@@ -347,6 +347,7 @@ class MainWindow(QMainWindow):
 
         # Recording header
         self.recording_header.name_changed.connect(self._on_recording_renamed)
+        self.recording_header.change_calendar_requested.connect(self._on_change_calendar_requested)
 
         # Transcript editing
         self.transcript_viewer.transcript_changed.connect(self._save_transcript)
@@ -1626,6 +1627,9 @@ class MainWindow(QMainWindow):
         except ValueError:
             return
 
+        self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
+
+    def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt):
         worker = CalendarLookupWorker(started_dt, stopped_dt)
         worker.session = session
         worker.finished.connect(self._on_calendar_lookup_finished)
@@ -1642,7 +1646,11 @@ class MainWindow(QMainWindow):
         session = getattr(worker, "session", None) if worker else None
         if worker in self._calendar_lookup_workers:
             self._calendar_lookup_workers.remove(worker)
-        if not events or session is None:
+        if session is None:
+            return
+        if not events:
+            if self._is_current_session(session):
+                self.status_label.setText("No other matching calendar events found.")
             return
         if not self._is_current_session(session):
             return  # user switched recordings — don't surface a stale banner
@@ -1678,6 +1686,7 @@ class MainWindow(QMainWindow):
         self._calendar_attendees = event_to_save.get("attendees", [])
         self.transcript_viewer.set_calendar_attendees(self._calendar_attendees)
         self._maybe_suggest_rename(self._current_session, event_to_save)
+        self._export_transcript()
 
     def _maybe_suggest_rename(self, session, event):
         """Offer to rename the recording to the calendar event's subject.
@@ -1710,6 +1719,24 @@ class MainWindow(QMainWindow):
         meta_path = session_dir / "metadata.json"
         if meta_path.exists():
             atomic_write_json(meta_path, self._current_session, indent=2)
+
+    def _on_change_calendar_requested(self):
+        session = self._current_session
+        if session is None:
+            return
+        if not self.config.get("calendar", "enabled"):
+            return
+        started, stopped = session.get("started_at"), session.get("stopped_at")
+        if not started or not stopped:
+            return
+        try:
+            started_dt = datetime.fromisoformat(started)
+            stopped_dt = datetime.fromisoformat(stopped)
+        except ValueError:
+            return
+        self.status_label.setText("Looking up calendar events...")
+        self._calendar_banner_session = session
+        self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
 
     def _maybe_auto_summarize(self):
         if not self.config.get("general", "auto_transcribe"):
