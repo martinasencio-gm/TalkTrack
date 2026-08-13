@@ -10,6 +10,7 @@ build/
 venv/
 env/
 recordings/
+transcripts/
 *.wav
 *.mp3
 *.mp4
