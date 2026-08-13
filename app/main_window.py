@@ -1389,6 +1389,13 @@ class MainWindow(QMainWindow):
             except (json.JSONDecodeError, OSError) as e:
                 print(f"Failed to save recording name: {e}")
 
+        calendar_event, _ = self._load_calendar_event(self._current_session)
+        self.recording_header.set_recording(
+            self._current_session,
+            speaker_count=self.transcript_viewer.get_speaker_count(),
+            calendar_event=calendar_event,
+        )
+
         self.recordings_list.refresh()
 
     def _on_error(self, error_msg):
