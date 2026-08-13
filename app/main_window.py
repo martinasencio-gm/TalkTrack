@@ -971,7 +971,21 @@ class MainWindow(QMainWindow):
                 except (json.JSONDecodeError, OSError):
                     pass
 
-        self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
+        calendar_event = None
+        calendar_attendees = []
+        if self._current_session:
+            calendar_path = Path(self._current_session["directory"]) / "calendar_event.json"
+            if calendar_path.exists():
+                try:
+                    with open(calendar_path, "r", encoding="utf-8") as f:
+                        calendar_event = json.load(f)
+                    calendar_attendees = calendar_event.get("attendees", [])
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        self.transcript_viewer.display_transcript(
+            result, speaker_names=speaker_names, attendees=calendar_attendees
+        )
         self.status_label.setText("Transcription complete.")
         if self._is_hidden_to_tray():
             self._flag_success_notification()
@@ -980,7 +994,8 @@ class MainWindow(QMainWindow):
         if self._current_session:
             self.recording_header.set_recording(
                 self._current_session,
-                speaker_count=self.transcript_viewer.get_speaker_count()
+                speaker_count=self.transcript_viewer.get_speaker_count(),
+                calendar_event=calendar_event,
             )
 
         # Save transcript
