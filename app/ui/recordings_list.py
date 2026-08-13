@@ -243,28 +243,67 @@ class RecordingsList(QWidget):
 
             self._recordings.append(metadata)
 
-            # Format display text
-            name = metadata.get("name", "")
-            started = metadata.get("started_at", "")
-            try:
-                dt = datetime.fromisoformat(started)
-                date_str = dt.strftime("%Y-%m-%d %H:%M")
-            except (ValueError, TypeError):
-                date_str = started
-
-            duration = metadata.get("duration", 0)
-            dur_str = self._format_duration(duration)
-
-            has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
-            transcript_indicator = " [T]" if has_transcript else ""
-
-            if name:
-                text = f"{name}  |  {date_str}  |  {dur_str}{transcript_indicator}"
-            else:
-                text = f"{date_str}  |  {dur_str}{transcript_indicator}"
-            item = QListWidgetItem(text)
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, metadata)
             self.list_widget.addItem(item)
+            row_widget = self._build_row_widget(metadata)
+            item.setSizeHint(row_widget.sizeHint())
+            self.list_widget.setItemWidget(item, row_widget)
+
+    def _build_row_widget(self, metadata):
+        """Build a two-line recording row: bold name over muted date, with
+        duration and a transcribed badge right-aligned. Replaces the old
+        single-line "name | date | dur [T]" text, which gave every field
+        (name, date, duration, transcript flag) equal visual weight even
+        though name is what you actually scan a list of recordings for."""
+        widget = QWidget()
+        outer = QHBoxLayout(widget)
+        outer.setContentsMargins(4, 2, 4, 2)
+        outer.setSpacing(8)
+
+        name = metadata.get("name", "")
+        started = metadata.get("started_at", "")
+        try:
+            dt = datetime.fromisoformat(started)
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            date_str = started
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(1)
+
+        name_label = QLabel(name or date_str)
+        name_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #cdd6f4;")
+        text_col.addWidget(name_label)
+
+        if name:
+            date_label = QLabel(date_str)
+            date_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+            text_col.addWidget(date_label)
+
+        outer.addLayout(text_col, 1)
+
+        meta_col = QVBoxLayout()
+        meta_col.setSpacing(1)
+        meta_col.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
+        dur_label.setStyleSheet(
+            "color: #a6adc8; font-size: 10px; "
+            "font-family: Consolas, 'Courier New', monospace;"
+        )
+        dur_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        meta_col.addWidget(dur_label)
+
+        has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
+        if has_transcript:
+            badge = QLabel("● Transcribed")
+            badge.setStyleSheet("color: #a6e3a1; font-size: 9px;")
+            badge.setAlignment(Qt.AlignmentFlag.AlignRight)
+            meta_col.addWidget(badge)
+
+        outer.addLayout(meta_col)
+        return widget
 
     def _on_item_double_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
