@@ -1636,9 +1636,10 @@ class MainWindow(QMainWindow):
 
         self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
 
-    def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt):
+    def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt, manual=False):
         worker = CalendarLookupWorker(started_dt, stopped_dt)
         worker.session = session
+        worker.manual = manual
         worker.finished.connect(self._on_calendar_lookup_finished)
         self._calendar_lookup_workers.append(worker)
         worker.start()
@@ -1651,12 +1652,17 @@ class MainWindow(QMainWindow):
         # lookup and could be read after the first worker is GC'd).
         worker = self.sender()
         session = getattr(worker, "session", None) if worker else None
+        manual = getattr(worker, "manual", False) if worker else False
         if worker in self._calendar_lookup_workers:
             self._calendar_lookup_workers.remove(worker)
         if session is None:
             return
         if not events:
-            if self._is_current_session(session):
+            # Only the manual "Change" lookup should report a no-match
+            # status — the automatic post-recording lookup fires for every
+            # untagged recording and would otherwise clobber transient
+            # status text like "Transcribing...".
+            if manual and self._is_current_session(session):
                 self.status_label.setText("No other matching calendar events found.")
             return
         if not self._is_current_session(session):
@@ -1743,7 +1749,7 @@ class MainWindow(QMainWindow):
             return
         self.status_label.setText("Looking up calendar events...")
         self._calendar_banner_session = session
-        self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
+        self._dispatch_calendar_lookup(session, started_dt, stopped_dt, manual=True)
 
     def _maybe_auto_summarize(self):
         if not self.config.get("general", "auto_transcribe"):
