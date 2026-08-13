@@ -63,7 +63,7 @@ class RecordingControls(QWidget):
         self.mute_btn.clicked.connect(self.mute_clicked.emit)
         btn_row.addWidget(self.mute_btn)
 
-        self.test_mic_btn = QPushButton("\U0001f399 Test")
+        self.test_mic_btn = QPushButton("\U0001f3a7 Test")
         self.test_mic_btn.setObjectName("testMicButton")
         self.test_mic_btn.setCheckable(True)
         self.test_mic_btn.setToolTip(
@@ -140,14 +140,14 @@ class RecordingControls(QWidget):
 
     def _update_test_mic_style(self, checked):
         if checked:
-            self.test_mic_btn.setText("\U0001f399 Testing")
+            self.test_mic_btn.setText("\U0001f3a7 Testing")
             self.test_mic_btn.setStyleSheet(
                 "QPushButton#testMicButton { "
                 "background-color: #a6e3a1; color: #1e1e2e; "
                 "border: 1px solid #a6e3a1; font-weight: bold; }"
             )
         else:
-            self.test_mic_btn.setText("\U0001f399 Test")
+            self.test_mic_btn.setText("\U0001f3a7 Test")
             self.test_mic_btn.setStyleSheet("")
 
     def clear_test_mic(self):

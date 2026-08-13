@@ -475,7 +475,7 @@ QToolTip {
     font-size: 12px;
 }
 
-#renameButton {
+#renameButton, #changeCalendarButton {
     padding: 4px 12px;
     font-size: 12px;
     min-height: 16px;

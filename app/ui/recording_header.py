@@ -100,7 +100,6 @@ class RecordingHeader(QWidget):
 
         self.change_calendar_btn = QPushButton("Change")
         self.change_calendar_btn.setObjectName("changeCalendarButton")
-        self.change_calendar_btn.setFixedWidth(60)
         self.change_calendar_btn.clicked.connect(self.change_calendar_requested.emit)
         self.change_calendar_btn.hide()
         calendar_row.addWidget(self.change_calendar_btn)
