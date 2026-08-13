@@ -68,5 +68,44 @@ class TestAvailableOptions(unittest.TestCase):
         self.assertEqual(opts, ["", "Jane", "John"])
 
 
+class TestSpeakersHoldingName(unittest.TestCase):
+
+    def test_no_match_returns_empty_list(self):
+        from app.ui.speaker_name_panel import _speakers_holding_name
+        result = _speakers_holding_name(
+            "Jane",
+            {"SPEAKER_00": "John"},
+            "SPEAKER_01",
+        )
+        self.assertEqual(result, [])
+
+    def test_one_match_excludes_asking_speaker(self):
+        from app.ui.speaker_name_panel import _speakers_holding_name
+        result = _speakers_holding_name(
+            "Jane",
+            {"SPEAKER_00": "Jane", "SPEAKER_01": "Jane"},
+            "SPEAKER_01",
+        )
+        self.assertEqual(result, ["SPEAKER_00"])
+
+    def test_multiple_speakers_holding_same_name(self):
+        from app.ui.speaker_name_panel import _speakers_holding_name
+        result = _speakers_holding_name(
+            "Jane",
+            {"SPEAKER_00": "Jane", "SPEAKER_01": "Jane", "SPEAKER_02": "John"},
+            "SPEAKER_02",
+        )
+        self.assertEqual(sorted(result), ["SPEAKER_00", "SPEAKER_01"])
+
+    def test_blank_name_never_matches(self):
+        from app.ui.speaker_name_panel import _speakers_holding_name
+        result = _speakers_holding_name(
+            "",
+            {"SPEAKER_00": "", "SPEAKER_01": ""},
+            "SPEAKER_02",
+        )
+        self.assertEqual(result, [])
+
+
 if __name__ == "__main__":
     unittest.main()

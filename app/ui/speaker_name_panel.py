@@ -40,6 +40,17 @@ def _available_options(speaker_id, speaker_ids, current_selections, attendees):
     return [""] + available
 
 
+def _speakers_holding_name(name, current_selections, exclude_speaker_id):
+    """speaker_ids (other than exclude_speaker_id) currently mapped to name.
+    Blank names never match."""
+    if not name:
+        return []
+    return [
+        sid for sid, n in current_selections.items()
+        if sid != exclude_speaker_id and n == name
+    ]
+
+
 class SpeakerNamePanel(QWidget):
     """Collapsible panel for mapping speaker IDs to friendly names.
 
@@ -172,7 +183,15 @@ class SpeakerNamePanel(QWidget):
             self._rows_layout.addWidget(row_widget)
 
     def _on_combo_changed(self, speaker_id, text):
-        self._speaker_names[speaker_id] = text.strip()
+        name = text.strip()
+        self._speaker_names[speaker_id] = name
+        for displaced_id in _speakers_holding_name(name, self._speaker_names, speaker_id):
+            self._speaker_names[displaced_id] = ""
+            displaced_combo = self._name_combos.get(displaced_id)
+            if displaced_combo is not None:
+                displaced_combo.blockSignals(True)
+                displaced_combo.setCurrentText("")
+                displaced_combo.blockSignals(False)
         self._refresh_combo_options()
         self.names_changed.emit(self.get_speaker_names())
 
