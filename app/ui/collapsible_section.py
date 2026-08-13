@@ -43,6 +43,7 @@ class CollapsibleSection(QWidget):
         self._toggle_btn.setStyleSheet(
             "QToolButton { border: none; background: transparent; "
             "color: #89b4fa; font-weight: bold; "
+            "font-family: 'Bahnschrift', 'Segoe UI Semibold', 'Segoe UI', sans-serif; "
             "text-align: left; padding: 4px 0; }"
             "QToolButton:hover { color: #b4befe; }"
         )

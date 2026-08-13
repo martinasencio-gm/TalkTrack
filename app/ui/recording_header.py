@@ -63,9 +63,6 @@ class RecordingHeader(QWidget):
 
         self.name_label = QLabel("")
         self.name_label.setObjectName("recordingName")
-        self.name_label.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #cdd6f4;"
-        )
         top_row.addWidget(self.name_label)
 
         self.name_edit = QLineEdit()

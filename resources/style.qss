@@ -176,6 +176,7 @@ QLabel#sectionHeader {
     font-weight: bold;
     color: #89b4fa;
     padding: 4px 0;
+    font-family: "Bahnschrift", "Segoe UI Semibold", "Segoe UI", sans-serif;
 }
 
 /* Text areas */
@@ -463,11 +464,13 @@ QToolTip {
     font-size: 16px;
     font-weight: bold;
     color: #cdd6f4;
+    font-family: "Bahnschrift", "Segoe UI Semibold", "Segoe UI", sans-serif;
 }
 
 #recordingNameEdit {
     font-size: 16px;
     font-weight: bold;
+    font-family: "Bahnschrift", "Segoe UI Semibold", "Segoe UI", sans-serif;
 }
 
 #recordingInfo {
@@ -493,6 +496,7 @@ QToolTip {
     border: none;
     border-left: 3px solid #94e2d5;
     background: transparent;
+    font-family: "Bahnschrift", "Segoe UI Semibold", "Segoe UI", sans-serif;
 }
 
 #speakerPanelToggle:hover {
@@ -581,4 +585,16 @@ QToolTip {
 QFrame#collapsibleHeader {
     background-color: #313244;
     border-radius: 4px;
+}
+
+/* Meters + waveform region: transparent border by default so toggling to
+   the recording accent doesn't reflow the layout (same border width, just
+   a color change). */
+QFrame#captureRegion {
+    border: 1px solid transparent;
+    border-radius: 8px;
+}
+
+QFrame#captureRegion[recording="true"] {
+    border: 1px solid #f38ba8;
 }

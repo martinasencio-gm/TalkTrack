@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog
+    QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog,
+    QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QAction
@@ -187,11 +188,20 @@ class MainWindow(QMainWindow):
         self.recording_controls = RecordingControls()
         left_layout.addWidget(self.recording_controls)
 
+        # Meters + waveform share a bordered region so recording state can
+        # accent the whole capture area at once (see _on_state_changed) —
+        # otherwise the only sign a recording is live is a small blinking dot.
+        self.capture_region = QFrame()
+        self.capture_region.setObjectName("captureRegion")
+        capture_layout = QVBoxLayout(self.capture_region)
+        capture_layout.setContentsMargins(4, 4, 4, 4)
+        capture_layout.setSpacing(4)
+
         self.meters_panel = MetersPanel()
         self.meters_panel.setObjectName("metersPanel")
         self.meters_panel.set_gain(self.config.get("audio", "mic_gain"))
         self.meters_panel.gain_changed.connect(self._on_gain_changed)
-        left_layout.addWidget(self.meters_panel)
+        capture_layout.addWidget(self.meters_panel)
 
         # Idle-time level monitors. Off by default every launch — user
         # enables them via the Test Mic button in recording_controls.
@@ -216,7 +226,9 @@ class MainWindow(QMainWindow):
             seconds=5,
             sample_rate=self.config.get("audio", "sample_rate"),
         )
-        left_layout.addWidget(self.waveform)
+        capture_layout.addWidget(self.waveform)
+
+        left_layout.addWidget(self.capture_region)
 
         # Audio sources (collapsible). Stretch is toggled dynamically below.
         self.source_selector = SourceSelector(config=self.config)
@@ -637,6 +649,10 @@ class MainWindow(QMainWindow):
     def _on_state_changed(self, state):
         self.recording_controls.set_state(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
+
+        self.capture_region.setProperty("recording", state == RecordingState.RECORDING)
+        self.capture_region.style().unpolish(self.capture_region)
+        self.capture_region.style().polish(self.capture_region)
         if hasattr(self, "tray") and self.tray.is_supported():
             self.tray.set_state(state, int(self.recorder.get_elapsed_time()))
 

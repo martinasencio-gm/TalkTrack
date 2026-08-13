@@ -22,7 +22,10 @@ class AboutDialog(QDialog):
         layout.setSpacing(12)
 
         title = QLabel("TalkTrack")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #cdd6f4;")
+        title.setStyleSheet(
+            "font-size: 26px; font-weight: bold; color: #cdd6f4; "
+            "font-family: 'Bahnschrift', 'Segoe UI Semibold', 'Segoe UI', sans-serif;"
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
