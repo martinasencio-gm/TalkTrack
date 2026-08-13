@@ -116,5 +116,34 @@ class TestCalendarDefaults(ConfigTestCase):
         self.assertTrue(cfg2.get("calendar", "enabled"))
 
 
+class TestTranscriptsDefaults(ConfigTestCase):
+    def test_transcripts_directory_has_a_default(self):
+        cfg = Config()
+        self.assertTrue(cfg.get("transcripts", "directory"))
+
+    def test_transcripts_directory_round_trips(self):
+        cfg = Config()
+        new_dir = str(Path(self._tmp.name) / "my_transcripts")
+        cfg.set("transcripts", "directory", new_dir)
+        cfg2 = Config()
+        self.assertEqual(cfg2.get("transcripts", "directory"), new_dir)
+
+    def test_transcripts_directory_created_on_load(self):
+        target = Path(self._tmp.name) / "fresh_transcripts_dir"
+        self.assertFalse(target.exists())
+        self._write_settings({"transcripts": {"directory": str(target)}})
+        Config()
+        self.assertTrue(target.exists())
+
+    def test_invalid_transcripts_dir_falls_back_to_default(self):
+        self._write_settings({"transcripts": {"directory": "Z:\\no\\such\\drive\\path"}})
+        try:
+            cfg = Config()
+        except OSError:
+            self.fail("Config() raised OSError for an invalid transcripts directory")
+        self.assertEqual(cfg.get("transcripts", "directory"),
+                         DEFAULT_CONFIG["transcripts"]["directory"])
+
+
 if __name__ == "__main__":
     unittest.main()

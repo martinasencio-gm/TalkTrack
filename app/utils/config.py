@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
         "format": "wav",
         "filename_template": "recording_{timestamp}",
     },
+    "transcripts": {
+        "directory": str(Path(__file__).parent.parent.parent / "transcripts"),
+    },
     "transcription": {
         "model_size": "base",
         "language": None,
@@ -92,6 +95,11 @@ class Config:
         except OSError:
             self._data["output"]["directory"] = DEFAULT_CONFIG["output"]["directory"]
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
+        try:
+            os.makedirs(self._data["transcripts"]["directory"], exist_ok=True)
+        except OSError:
+            self._data["transcripts"]["directory"] = DEFAULT_CONFIG["transcripts"]["directory"]
+            os.makedirs(self._data["transcripts"]["directory"], exist_ok=True)
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
