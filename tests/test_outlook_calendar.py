@@ -60,6 +60,11 @@ class TestFindOverlappingEvents(unittest.TestCase):
         mock_items.__iter__ = lambda self_: iter(appointments)
         mock_items.IncludeRecurrences = False
         mock_items.Sort = MagicMock()
+        # find_overlapping_events calls items.Restrict(...) and iterates the
+        # result (C2 fix) — the fake calendar has no real filtering, so
+        # Restrict just hands back the same (already fully-populated) fake
+        # Items collection.
+        mock_items.Restrict = MagicMock(return_value=mock_items)
         mock_calendar_folder = MagicMock()
         mock_calendar_folder.Items = mock_items
         mock_namespace = MagicMock()

@@ -1,4 +1,5 @@
 """Off-thread Outlook calendar lookup for a finished recording."""
+import pythoncom
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.integrations.outlook_calendar import find_overlapping_events
@@ -22,5 +23,15 @@ class CalendarLookupWorker(QThread):
         self.session = None
 
     def run(self):
-        events = find_overlapping_events(self.started_at, self.stopped_at)
+        # pywin32 requires CoInitialize per thread before any COM Dispatch
+        # call; without it win32com.client.Dispatch raises
+        # "CoInitialize has not been called", which find_overlapping_events's
+        # broad except Exception silently swallows into []. See
+        # app/recording/_process_com.py for the same per-thread COM-init
+        # requirement on the process-loopback capture thread.
+        pythoncom.CoInitialize()
+        try:
+            events = find_overlapping_events(self.started_at, self.stopped_at)
+        finally:
+            pythoncom.CoUninitialize()
         self.finished.emit(events)

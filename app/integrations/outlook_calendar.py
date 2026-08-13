@@ -45,8 +45,28 @@ def find_overlapping_events(start: datetime, end: datetime, tolerance_minutes: i
         namespace = outlook.GetNamespace("MAPI")
         calendar = namespace.GetDefaultFolder(_OL_FOLDER_CALENDAR)
         items = calendar.Items
-        items.IncludeRecurrences = True
+        # Outlook requires Sort THEN IncludeRecurrences (in that order) for
+        # recurrence expansion to work correctly on a subsequent Restrict.
         items.Sort("[Start]")
+        items.IncludeRecurrences = True
+
+        # Restrict to a padded window before iterating — without this, with
+        # recurrences expanded, the loop below enumerates every occurrence of
+        # every recurring meeting on the calendar indefinitely into the
+        # future. Over-fetch a bit (Restrict's date filtering on recurring
+        # items is unreliable) and let _event_overlaps_window filter
+        # precisely below.
+        tolerance = timedelta(minutes=tolerance_minutes)
+        safety_margin = timedelta(days=1)
+        restrict_start = start - tolerance - safety_margin
+        restrict_end = end + tolerance + safety_margin
+        restrict_filter = (
+            "[Start] < '{}' AND [End] > '{}'".format(
+                restrict_end.strftime("%m/%d/%Y %I:%M %p"),
+                restrict_start.strftime("%m/%d/%Y %I:%M %p"),
+            )
+        )
+        items = items.Restrict(restrict_filter)
 
         results = []
         for appt in items:
