@@ -107,11 +107,11 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
         lines.append("# Action Items")
         lines.append("")
         for item in action_items:
-            task = item.get("task", "").strip()
+            task = (item.get("task") or "").strip()
             if not task:
                 continue
-            assignee = item.get("assignee", "").strip()
-            due = item.get("due", "").strip()
+            assignee = (item.get("assignee") or "").strip()
+            due = (item.get("due") or "").strip()
             entry = f"{assignee}: {task}" if assignee else task
             if due:
                 entry += f" (due {due})"
@@ -153,5 +153,5 @@ def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
             notes, summary_markdown, action_items,
         )
         atomic_write_text(path, markdown)
-    except OSError:
+    except (OSError, TypeError, AttributeError, KeyError):
         logger.exception("Failed to export transcript for %s", metadata.get("directory"))
