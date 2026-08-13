@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -38,6 +39,42 @@ class TestAtomicWrite(unittest.TestCase):
         data = {"segments": [{"text": "héllo", "start": 1.5}]}
         atomic_write_json(path, data, indent=2, ensure_ascii=False)
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), data)
+
+    def test_write_text_retries_transient_permission_error(self):
+        # Windows holds transient locks on just-touched files (OneDrive
+        # sync, Defender, indexer) — os.replace can fail with WinError 5
+        # (PermissionError) for a moment even though nothing is actually
+        # wrong. Retry should ride through it instead of surfacing an error.
+        from app.utils import atomic_io
+        path = self.dir / "out.txt"
+        path.write_text("old", encoding="utf-8")
+
+        real_replace = __import__("os").replace
+        calls = []
+
+        def flaky_replace(src, dst):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError(5, "Access is denied")
+            real_replace(src, dst)
+
+        with unittest.mock.patch.object(atomic_io.os, "replace", side_effect=flaky_replace), \
+             unittest.mock.patch.object(atomic_io.time, "sleep"):
+            atomic_io.atomic_write_text(path, "new")
+
+        self.assertEqual(path.read_text(encoding="utf-8"), "new")
+        self.assertEqual(len(calls), 3)
+
+    def test_write_text_gives_up_after_max_retries(self):
+        from app.utils import atomic_io
+        path = self.dir / "out.txt"
+
+        with unittest.mock.patch.object(
+            atomic_io.os, "replace",
+            side_effect=PermissionError(5, "Access is denied"),
+        ), unittest.mock.patch.object(atomic_io.time, "sleep"):
+            with self.assertRaises(PermissionError):
+                atomic_io.atomic_write_text(path, "new")
 
 
 if __name__ == "__main__":
