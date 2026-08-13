@@ -187,17 +187,23 @@ class SpeakerNamePanel(QWidget):
             self._rows_layout.addWidget(row_widget)
 
     def eventFilter(self, obj, event):
-        """Show the full attendee list as soon as a combo box gains focus.
+        """Show the full attendee list when the line edit is clicked.
 
         Editable QComboBox only inline-autocompletes as you type by default;
         the actual dropdown of options otherwise requires clicking the small
-        arrow button, which isn't discoverable. showPopup() is deferred via
-        singleShot because calling it synchronously during FocusIn can be
-        swallowed by Qt's own focus-handling on some platforms.
+        arrow button, which isn't discoverable. FocusIn was tried first but
+        only fires once per focus transition — a second click on an
+        already-focused field produced no event at all, and reacting to the
+        very first FocusIn raced with Qt's own arrow-click popup handling
+        (both can fire for the same click when the field wasn't focused yet),
+        which closed the popup it had just opened. MouseButtonPress on the
+        line edit has neither problem: it fires on every click, and clicks on
+        the arrow subcontrol never reach the line edit's event stream at all,
+        so there's nothing to race with.
         """
-        if event.type() == QEvent.Type.FocusIn:
+        if event.type() == QEvent.Type.MouseButtonPress:
             combo = self._combo_line_edits.get(obj)
-            if combo is not None:
+            if combo is not None and not combo.view().isVisible():
                 QTimer.singleShot(0, combo.showPopup)
         return super().eventFilter(obj, event)
 
