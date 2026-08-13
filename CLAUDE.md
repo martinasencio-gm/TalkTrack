@@ -43,11 +43,15 @@ TalkTrack/
     audio/
       __init__.py                      # Package init
       segment_player.py               # Audio clip playback for transcript segments
+    integrations/
+      __init__.py                      # Package init
+      outlook_calendar.py              # Read-only Outlook desktop calendar lookup (COM)
     recording/
       audio_capture.py                 # AudioStream, DualAudioCapture (legacy + per-app modes)
       chunk_writer.py                  # ChunkWriter: streams capture audio to disk (#32)
       process_audio_capture.py         # ProcessCaptureStream, ProcessAudioCapture (Win11 per-PID)
       recorder.py                      # State machine, session management
+      import_session.py                # Pure metadata builder for imported recordings
     transcription/
       transcriber.py                   # Whisper worker + dataclasses
       diarizer.py                      # Speaker diarization (pyannote)
@@ -68,6 +72,9 @@ TalkTrack/
       source_selector.py              # Mic dropdown + per-app picker (Win11) or legacy loopback (Win10)
       recording_controls.py           # Record/Pause/Stop buttons + timer
       recording_header.py             # Recording info display with rename
+      calendar_banner.py              # Calendar-match suggestion banner
+      calendar_lookup_worker.py       # Off-thread Outlook calendar lookup
+      import_timestamp_dialog.py      # Confirm/edit an imported recording's start time
       segment_widget.py               # Interactive transcript segment row
       settings_dialog.py              # Settings dialog with tabs
       speaker_name_panel.py           # Collapsible speaker name mapping panel
@@ -96,10 +103,13 @@ TalkTrack/
     test_chunk_writer.py              # Streaming disk writer tests
     test_dual_audio_capture.py        # Per-app mode integration tests
     test_dependency_checker.py        # Dependency checker tests
+    test_config.py                    # Config load/save tests (incl. calendar defaults)
     test_transcriber.py               # TranscriptSegment/TranscriptResult tests
     test_segment_player.py            # Audio clip playback tests
-    test_recording_header.py          # RecordingHeader helper tests
-    test_speaker_name_panel.py        # SpeakerNamePanel helper tests
+    test_recording_header.py          # RecordingHeader helper tests (incl. calendar line formatting)
+    test_speaker_name_panel.py        # SpeakerNamePanel helper tests (incl. attendee dropdown mutual exclusion)
+    test_outlook_calendar.py          # Outlook calendar overlap-matching tests (COM mocked)
+    test_import_session.py            # Import metadata builder tests
     test_segment_widget.py            # SegmentWidget helper tests
     test_level_meter.py                # Audio level meter tests
     test_waveform_display.py           # Waveform ring buffer tests
@@ -135,11 +145,13 @@ TalkTrack/
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
 - **Speaker naming:** assign friendly names to diarized speakers, saved per recording
+- **Calendar tagging (opt-in):** after a recording finishes, optionally checks the local Outlook desktop calendar for an overlapping event and offers to tag the recording with its subject, organizer, and attendees (`calendar_event.json`); attendee names populate a mutually-exclusive dropdown in speaker naming
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
 - Call notes with timestamp insertion
 - Browse and replay past recordings (with friendly names)
+- **Recording import:** import an existing audio file (wav/mp3/m4a) as a new session via Recordings > Import..., running it through the same transcribe/diarize pipeline as a live recording
 - Settings for model size, sample rate, output format (WAV/MP3)
 - Dark theme UI (Catppuccin Mocha palette)
 - **Audio level meters:** real-time VU meters for mic and system audio during recording
@@ -302,3 +314,13 @@ When running shell commands:
 
 - **Windows only:** Uses WASAPI and Windows COM APIs
 - **Per-app capture requires Windows 11 Build 22000+**
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
