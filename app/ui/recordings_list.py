@@ -11,7 +11,7 @@ import shutil
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QMenu, QMessageBox
+    QPushButton, QLabel, QMenu, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction
@@ -169,6 +169,7 @@ class RecordingsList(QWidget):
                                            # stop playback on the target files
     recording_deleted = pyqtSignal(str)    # directory path of deleted recording
     search_result_selected = pyqtSignal(str, float)  # recording_id, timestamp
+    import_requested = pyqtSignal(str)  # chosen audio file path
 
     def __init__(self, recordings_dir, parent=None):
         super().__init__(parent)
@@ -196,6 +197,17 @@ class RecordingsList(QWidget):
         self.search_bar.search_requested.connect(self._on_search)
         self.search_bar.cleared.connect(self.refresh)
         layout.addWidget(self.search_bar)
+
+        import_row = QHBoxLayout()
+        import_row.addStretch()
+        self.import_btn = QPushButton("Import...")
+        self.import_btn.setToolTip(
+            "Import an existing audio file (wav/mp3/m4a) as a new recording, "
+            "running it through transcription and diarization."
+        )
+        self.import_btn.clicked.connect(self._on_import_clicked)
+        import_row.addWidget(self.import_btn)
+        layout.addLayout(import_row)
 
         # List
         self.list_widget = QListWidget()
@@ -424,3 +436,11 @@ class RecordingsList(QWidget):
         elif m > 0:
             return f"{m}m {s}s"
         return f"{s}s"
+
+    def _on_import_clicked(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Recording", "",
+            "Audio Files (*.wav *.mp3 *.m4a)"
+        )
+        if path:
+            self.import_requested.emit(path)
