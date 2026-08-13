@@ -54,7 +54,8 @@ class MainWindow(QMainWindow):
         self.recorder = Recorder(self.config)
         self._current_session = None
         self._transcription_worker = None
-        self._calendar_lookup_worker = None
+        self._calendar_lookup_workers = []
+        self._calendar_banner_session = None
         self._diarization_worker = None
         self._simple_diarize_worker = None
         self._summarize_worker = None
@@ -721,11 +722,23 @@ class MainWindow(QMainWindow):
         timestamp = started_at.strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.get("output", "directory"))
         session_dir = output_dir / f"recording_{timestamp}"
-        session_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            session_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            QMessageBox.warning(
+                self, "Import Failed",
+                "A recording already exists for this timestamp — adjust the "
+                "time slightly and try again."
+            )
+            return
 
         audio_filename = "combined_audio.wav"
         dest_path = session_dir / audio_filename
 
+        # ffmpeg conversion / large-file copy run synchronously on the GUI
+        # thread (a full off-thread rewrite is out of scope for this fix) —
+        # at minimum show a busy cursor so the window doesn't look hung.
+        self.setCursor(Qt.CursorShape.WaitCursor)
         try:
             if needs_conversion(source_path):
                 if not shutil.which("ffmpeg"):
@@ -745,11 +758,20 @@ class MainWindow(QMainWindow):
                 shutil.copy2(source_path, dest_path)
 
             duration = sf.info(str(dest_path)).duration
+            if not duration:
+                QMessageBox.warning(
+                    self, "Import Failed",
+                    "Could not import file: audio has zero duration."
+                )
+                shutil.rmtree(session_dir, ignore_errors=True)
+                return
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
                 RuntimeError, OSError) as e:
             QMessageBox.warning(self, "Import Failed", f"Could not import file: {e}")
             shutil.rmtree(session_dir, ignore_errors=True)
             return
+        finally:
+            self.unsetCursor()
 
         session = build_import_metadata(
             source_path=source_path,
@@ -760,9 +782,24 @@ class MainWindow(QMainWindow):
         )
         atomic_write_json(session_dir / "metadata.json", session, indent=2)
 
+        # The notes editor still holds whatever was loaded for the
+        # last-viewed recording (from _on_recording_selected). Clear it
+        # before funneling into _on_recording_finished — which treats a
+        # non-empty editor as "notes typed live during this recording" and
+        # would otherwise duplicate the stale notes into the imported
+        # session's notes.txt.
+        self.notes_panel.clear()
+
         self._on_recording_finished(session)
 
     def _on_recording_finished(self, session):
+        # Clear any stale calendar-suggestion banner from a previous session
+        # before switching — otherwise a Tag/Dismiss click after this point
+        # can write the previous recording's calendar match into this one's
+        # calendar_event.json / metadata.json.
+        self.calendar_banner.hide_and_clear()
+        self._calendar_banner_session = None
+
         self._current_session = session
         self._transcript = None
         self.status_label.setText("Recording saved.")
@@ -1003,6 +1040,28 @@ class MainWindow(QMainWindow):
         except OSError:
             self.status_label.setText("Failed to save transcript.")
 
+    def _load_calendar_event(self, session):
+        """Load calendar_event.json for a session, if present.
+
+        Returns (calendar_event: dict|None, attendees: list[str]). Shared by
+        _display_final_transcript (just-finished-transcribing path) and
+        _on_recording_selected (browse-to-past-recording path) so both show
+        a previously saved calendar tag, not just the former.
+        """
+        calendar_event = None
+        attendees = []
+        if not session or not session.get("directory"):
+            return calendar_event, attendees
+        calendar_path = Path(session["directory"]) / "calendar_event.json"
+        if calendar_path.exists():
+            try:
+                with open(calendar_path, "r", encoding="utf-8") as f:
+                    calendar_event = json.load(f)
+                attendees = calendar_event.get("attendees", [])
+            except (json.JSONDecodeError, OSError):
+                pass
+        return calendar_event, attendees
+
     def _display_final_transcript(self, result, session=None):
         if session is None:
             session = self._current_session
@@ -1032,17 +1091,7 @@ class MainWindow(QMainWindow):
                 except (json.JSONDecodeError, OSError):
                     pass
 
-        calendar_event = None
-        calendar_attendees = []
-        if self._current_session:
-            calendar_path = Path(self._current_session["directory"]) / "calendar_event.json"
-            if calendar_path.exists():
-                try:
-                    with open(calendar_path, "r", encoding="utf-8") as f:
-                        calendar_event = json.load(f)
-                    calendar_attendees = calendar_event.get("attendees", [])
-                except (json.JSONDecodeError, OSError):
-                    pass
+        calendar_event, calendar_attendees = self._load_calendar_event(self._current_session)
 
         self.transcript_viewer.display_transcript(
             result, speaker_names=speaker_names, attendees=calendar_attendees
@@ -1106,6 +1155,11 @@ class MainWindow(QMainWindow):
 
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
+        # Clear any stale calendar-suggestion banner from the previously
+        # displayed recording — see _on_recording_finished for why.
+        self.calendar_banner.hide_and_clear()
+        self._calendar_banner_session = None
+
         self._current_session = metadata
 
         # Clear previous state before loading
@@ -1128,6 +1182,12 @@ class MainWindow(QMainWindow):
             except (json.JSONDecodeError, OSError):
                 pass
 
+        # Load a previously saved calendar tag, if any — same lookup used by
+        # the just-finished-transcribing path, so browsing to an
+        # already-tagged recording shows its calendar line and attendee
+        # dropdowns too.
+        calendar_event, calendar_attendees = self._load_calendar_event(metadata)
+
         # Load existing transcript if available
         transcript_path = Path(metadata["directory"]) / "transcript.json"
         if transcript_path.exists():
@@ -1140,7 +1200,9 @@ class MainWindow(QMainWindow):
                     language=data.get("language", ""),
                     duration=data.get("duration", 0),
                 )
-                self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
+                self.transcript_viewer.display_transcript(
+                    result, speaker_names=speaker_names, attendees=calendar_attendees
+                )
                 self._transcript = result
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
@@ -1148,7 +1210,8 @@ class MainWindow(QMainWindow):
         # Update recording header
         self.recording_header.set_recording(
             metadata,
-            speaker_count=self.transcript_viewer.get_speaker_count()
+            speaker_count=self.transcript_viewer.get_speaker_count(),
+            calendar_event=calendar_event,
         )
 
         # Persist any edits to the previously loaded recording's notes
@@ -1496,14 +1559,22 @@ class MainWindow(QMainWindow):
         except ValueError:
             return
 
-        self._calendar_lookup_worker = CalendarLookupWorker(started_dt, stopped_dt)
-        self._calendar_lookup_worker.session = session
-        self._calendar_lookup_worker.finished.connect(self._on_calendar_lookup_finished)
-        self._calendar_lookup_worker.start()
+        worker = CalendarLookupWorker(started_dt, stopped_dt)
+        worker.session = session
+        worker.finished.connect(self._on_calendar_lookup_finished)
+        self._calendar_lookup_workers.append(worker)
+        worker.start()
 
     def _on_calendar_lookup_finished(self, events):
-        worker = self._calendar_lookup_worker
+        # Calendar lookups are NOT serialized like transcription — two
+        # recordings finishing back-to-back can have overlapping lookups in
+        # flight. Read the emitting worker via sender(), never a single
+        # instance attribute (which would get overwritten by a second
+        # lookup and could be read after the first worker is GC'd).
+        worker = self.sender()
         session = getattr(worker, "session", None) if worker else None
+        if worker in self._calendar_lookup_workers:
+            self._calendar_lookup_workers.remove(worker)
         if not events or session is None:
             return
         if not self._is_current_session(session):
@@ -1513,10 +1584,19 @@ class MainWindow(QMainWindow):
         # show_matches() while the main window is hidden to tray just leaves
         # the banner visible-but-unseen until the window is next shown, same
         # as the recording header or transcript already sitting there.
+        self._calendar_banner_session = session
         self.calendar_banner.show_matches(events)
 
     def _on_calendar_tag_requested(self, event):
         if not self._current_session:
+            return
+        # Defense in depth: the banner should already have been hidden by
+        # _on_recording_selected/_on_recording_finished on any session
+        # switch, but guard against writing a stale banner's event into the
+        # wrong recording's directory.
+        if self._calendar_banner_session is not None and not self._is_current_session(
+            self._calendar_banner_session
+        ):
             return
         session_dir = Path(self._current_session["directory"])
         event_to_save = dict(event)
@@ -1533,6 +1613,10 @@ class MainWindow(QMainWindow):
 
     def _on_calendar_dismissed(self):
         if not self._current_session:
+            return
+        if self._calendar_banner_session is not None and not self._is_current_session(
+            self._calendar_banner_session
+        ):
             return
         self._current_session["calendar_prompt_dismissed"] = True
         session_dir = Path(self._current_session["directory"])
@@ -1707,7 +1791,7 @@ class MainWindow(QMainWindow):
             self._summarize_worker,
             self.chat_panel.active_worker(),
             self.recordings_list.active_search_worker(),
-        ]
+        ] + list(self._calendar_lookup_workers)
         for worker in workers:
             if worker is None or not worker.isRunning():
                 continue
