@@ -1845,9 +1845,10 @@ class MainWindow(QMainWindow):
             path = Path(self._current_session["directory"]) / "summary.md"
             try:
                 atomic_write_text(path, summary)
-                self._export_transcript()
             except OSError:
                 self.status_label.setText("Failed to save summary.")
+                return
+            self._export_transcript()
 
     def _on_actions_ready(self, items):
         self.action_items_panel.set_items(items)
@@ -1858,9 +1859,10 @@ class MainWindow(QMainWindow):
             path = Path(self._current_session["directory"]) / "action_items.json"
             try:
                 atomic_write_json(path, items, indent=2)
-                self._export_transcript()
             except OSError:
                 self.status_label.setText("Failed to save action items.")
+                return
+            self._export_transcript()
 
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
