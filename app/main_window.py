@@ -41,6 +41,8 @@ from app.ui.summary_panel import SummaryPanel
 from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
+from app.ui.calendar_banner import CalendarSuggestionBanner
+from app.ui.calendar_lookup_worker import CalendarLookupWorker
 
 
 class MainWindow(QMainWindow):
@@ -50,6 +52,7 @@ class MainWindow(QMainWindow):
         self.recorder = Recorder(self.config)
         self._current_session = None
         self._transcription_worker = None
+        self._calendar_lookup_worker = None
         self._diarization_worker = None
         self._simple_diarize_worker = None
         self._summarize_worker = None
@@ -243,6 +246,11 @@ class MainWindow(QMainWindow):
         # Recording header (above tabs)
         self.recording_header = RecordingHeader()
         right_layout.addWidget(self.recording_header)
+
+        self.calendar_banner = CalendarSuggestionBanner()
+        self.calendar_banner.tag_requested.connect(self._on_calendar_tag_requested)
+        self.calendar_banner.dismissed.connect(self._on_calendar_dismissed)
+        right_layout.addWidget(self.calendar_banner)
 
         self.tabs = QTabWidget()
 
@@ -742,6 +750,8 @@ class MainWindow(QMainWindow):
                 f"Recording too short ({duration:.0f}s < {min_duration}s) — "
                 "skipping auto-transcription. Use Transcribe button to transcribe manually."
             )
+
+        self._maybe_lookup_calendar(session)
 
     def _transcription_busy(self):
         return (
@@ -1385,6 +1395,74 @@ class MainWindow(QMainWindow):
             self.chat_panel.set_provider(provider)
         except Exception:
             self.chat_panel.set_provider(None)
+
+    def _maybe_lookup_calendar(self, session):
+        """Kick off an off-thread Outlook calendar lookup for this session,
+        if the feature is enabled. Best-effort — no-op on any failure,
+        never surfaces an error to the user (see outlook_calendar.py)."""
+        if not self.config.get("calendar", "enabled"):
+            return
+        if session is None:
+            return
+        if session.get("calendar_prompt_dismissed"):
+            return
+        session_dir = session.get("directory")
+        if session_dir and (Path(session_dir) / "calendar_event.json").exists():
+            return  # already tagged
+        started = session.get("started_at")
+        stopped = session.get("stopped_at")
+        if not started or not stopped:
+            return
+        from datetime import datetime
+        try:
+            started_dt = datetime.fromisoformat(started)
+            stopped_dt = datetime.fromisoformat(stopped)
+        except ValueError:
+            return
+
+        self._calendar_lookup_worker = CalendarLookupWorker(started_dt, stopped_dt)
+        self._calendar_lookup_worker.session = session
+        self._calendar_lookup_worker.finished.connect(self._on_calendar_lookup_finished)
+        self._calendar_lookup_worker.start()
+
+    def _on_calendar_lookup_finished(self, events):
+        worker = self._calendar_lookup_worker
+        session = getattr(worker, "session", None) if worker else None
+        if not events or session is None:
+            return
+        if not self._is_current_session(session):
+            return  # user switched recordings — don't surface a stale banner
+        # Unlike QMessageBox, the banner is a normal child widget embedded in
+        # the window layout — no tray-hidden special-casing needed. Calling
+        # show_matches() while the main window is hidden to tray just leaves
+        # the banner visible-but-unseen until the window is next shown, same
+        # as the recording header or transcript already sitting there.
+        self.calendar_banner.show_matches(events)
+
+    def _on_calendar_tag_requested(self, event):
+        if not self._current_session:
+            return
+        session_dir = Path(self._current_session["directory"])
+        event_to_save = dict(event)
+        event_to_save["start"] = event["start"].isoformat()
+        event_to_save["end"] = event["end"].isoformat()
+        atomic_write_json(session_dir / "calendar_event.json", event_to_save, indent=2)
+        self.recording_header.set_recording(
+            self._current_session,
+            speaker_count=self.transcript_viewer.get_speaker_count(),
+            calendar_event=event_to_save,
+        )
+        self._calendar_attendees = event_to_save.get("attendees", [])
+        self.transcript_viewer.set_calendar_attendees(self._calendar_attendees)
+
+    def _on_calendar_dismissed(self):
+        if not self._current_session:
+            return
+        self._current_session["calendar_prompt_dismissed"] = True
+        session_dir = Path(self._current_session["directory"])
+        meta_path = session_dir / "metadata.json"
+        if meta_path.exists():
+            atomic_write_json(meta_path, self._current_session, indent=2)
 
     def _maybe_auto_summarize(self):
         if not self.config.get("general", "auto_transcribe"):
