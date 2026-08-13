@@ -347,6 +347,28 @@ class SettingsDialog(QDialog):
         ai_layout.addStretch()
         tabs.addTab(ai_tab, "AI Assistant")
 
+        # Calendar Tab
+        calendar_tab = QWidget()
+        calendar_layout = QVBoxLayout(calendar_tab)
+
+        calendar_group = QGroupBox("Outlook Calendar")
+        calendar_form = QFormLayout(calendar_group)
+
+        self.calendar_enabled_cb = QCheckBox("Suggest calendar tags for finished recordings")
+        self.calendar_enabled_cb.setToolTip(
+            "After a recording finishes, check the local Outlook desktop\n"
+            "app's calendar for an overlapping event and offer to tag the\n"
+            "recording with its subject, organizer, and attendees.\n"
+            "Requires Outlook desktop to be installed and configured — no\n"
+            "cloud sign-in, no internet call."
+        )
+        calendar_form.addRow(self.calendar_enabled_cb)
+
+        calendar_layout.addWidget(calendar_group)
+        calendar_layout.addStretch()
+
+        tabs.addTab(calendar_tab, "Calendar")
+
         layout.addWidget(tabs)
 
         # OK / Cancel buttons
@@ -456,6 +478,9 @@ class SettingsDialog(QDialog):
         self.auto_summarize_cb.setChecked(self.config.get("ai", "auto_summarize"))
         self._on_ai_provider_changed(self.ai_provider_combo.currentIndex())
 
+        # Calendar
+        self.calendar_enabled_cb.setChecked(self.config.get("calendar", "enabled"))
+
     def _save_and_close(self):
         self.config.set("general", "min_recording_length", self.min_recording_spin.value())
         self.config.set("general", "auto_record", self.auto_record_cb.isChecked())
@@ -512,6 +537,9 @@ class SettingsDialog(QDialog):
         self.config.set("ai", "auto_summarize", self.auto_summarize_cb.isChecked())
         # Persist all provider settings so switching back restores them
         self.config.set("ai", "provider_settings", self._provider_settings)
+
+        # Calendar
+        self.config.set("calendar", "enabled", self.calendar_enabled_cb.isChecked())
 
         self.config.save()
         self.accept()
