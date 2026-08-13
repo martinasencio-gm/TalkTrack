@@ -18,6 +18,7 @@ from PyQt6.QtGui import QAction
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
+from app.utils import transcript_export
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
@@ -821,6 +822,7 @@ class MainWindow(QMainWindow):
         # Save notes typed during the recording into the new session.
         self.notes_panel.set_session_dir(session["directory"], keep_editor_text=True)
         self.notes_panel.save_notes()
+        self._export_transcript()
 
         # Refresh recordings list
         self.recordings_list.refresh()
@@ -1040,6 +1042,68 @@ class MainWindow(QMainWindow):
         except OSError:
             self.status_label.setText("Failed to save transcript.")
 
+    def _export_transcript(self, session=None):
+        """Best-effort LLM-readable Markdown export for a session, reading
+        everything fresh from disk. Deliberately does not touch
+        self.transcript_viewer / self.notes_panel — the caller in
+        _on_recording_selected runs this for a session that is no longer
+        the one those widgets currently display."""
+        session = session if session is not None else self._current_session
+        if not session or not session.get("directory"):
+            return
+        directory = Path(session["directory"])
+
+        transcript_path = directory / "transcript.json"
+        if not transcript_path.exists():
+            return  # nothing transcribed yet — nothing useful to export
+        try:
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                transcript_data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        speaker_names = {}
+        names_path = directory / "speaker_names.json"
+        if names_path.exists():
+            try:
+                with open(names_path, "r", encoding="utf-8") as f:
+                    speaker_names = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        calendar_event, _ = self._load_calendar_event(session)
+
+        notes = ""
+        notes_path = directory / "notes.txt"
+        if notes_path.exists():
+            try:
+                notes = notes_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+        summary_markdown = None
+        summary_path = directory / "summary.md"
+        if summary_path.exists():
+            try:
+                summary_markdown = summary_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+        action_items = None
+        actions_path = directory / "action_items.json"
+        if actions_path.exists():
+            try:
+                with open(actions_path, "r", encoding="utf-8") as f:
+                    action_items = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        transcript_export.export_transcript(
+            session, transcript_data, speaker_names, calendar_event,
+            notes, summary_markdown, action_items,
+            self.config.get("transcripts", "directory"),
+        )
+
     def _load_calendar_event(self, session):
         """Load calendar_event.json for a session, if present.
 
@@ -1160,6 +1224,7 @@ class MainWindow(QMainWindow):
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
 
+        previous_session = self._current_session
         self._current_session = metadata
 
         # Clear previous state before loading
@@ -1217,6 +1282,7 @@ class MainWindow(QMainWindow):
         # Persist any edits to the previously loaded recording's notes
         # before the editor is repointed, then load this recording's notes.
         self.notes_panel.save_notes()
+        self._export_transcript(previous_session)
         self.notes_panel.set_session_dir(metadata["directory"])
 
         # Load saved summary and action items
@@ -1289,6 +1355,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Failed to save transcript: {e}")
             return
 
+        self._export_transcript()
         self.recordings_list.refresh()
 
     def _save_speaker_names(self, names):
@@ -1715,6 +1782,7 @@ class MainWindow(QMainWindow):
             path = Path(self._current_session["directory"]) / "summary.md"
             try:
                 atomic_write_text(path, summary)
+                self._export_transcript()
             except OSError:
                 self.status_label.setText("Failed to save summary.")
 
@@ -1727,6 +1795,7 @@ class MainWindow(QMainWindow):
             path = Path(self._current_session["directory"]) / "action_items.json"
             try:
                 atomic_write_json(path, items, indent=2)
+                self._export_transcript()
             except OSError:
                 self.status_label.setText("Failed to save action items.")
 
