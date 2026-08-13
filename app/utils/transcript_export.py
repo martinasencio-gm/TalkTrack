@@ -85,20 +85,20 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
 
     if calendar_event:
         lines.append("calendar:")
-        lines.append(f"  subject: {_yaml_str(calendar_event.get('subject', ''))}")
-        organizer = calendar_event.get("organizer", "")
+        lines.append(f"  subject: {_yaml_str(calendar_event.get('subject') or '')}")
+        organizer = calendar_event.get("organizer") or ""
         if organizer:
             lines.append(f"  organizer: {_yaml_str(organizer)}")
-        attendees = calendar_event.get("attendees", [])
+        attendees = calendar_event.get("attendees") or []
         if attendees:
             lines.append("  attendees:")
             for name in attendees:
-                lines.append(f"    - {_yaml_str(name)}")
+                lines.append(f"    - {_yaml_str(name or '')}")
 
     if speaker_names:
         lines.append("speakers:")
         for speaker_id, name in speaker_names.items():
-            lines.append(f"  {speaker_id}: {_yaml_str(name)}")
+            lines.append(f"  {speaker_id}: {_yaml_str(name or '')}")
 
     lines.append("---")
     lines.append("")

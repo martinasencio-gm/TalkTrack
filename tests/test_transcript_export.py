@@ -102,6 +102,22 @@ class TestBuildExportMarkdown(unittest.TestCase):
         self.assertIn("- \"jane.doe@example.com\"", md)
         self.assertIn("- \"john.smith@example.com\"", md)
 
+    def test_calendar_block_tolerates_none_fields(self):
+        """None values for subject/organizer/attendee entries must degrade
+        to empty strings rather than raising inside _yaml_str."""
+        event = {"subject": None, "organizer": None, "attendees": [None]}
+        md = build_export_markdown(
+            self._metadata(), self._transcript(), {}, event, "", None, None
+        )
+        self.assertIn("calendar:", md)
+        self.assertIn('subject: ""', md)
+
+    def test_speakers_block_tolerates_none_name(self):
+        md = build_export_markdown(
+            self._metadata(), self._transcript(), {"SPEAKER_00": None}, None, "", None, None
+        )
+        self.assertIn('SPEAKER_00: ""', md)
+
     def test_speakers_block_omitted_when_no_names(self):
         md = build_export_markdown(
             self._metadata(), self._transcript(), {}, None, "", None, None
@@ -295,13 +311,19 @@ class TestExportTranscript(unittest.TestCase):
                     self.fail("export_transcript() raised OSError; should have caught it")
 
     def test_export_transcript_malformed_calendar_event(self):
-        """Malformed calendar_event (subject=None) does not propagate as unhandled exception."""
+        """Malformed calendar_event (subject/organizer/attendee=None) degrades
+        gracefully to an empty string instead of raising and silently
+        skipping the whole export (which would leave a stale previous
+        export in place)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             metadata = self._metadata()
             transcript = self._transcript()
-            calendar_event = {"subject": None}  # None value instead of string
+            calendar_event = {
+                "subject": None,
+                "organizer": None,
+                "attendees": [None, "jane@example.com"],
+            }
 
-            # This should not raise; malformed input is caught
             try:
                 export_transcript(
                     metadata, transcript, {}, calendar_event, "", None, None, tmpdir
@@ -311,6 +333,10 @@ class TestExportTranscript(unittest.TestCase):
                     "export_transcript() raised exception on malformed calendar_event; "
                     "should have caught it"
                 )
+
+            # The export must actually be written, not silently dropped.
+            md_files = list(Path(tmpdir).glob("*.md"))
+            self.assertEqual(len(md_files), 1)
 
     def test_export_transcript_malformed_action_items(self):
         """Malformed action items (assignee/task/due=None) do not propagate."""
