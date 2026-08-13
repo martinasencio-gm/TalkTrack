@@ -96,6 +96,7 @@ TalkTrack/
       config.py                       # JSON config management
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
+      transcript_export.py            # Pure Markdown builder for LLM-ready transcript export
   tests/
     test_platform_info.py             # Windows version detection tests
     test_audio_session_monitor.py     # Audio session enumeration tests
@@ -119,6 +120,7 @@ TalkTrack/
     test_summarizer.py                 # Summary prompt builder tests
     test_search_index.py               # Transcript search tests
     test_chat.py                       # Chat context builder tests
+    test_transcript_export.py          # LLM-ready transcript Markdown export tests
   resources/
     style.qss                          # Dark theme stylesheet (Catppuccin Mocha)
     talktrack.ico                      # App icon (multi-size: 16-256px)
@@ -129,6 +131,7 @@ TalkTrack/
     TT_logo_*.png                      # Logo files (655x200, 1300x400)
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory
+  transcripts/                        # LLM-ready Markdown transcript export directory
 ```
 
 ## Current Features
@@ -146,6 +149,9 @@ TalkTrack/
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
 - **Speaker naming:** assign friendly names to diarized speakers, saved per recording
 - **Calendar tagging (opt-in):** after a recording finishes, optionally checks the local Outlook desktop calendar for an overlapping event and offers to tag the recording with its subject, organizer, and attendees (`calendar_event.json`); attendee names populate a mutually-exclusive dropdown in speaker naming
+- **Calendar rename suggestion:** when a recording is tagged to a calendar event and has no custom name yet, offers to rename it to the event's subject
+- **Calendar remap:** "Change" button in the recording header re-runs the calendar lookup on demand and lets the user retag the recording to a different matching event
+- **LLM-ready transcript export:** every transcript/notes/summary save also writes a Markdown export (frontmatter + summary + action items + notes + transcript) to the configured transcripts folder, keyed by the recording's stable directory name so renames/retagging don't orphan old exports
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
@@ -249,6 +255,7 @@ TalkTrack/
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
+- Output settings: `output.directory` (recordings output folder), `transcripts.directory` (Markdown export folder, default sibling `transcripts/` dir, auto-created)
 
 ### Data Files Per Recording
 - summary.md: AI-generated meeting summary
