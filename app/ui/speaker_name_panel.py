@@ -192,11 +192,18 @@ class SpeakerNamePanel(QWidget):
                 displaced_combo.blockSignals(True)
                 displaced_combo.setCurrentText("")
                 displaced_combo.blockSignals(False)
-        self._refresh_combo_options()
+        self._refresh_combo_options(skip_speaker_id=speaker_id)
         self.names_changed.emit(self.get_speaker_names())
 
-    def _refresh_combo_options(self):
+    def _refresh_combo_options(self, skip_speaker_id=None):
         for speaker_id, combo in self._name_combos.items():
+            if speaker_id == skip_speaker_id:
+                # Don't rebuild the combo the user is actively typing in —
+                # this fires on every keystroke (_on_combo_changed calls us
+                # for editable combos) and rebuilding mid-type breaks cursor
+                # position / any inline completion popup. Its own option
+                # list doesn't need to be current until it's touched again.
+                continue
             options = _available_options(
                 speaker_id, self._speaker_ids, self._speaker_names, self._attendees
             )
