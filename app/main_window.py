@@ -1042,6 +1042,9 @@ class MainWindow(QMainWindow):
                               result.to_text(speaker_names=names))
         except OSError:
             self.status_label.setText("Failed to save transcript.")
+            return
+
+        self._export_transcript(session)
 
     def _export_transcript(self, session=None):
         """Best-effort LLM-readable Markdown export for a session, reading
