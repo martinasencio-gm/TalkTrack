@@ -34,8 +34,14 @@ def sanitize_filename_component(text):
     return collapsed[:_MAX_TITLE_LEN] if collapsed else "Untitled"
 
 
-def export_path_for(title, timestamp_iso, transcripts_dir):
-    """<transcripts_dir>/<sanitized-title>_<YYYYMMDD>_<HHMM>.md
+def export_path_for(directory_name, timestamp_iso, transcripts_dir):
+    """<transcripts_dir>/<sanitized-directory-name>_<YYYYMMDD>_<HHMM>.md
+
+    The filename is derived from the recording's stable session directory
+    name, NOT its (mutable) title — a rename, a calendar tag, or a calendar
+    remap all change the title but must keep re-exporting to the same file.
+    Deriving the filename from the title instead would orphan the previous
+    export under the old filename every time the title changes.
 
     Timestamp comes from the recording's started_at, not wall-clock export
     time, so re-exporting the same recording overwrites the same file
@@ -50,7 +56,7 @@ def export_path_for(title, timestamp_iso, transcripts_dir):
             stamp = dt.strftime("%Y%m%d_%H%M")
         except ValueError:
             pass
-    filename = f"{sanitize_filename_component(title)}_{stamp}.md"
+    filename = f"{sanitize_filename_component(directory_name)}_{stamp}.md"
     return Path(transcripts_dir) / filename
 
 
@@ -146,8 +152,7 @@ def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
     try:
         os.makedirs(transcripts_dir, exist_ok=True)
         directory_name = Path(metadata.get("directory", "")).name
-        title = (calendar_event or {}).get("subject") or metadata.get("name") or directory_name
-        path = export_path_for(title, metadata.get("started_at", ""), transcripts_dir)
+        path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
         markdown = build_export_markdown(
             metadata, transcript_data, speaker_names, calendar_event,
             notes, summary_markdown, action_items,

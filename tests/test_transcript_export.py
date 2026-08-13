@@ -37,12 +37,20 @@ class TestSanitizeFilenameComponent(unittest.TestCase):
 
 class TestExportPathFor(unittest.TestCase):
     def test_builds_timestamped_sanitized_path(self):
-        path = export_path_for("Q3 Roadmap Sync", "2026-08-13T14:00:00", Path("C:/transcripts"))
-        self.assertEqual(path, Path("C:/transcripts/Q3_Roadmap_Sync_20260813_1400.md"))
+        path = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
+        self.assertEqual(path, Path("C:/transcripts/rec_20260813_140000_20260813_1400.md"))
 
     def test_missing_timestamp_still_produces_a_path(self):
-        path = export_path_for("Focus Block", "", Path("C:/transcripts"))
-        self.assertEqual(path, Path("C:/transcripts/Focus_Block_00000000_0000.md"))
+        path = export_path_for("rec_focus_block", "", Path("C:/transcripts"))
+        self.assertEqual(path, Path("C:/transcripts/rec_focus_block_00000000_0000.md"))
+
+    def test_path_is_stable_across_title_changing_inputs(self):
+        """export_path_for only ever receives the stable directory name, so
+        passing it directly (never the mutable title) keeps the path
+        constant regardless of what the recording is currently named."""
+        path_a = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
+        path_b = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
+        self.assertEqual(path_a, path_b)
 
 
 class TestBuildExportMarkdown(unittest.TestCase):
@@ -237,6 +245,36 @@ class TestExportTranscript(unittest.TestCase):
             self.assertIn("Important discussion about Q3 plans.", content)
             self.assertIn("# Transcript", content)
             self.assertIn("**[00:00:03] Alice:** Test segment one.", content)
+
+    def test_reexport_with_changed_title_overwrites_not_orphans(self):
+        """A rename / calendar tag / calendar remap changes the title but
+        must keep writing to the SAME file — not leave the old title's
+        export behind as an orphan. Regression test for the filename
+        previously being derived from the (mutable) title instead of the
+        stable session directory name."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata = self._metadata()
+            transcript = self._transcript()
+
+            export_transcript(
+                metadata, transcript, {}, None, "", None, None, tmpdir
+            )
+            md_files_before = list(Path(tmpdir).glob("*.md"))
+            self.assertEqual(len(md_files_before), 1)
+            first_path = md_files_before[0]
+
+            # Same recording (same "directory"), but the title-driving
+            # inputs changed — e.g. tagged to a calendar event.
+            renamed_metadata = dict(metadata)
+            renamed_metadata["name"] = "Totally Different Title"
+            calendar_event = {"subject": "Yet Another Title"}
+
+            export_transcript(
+                renamed_metadata, transcript, {}, calendar_event, "", None, None, tmpdir
+            )
+            md_files_after = list(Path(tmpdir).glob("*.md"))
+            self.assertEqual(len(md_files_after), 1)
+            self.assertEqual(md_files_after[0], first_path)
 
     def test_export_transcript_write_failure_does_not_propagate(self):
         """Write failure (OSError) is caught and logged, does not raise."""
