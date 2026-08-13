@@ -1,6 +1,6 @@
 """Collapsible speaker name editing panel."""
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -27,6 +27,19 @@ def _extract_speakers(segments):
     return sorted(speakers)
 
 
+def _available_options(speaker_id, speaker_ids, current_selections, attendees):
+    """Attendee names selectable for speaker_id's dropdown: blank + every
+    attendee not already assigned to a DIFFERENT speaker. speaker_id's own
+    current selection (if any) always stays available in its own list."""
+    own_selection = current_selections.get(speaker_id, "")
+    taken_elsewhere = {
+        name for sid, name in current_selections.items()
+        if sid != speaker_id and name
+    }
+    available = [a for a in attendees if a not in taken_elsewhere]
+    return [""] + available
+
+
 class SpeakerNamePanel(QWidget):
     """Collapsible panel for mapping speaker IDs to friendly names.
 
@@ -39,8 +52,10 @@ class SpeakerNamePanel(QWidget):
         super().__init__(parent)
         self._config = config
         self._speaker_ids = []
-        self._name_edits = {}  # speaker_id -> QLineEdit
-        self._speaker_names = {}  # speaker_id -> name str
+        self._name_edits = {}      # speaker_id -> QLineEdit (no-attendee mode)
+        self._name_combos = {}     # speaker_id -> QComboBox (attendee mode)
+        self._speaker_names = {}   # speaker_id -> name str
+        self._attendees = []
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
         self._setup_ui()
         self.hide()  # hidden until speakers exist
@@ -71,15 +86,19 @@ class SpeakerNamePanel(QWidget):
         self._rows_layout.setSpacing(4)
         self._main_layout.addWidget(self._rows_container)
 
-    def set_speakers(self, segments, speaker_names=None):
+    def set_speakers(self, segments, speaker_names=None, attendees=None):
         """Populate panel from transcript segments and optional existing names.
 
         Args:
             segments: list of TranscriptSegment
             speaker_names: dict of {speaker_id: name} or None
+            attendees: optional list of calendar attendee names. When
+                provided (non-empty), rows become mutually-exclusive
+                dropdowns instead of free-text fields.
         """
         self._speaker_ids = _extract_speakers(segments)
         self._speaker_names = dict(speaker_names) if speaker_names else {}
+        self._attendees = list(attendees) if attendees else []
 
         if not self._speaker_ids:
             self.hide()
@@ -92,6 +111,7 @@ class SpeakerNamePanel(QWidget):
 
         # Clear existing rows
         self._name_edits.clear()
+        self._name_combos.clear()
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             if item.widget():
@@ -117,23 +137,56 @@ class SpeakerNamePanel(QWidget):
             row_layout.addWidget(id_label)
 
             # Arrow
-            arrow = QLabel("\u2192")
-            arrow.setStyleSheet("color: #585b70;")
-            arrow.setFixedWidth(20)
-            row_layout.addWidget(arrow)
+            arrow_label = QLabel("\u2192")
+            arrow_label.setStyleSheet("color: #585b70;")
+            arrow_label.setFixedWidth(20)
+            row_layout.addWidget(arrow_label)
 
-            # Name edit
-            name_edit = QLineEdit()
-            name_edit.setPlaceholderText("Enter name...")
-            name_edit.setMaximumHeight(28)
             existing_name = self._speaker_names.get(speaker_id, "")
-            if existing_name:
-                name_edit.setText(existing_name)
-            name_edit.textChanged.connect(self._on_name_changed)
-            row_layout.addWidget(name_edit)
 
-            self._name_edits[speaker_id] = name_edit
+            if self._attendees:
+                combo = QComboBox()
+                combo.setEditable(True)
+                combo.setMaximumHeight(28)
+                options = _available_options(
+                    speaker_id, self._speaker_ids, self._speaker_names, self._attendees
+                )
+                combo.addItems(options)
+                if existing_name:
+                    combo.setCurrentText(existing_name)
+                combo.currentTextChanged.connect(
+                    lambda text, sid=speaker_id: self._on_combo_changed(sid, text)
+                )
+                row_layout.addWidget(combo)
+                self._name_combos[speaker_id] = combo
+            else:
+                name_edit = QLineEdit()
+                name_edit.setPlaceholderText("Enter name...")
+                name_edit.setMaximumHeight(28)
+                if existing_name:
+                    name_edit.setText(existing_name)
+                name_edit.textChanged.connect(self._on_name_changed)
+                row_layout.addWidget(name_edit)
+                self._name_edits[speaker_id] = name_edit
+
             self._rows_layout.addWidget(row_widget)
+
+    def _on_combo_changed(self, speaker_id, text):
+        self._speaker_names[speaker_id] = text.strip()
+        self._refresh_combo_options()
+        self.names_changed.emit(self.get_speaker_names())
+
+    def _refresh_combo_options(self):
+        for speaker_id, combo in self._name_combos.items():
+            options = _available_options(
+                speaker_id, self._speaker_ids, self._speaker_names, self._attendees
+            )
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(options)
+            combo.setCurrentText(current)
+            combo.blockSignals(False)
 
     def get_speaker_names(self):
         """Return current speaker name mappings (only non-empty names)."""
@@ -142,15 +195,21 @@ class SpeakerNamePanel(QWidget):
             name = edit.text().strip()
             if name:
                 names[speaker_id] = name
+        for speaker_id, combo in self._name_combos.items():
+            name = combo.currentText().strip()
+            if name:
+                names[speaker_id] = name
         return names
 
     def focus_speaker(self, speaker_id):
-        """Focus the name edit for the given speaker ID."""
+        """Focus the name field for the given speaker ID."""
+        if self._collapsed:
+            self._toggle_collapsed()
         if speaker_id in self._name_edits:
-            if self._collapsed:
-                self._toggle_collapsed()
             self._name_edits[speaker_id].setFocus()
             self._name_edits[speaker_id].selectAll()
+        elif speaker_id in self._name_combos:
+            self._name_combos[speaker_id].setFocus()
 
     def _on_name_changed(self, text):
         """Emit names_changed whenever any name field changes."""

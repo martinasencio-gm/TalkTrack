@@ -22,5 +22,51 @@ class TestSpeakerNamePanelLogic(unittest.TestCase):
         self.assertEqual(_extract_speakers([]), [])
 
 
+class TestAvailableOptions(unittest.TestCase):
+
+    def test_no_selections_yet_returns_all_attendees_plus_blank(self):
+        from app.ui.speaker_name_panel import _available_options
+        opts = _available_options(
+            "SPEAKER_00",
+            ["SPEAKER_00", "SPEAKER_01"],
+            {},
+            ["Jane", "John"],
+        )
+        self.assertEqual(opts, ["", "Jane", "John"])
+
+    def test_excludes_names_assigned_to_other_speakers(self):
+        from app.ui.speaker_name_panel import _available_options
+        opts = _available_options(
+            "SPEAKER_01",
+            ["SPEAKER_00", "SPEAKER_01"],
+            {"SPEAKER_00": "Jane"},
+            ["Jane", "John"],
+        )
+        self.assertEqual(opts, ["", "John"])
+
+    def test_keeps_own_current_selection_available(self):
+        from app.ui.speaker_name_panel import _available_options
+        opts = _available_options(
+            "SPEAKER_00",
+            ["SPEAKER_00", "SPEAKER_01"],
+            {"SPEAKER_00": "Jane", "SPEAKER_01": "John"},
+            ["Jane", "John"],
+        )
+        self.assertEqual(opts, ["", "Jane"])
+
+    def test_custom_typed_name_not_in_attendees_does_not_appear_in_list(self):
+        # A name typed freely (not an attendee) shouldn't show up as a
+        # dropdown option for other speakers to "steal" — it's just absent
+        # from the attendee-derived list entirely.
+        from app.ui.speaker_name_panel import _available_options
+        opts = _available_options(
+            "SPEAKER_01",
+            ["SPEAKER_00", "SPEAKER_01"],
+            {"SPEAKER_00": "Some Guest"},
+            ["Jane", "John"],
+        )
+        self.assertEqual(opts, ["", "Jane", "John"])
+
+
 if __name__ == "__main__":
     unittest.main()
