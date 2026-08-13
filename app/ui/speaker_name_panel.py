@@ -82,10 +82,6 @@ class SpeakerNamePanel(QWidget):
         self._toggle_btn = QPushButton("\u25bc Speakers")
         self._toggle_btn.setObjectName("speakerPanelToggle")
         self._toggle_btn.setFlat(True)
-        self._toggle_btn.setStyleSheet(
-            "text-align: left; font-weight: bold; color: #89b4fa; "
-            "font-size: 13px; padding: 4px 0; border: none;"
-        )
         self._toggle_btn.clicked.connect(self._toggle_collapsed)
         header_row.addWidget(self._toggle_btn)
         header_row.addStretch()

@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
         # Recordings list wrapped in a CollapsibleSection
         recordings_dir = self.config.get("output", "directory")
         self.recordings_list = RecordingsList(recordings_dir)
-        self._recordings_section = CollapsibleSection("Recordings")
+        self._recordings_section = CollapsibleSection("Recordings", accent="#cba6f7")
         self._recordings_section.content_layout().addWidget(self.recordings_list)
         self._recordings_section.set_expanded(True)
         left_layout.addWidget(self._recordings_section, 1)

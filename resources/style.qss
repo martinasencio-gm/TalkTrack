@@ -487,15 +487,16 @@ QToolTip {
 #speakerPanelToggle {
     text-align: left;
     font-weight: bold;
-    color: #89b4fa;
+    color: #94e2d5;
     font-size: 13px;
-    padding: 4px 0;
+    padding: 4px 0 4px 6px;
     border: none;
+    border-left: 3px solid #94e2d5;
     background: transparent;
 }
 
 #speakerPanelToggle:hover {
-    color: #b4d0fb;
+    color: #b1ecdf;
 }
 
 /* Diarization Setup Wizard */

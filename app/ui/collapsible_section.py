@@ -12,7 +12,7 @@ class CollapsibleSection(QWidget):
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, title, parent=None):
+    def __init__(self, title, parent=None, accent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -22,6 +22,13 @@ class CollapsibleSection(QWidget):
         # band. Extras (Refresh, etc.) can be added via add_header_widget().
         self._header_frame = QFrame()
         self._header_frame.setObjectName("collapsibleHeader")
+        if accent:
+            # A left-edge accent stripe, not a recolored band — several
+            # sections share this identical band otherwise, so nothing
+            # keys the eye to which is which at a glance.
+            self._header_frame.setStyleSheet(
+                f"QFrame#collapsibleHeader {{ border-left: 3px solid {accent}; }}"
+            )
         self._header_row = QHBoxLayout(self._header_frame)
         self._header_row.setContentsMargins(6, 2, 6, 2)
         self._header_row.setSpacing(4)

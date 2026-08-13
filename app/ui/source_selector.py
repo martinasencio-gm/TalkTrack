@@ -96,7 +96,7 @@ class SourceSelector(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Collapsible audio sources section
-        self._section = CollapsibleSection(self._BASE_TITLE)
+        self._section = CollapsibleSection(self._BASE_TITLE, accent="#89b4fa")
         content = self._section.content_layout()
 
         # Microphone selector
