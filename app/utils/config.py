@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
         "theme": "dark",
         "speakers_collapsed": False,
     },
+    "calendar": {
+        "enabled": False,
+    },
 }
 
 CONFIG_DIR = Path.home() / ".talktrack"

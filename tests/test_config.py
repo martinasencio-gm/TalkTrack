@@ -104,5 +104,17 @@ class TestOutputDirFallback(ConfigTestCase):
             self.fail("Config() raised OSError for an invalid output directory")
 
 
+class TestCalendarDefaults(ConfigTestCase):
+    def test_calendar_enabled_defaults_false(self):
+        cfg = Config()
+        self.assertFalse(cfg.get("calendar", "enabled"))
+
+    def test_calendar_enabled_round_trips(self):
+        cfg = Config()
+        cfg.set("calendar", "enabled", True)
+        cfg2 = Config()
+        self.assertTrue(cfg2.get("calendar", "enabled"))
+
+
 if __name__ == "__main__":
     unittest.main()
