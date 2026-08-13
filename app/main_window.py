@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel
+    QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QAction
@@ -1677,6 +1677,26 @@ class MainWindow(QMainWindow):
         )
         self._calendar_attendees = event_to_save.get("attendees", [])
         self.transcript_viewer.set_calendar_attendees(self._calendar_attendees)
+        self._maybe_suggest_rename(self._current_session, event_to_save)
+
+    def _maybe_suggest_rename(self, session, event):
+        """Offer to rename the recording to the calendar event's subject.
+        Never overwrites a name the user already set — a recording counts
+        as "already custom-named" the moment metadata["name"] is truthy,
+        whether that happened via manual rename or an earlier accepted
+        suggestion."""
+        if session is None or session.get("name"):
+            return
+        subject = event.get("subject", "").strip()
+        if not subject:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "Rename Recording?",
+            "Rename this recording to match the calendar event?",
+            text=subject,
+        )
+        if ok and new_name.strip():
+            self._on_recording_renamed(new_name.strip())
 
     def _on_calendar_dismissed(self):
         if not self._current_session:
