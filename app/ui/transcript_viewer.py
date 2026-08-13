@@ -47,6 +47,7 @@ class TranscriptViewer(QWidget):
         self._transcript = None
         self._speaker_colors = {}
         self._speaker_names = {}
+        self._calendar_attendees = []
         self._segment_widgets = []
         self._audio_path = None
         self._player = None
@@ -198,6 +199,16 @@ class TranscriptViewer(QWidget):
         """Set speaker names from loaded speaker_names.json."""
         self._speaker_names = dict(names) if names else {}
 
+    def set_calendar_attendees(self, attendees):
+        """Update the attendee list used for speaker-naming dropdowns and
+        refresh the panel immediately if a transcript is already shown."""
+        self._calendar_attendees = list(attendees) if attendees else []
+        if self._transcript is not None:
+            self.speaker_panel.set_speakers(
+                self._transcript.segments, self._speaker_names,
+                attendees=self._calendar_attendees
+            )
+
     def _on_transcribe_clicked(self):
         if self._audio_path:
             self.transcribe_requested.emit(self._audio_path)
@@ -216,7 +227,7 @@ class TranscriptViewer(QWidget):
     def _on_cancel_clicked(self):
         self.cancel_requested.emit()
 
-    def display_transcript(self, transcript, speaker_names=None):
+    def display_transcript(self, transcript, speaker_names=None, attendees=None):
         """Render transcript with interactive segment widgets."""
         self._transcript = transcript
         if speaker_names is not None:
@@ -266,7 +277,11 @@ class TranscriptViewer(QWidget):
         self._segments_layout.addStretch()
 
         # Update speaker panel
-        self.speaker_panel.set_speakers(transcript.segments, self._speaker_names)
+        if attendees is not None:
+            self._calendar_attendees = attendees
+        self.speaker_panel.set_speakers(
+            transcript.segments, self._speaker_names, attendees=self._calendar_attendees
+        )
 
         # Enable export and playback buttons
         self.copy_all_btn.setEnabled(True)
@@ -282,6 +297,7 @@ class TranscriptViewer(QWidget):
         self._transcript = None
         self._speaker_colors = {}
         self._speaker_names = {}
+        self._calendar_attendees = []
         self._audio_path = None
 
         # Remove segment widgets
