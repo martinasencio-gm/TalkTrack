@@ -193,15 +193,16 @@ class SpeakerNamePanel(QWidget):
         the actual dropdown of options otherwise requires clicking the small
         arrow button, which isn't discoverable. FocusIn was tried first but
         only fires once per focus transition — a second click on an
-        already-focused field produced no event at all, and reacting to the
-        very first FocusIn raced with Qt's own arrow-click popup handling
-        (both can fire for the same click when the field wasn't focused yet),
-        which closed the popup it had just opened. MouseButtonPress on the
-        line edit has neither problem: it fires on every click, and clicks on
-        the arrow subcontrol never reach the line edit's event stream at all,
-        so there's nothing to race with.
+        already-focused field produced no event at all. MouseButtonPress was
+        tried next but caused the popup to flash open and immediately close:
+        the press lands on the line edit (not the popup), so when the
+        matching release for that same click arrives a moment later, Qt's
+        popup sees a release it never saw a press for and treats it as a
+        click outside the popup, closing it. Triggering on
+        MouseButtonRelease instead leaves no further release event in the
+        queue to be misread that way.
         """
-        if event.type() == QEvent.Type.MouseButtonPress:
+        if event.type() == QEvent.Type.MouseButtonRelease:
             combo = self._combo_line_edits.get(obj)
             if combo is not None and not combo.view().isVisible():
                 QTimer.singleShot(0, combo.showPopup)
