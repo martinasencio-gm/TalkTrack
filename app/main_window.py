@@ -43,6 +43,8 @@ from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
 from app.ui.calendar_lookup_worker import CalendarLookupWorker
+from app.ui.import_timestamp_dialog import ImportTimestampDialog
+from app.recording.import_session import build_import_metadata, needs_conversion
 
 
 class MainWindow(QMainWindow):
@@ -328,6 +330,7 @@ class MainWindow(QMainWindow):
         self.recordings_list.about_to_delete.connect(self._on_recording_about_to_delete)
         self.recordings_list.recording_deleted.connect(self._on_recording_deleted)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
+        self.recordings_list.import_requested.connect(self._on_import_requested)
 
         # Mic device change: restart monitor on new device if it's running
         self.source_selector.mic_changed.connect(self._on_mic_device_changed)
@@ -700,6 +703,64 @@ class MainWindow(QMainWindow):
         self._success_pending = True
         from app.ui.tray_icon import resolve_overlay
         self.tray.set_overlay(resolve_overlay(self._success_pending, self._error_pending))
+
+    def _on_import_requested(self, source_path):
+        import os
+        import shutil
+        import subprocess
+        import soundfile as sf
+        from datetime import datetime
+        from app.utils.atomic_io import atomic_write_json
+
+        mtime = datetime.fromtimestamp(os.path.getmtime(source_path))
+        dialog = ImportTimestampDialog(mtime, parent=self)
+        if not dialog.exec():
+            return
+        started_at = dialog.selected_datetime()
+
+        timestamp = started_at.strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(self.config.get("output", "directory"))
+        session_dir = output_dir / f"recording_{timestamp}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        audio_filename = "combined_audio.wav"
+        dest_path = session_dir / audio_filename
+
+        try:
+            if needs_conversion(source_path):
+                if not shutil.which("ffmpeg"):
+                    QMessageBox.warning(
+                        self, "Import Failed",
+                        "This file needs FFmpeg to convert from M4A, but FFmpeg "
+                        "wasn't found on PATH. Install FFmpeg and try again, or "
+                        "convert the file to WAV/MP3 first."
+                    )
+                    shutil.rmtree(session_dir, ignore_errors=True)
+                    return
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", source_path, str(dest_path)],
+                    capture_output=True, check=True, timeout=300,
+                )
+            else:
+                shutil.copy2(source_path, dest_path)
+
+            duration = sf.info(str(dest_path)).duration
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                RuntimeError, OSError) as e:
+            QMessageBox.warning(self, "Import Failed", f"Could not import file: {e}")
+            shutil.rmtree(session_dir, ignore_errors=True)
+            return
+
+        session = build_import_metadata(
+            source_path=source_path,
+            session_dir=str(session_dir),
+            started_at=started_at,
+            duration=duration,
+            audio_filename=audio_filename,
+        )
+        atomic_write_json(session_dir / "metadata.json", session, indent=2)
+
+        self._on_recording_finished(session)
 
     def _on_recording_finished(self, session):
         self._current_session = session
