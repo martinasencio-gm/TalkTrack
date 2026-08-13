@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QTimer
 
 
 # Speaker colors — must match the list in transcript_viewer.py
@@ -65,6 +65,7 @@ class SpeakerNamePanel(QWidget):
         self._speaker_ids = []
         self._name_edits = {}      # speaker_id -> QLineEdit (no-attendee mode)
         self._name_combos = {}     # speaker_id -> QComboBox (attendee mode)
+        self._combo_line_edits = {}  # QLineEdit -> QComboBox, for eventFilter
         self._speaker_names = {}   # speaker_id -> name str
         self._attendees = []
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
@@ -123,6 +124,7 @@ class SpeakerNamePanel(QWidget):
         # Clear existing rows
         self._name_edits.clear()
         self._name_combos.clear()
+        self._combo_line_edits.clear()
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             if item.widget():
@@ -168,6 +170,8 @@ class SpeakerNamePanel(QWidget):
                 combo.currentTextChanged.connect(
                     lambda text, sid=speaker_id: self._on_combo_changed(sid, text)
                 )
+                combo.lineEdit().installEventFilter(self)
+                self._combo_line_edits[combo.lineEdit()] = combo
                 row_layout.addWidget(combo)
                 self._name_combos[speaker_id] = combo
             else:
@@ -181,6 +185,21 @@ class SpeakerNamePanel(QWidget):
                 self._name_edits[speaker_id] = name_edit
 
             self._rows_layout.addWidget(row_widget)
+
+    def eventFilter(self, obj, event):
+        """Show the full attendee list as soon as a combo box gains focus.
+
+        Editable QComboBox only inline-autocompletes as you type by default;
+        the actual dropdown of options otherwise requires clicking the small
+        arrow button, which isn't discoverable. showPopup() is deferred via
+        singleShot because calling it synchronously during FocusIn can be
+        swallowed by Qt's own focus-handling on some platforms.
+        """
+        if event.type() == QEvent.Type.FocusIn:
+            combo = self._combo_line_edits.get(obj)
+            if combo is not None:
+                QTimer.singleShot(0, combo.showPopup)
+        return super().eventFilter(obj, event)
 
     def _on_combo_changed(self, speaker_id, text):
         name = text.strip()
