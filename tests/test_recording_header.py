@@ -31,6 +31,23 @@ class TestRecordingHeaderHelpers(unittest.TestCase):
         from app.ui.recording_header import _format_duration
         self.assertEqual(_format_duration(3661), "1h 1m 1s")
 
+    def test_format_calendar_line_with_attendees(self):
+        from app.ui.recording_header import _format_calendar_line
+        event = {"subject": "Q3 Roadmap Sync", "attendees": ["Jane", "John", "Priya"]}
+        self.assertEqual(
+            _format_calendar_line(event), "\U0001F4C5 Q3 Roadmap Sync · 3 attendees"
+        )
+
+    def test_format_calendar_line_singular_attendee(self):
+        from app.ui.recording_header import _format_calendar_line
+        event = {"subject": "1:1", "attendees": ["Jane"]}
+        self.assertEqual(_format_calendar_line(event), "\U0001F4C5 1:1 · 1 attendee")
+
+    def test_format_calendar_line_no_attendees(self):
+        from app.ui.recording_header import _format_calendar_line
+        event = {"subject": "Focus Block", "attendees": []}
+        self.assertEqual(_format_calendar_line(event), "\U0001F4C5 Focus Block")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,18 @@ def _format_duration(seconds):
     return f"{s}s"
 
 
+def _format_calendar_line(calendar_event):
+    """Format a calendar_event.json dict as a display line."""
+    subject = calendar_event.get("subject", "")
+    attendees = calendar_event.get("attendees", [])
+    line = f"\U0001F4C5 {subject}"
+    if attendees:
+        count = len(attendees)
+        noun = "attendee" if count == 1 else "attendees"
+        line += f" · {count} {noun}"
+    return line
+
+
 class RecordingHeader(QWidget):
     """Displays recording info (name, date, duration) with rename capability."""
 
@@ -77,7 +89,14 @@ class RecordingHeader(QWidget):
         self.info_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         layout.addWidget(self.info_label)
 
-    def set_recording(self, metadata, speaker_count=0):
+        # Calendar event line
+        self.calendar_label = QLabel("")
+        self.calendar_label.setObjectName("recordingCalendarInfo")
+        self.calendar_label.setStyleSheet("color: #89b4fa; font-size: 12px;")
+        self.calendar_label.hide()
+        layout.addWidget(self.calendar_label)
+
+    def set_recording(self, metadata, speaker_count=0, calendar_event=None):
         """Display info for the given recording metadata."""
         self._metadata = metadata
         if metadata is None:
@@ -108,6 +127,13 @@ class RecordingHeader(QWidget):
             parts.append(f"{speaker_count} speaker{'s' if speaker_count != 1 else ''}")
 
         self.info_label.setText("  |  ".join(parts))
+
+        if calendar_event:
+            self.calendar_label.setText(_format_calendar_line(calendar_event))
+            self.calendar_label.show()
+        else:
+            self.calendar_label.clear()
+            self.calendar_label.hide()
 
     def clear(self):
         """Clear the header, hiding it."""
