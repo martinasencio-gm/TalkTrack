@@ -45,6 +45,7 @@ class RecordingHeader(QWidget):
     """Displays recording info (name, date, duration) with rename capability."""
 
     name_changed = pyqtSignal(str)  # emitted when user renames the recording
+    change_calendar_requested = pyqtSignal()  # emitted when user clicks "Change" on the calendar line
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,12 +90,23 @@ class RecordingHeader(QWidget):
         self.info_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         layout.addWidget(self.info_label)
 
-        # Calendar event line
+        # Calendar event line + remap button
+        calendar_row = QHBoxLayout()
         self.calendar_label = QLabel("")
         self.calendar_label.setObjectName("recordingCalendarInfo")
         self.calendar_label.setStyleSheet("color: #89b4fa; font-size: 12px;")
         self.calendar_label.hide()
-        layout.addWidget(self.calendar_label)
+        calendar_row.addWidget(self.calendar_label)
+
+        self.change_calendar_btn = QPushButton("Change")
+        self.change_calendar_btn.setObjectName("changeCalendarButton")
+        self.change_calendar_btn.setFixedWidth(60)
+        self.change_calendar_btn.clicked.connect(self.change_calendar_requested.emit)
+        self.change_calendar_btn.hide()
+        calendar_row.addWidget(self.change_calendar_btn)
+
+        calendar_row.addStretch()
+        layout.addLayout(calendar_row)
 
     def set_recording(self, metadata, speaker_count=0, calendar_event=None):
         """Display info for the given recording metadata."""
@@ -131,9 +143,11 @@ class RecordingHeader(QWidget):
         if calendar_event:
             self.calendar_label.setText(_format_calendar_line(calendar_event))
             self.calendar_label.show()
+            self.change_calendar_btn.show()
         else:
             self.calendar_label.clear()
             self.calendar_label.hide()
+            self.change_calendar_btn.hide()
 
     def clear(self):
         """Clear the header, hiding it."""
