@@ -210,9 +210,10 @@ class RecordingsList(QWidget):
     search_result_selected = pyqtSignal(str, float)  # recording_id, timestamp
     import_requested = pyqtSignal(str)  # chosen audio file path
 
-    def __init__(self, recordings_dir, parent=None):
+    def __init__(self, recordings_dir, parent=None, config=None):
         super().__init__(parent)
         self.recordings_dir = Path(recordings_dir)
+        self.config = config
         self._recordings = []
         self._search_worker = None
         self._pending_search = None
@@ -395,6 +396,19 @@ class RecordingsList(QWidget):
 
         if len(selected_items) > 1:
             # Multi-select context menu
+            open_recordings = QAction("Open Recordings Folder", self)
+            open_recordings.triggered.connect(
+                lambda: self._open_folder(str(self.recordings_dir))
+            )
+            menu.addAction(open_recordings)
+
+            open_transcripts = QAction("Open Transcripts Folder", self)
+            open_transcripts.triggered.connect(self._open_transcripts_folder)
+            open_transcripts.setEnabled(self.config is not None)
+            menu.addAction(open_transcripts)
+
+            menu.addSeparator()
+
             count = len(selected_items)
             delete_action = QAction(f"Delete {count} Recordings", self)
             delete_action.triggered.connect(
@@ -403,11 +417,18 @@ class RecordingsList(QWidget):
             menu.addAction(delete_action)
         else:
             # Single item context menu
-            open_folder = QAction("Open Folder", self)
-            open_folder.triggered.connect(
+            open_recordings = QAction("Open Recordings Folder", self)
+            open_recordings.triggered.connect(
                 lambda: self._open_folder(metadata["directory"])
             )
-            menu.addAction(open_folder)
+            menu.addAction(open_recordings)
+
+            open_transcripts = QAction("Open Transcripts Folder", self)
+            open_transcripts.triggered.connect(self._open_transcripts_folder)
+            open_transcripts.setEnabled(self.config is not None)
+            menu.addAction(open_transcripts)
+
+            menu.addSeparator()
 
             view_action = QAction("View / Transcribe", self)
             view_action.triggered.connect(lambda: self.recording_selected.emit(metadata))
@@ -427,6 +448,13 @@ class RecordingsList(QWidget):
 
     def _open_folder(self, directory):
         os.startfile(directory)
+
+    def _open_transcripts_folder(self):
+        if self.config is None:
+            return
+        transcripts_dir = self.config.get("transcripts", "directory")
+        os.makedirs(transcripts_dir, exist_ok=True)
+        os.startfile(transcripts_dir)
 
     def _delete_recording(self, metadata):
         directory = metadata.get("directory", "")
