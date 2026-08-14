@@ -75,9 +75,10 @@ class SourceSelector(QWidget):
 
     _BASE_TITLE = "Audio Sources"
 
-    def __init__(self, config=None, parent=None):
+    def __init__(self, config=None, parent=None, com_poller=None):
         super().__init__(parent)
         self._config = config
+        self._com_poller = com_poller
         self._mic_devices = []
         self._loopback_devices = []
         self._win11 = is_windows_11()
@@ -293,28 +294,27 @@ class SourceSelector(QWidget):
         if self._auto_refresh_timer is None:
             self._auto_refresh_timer = QTimer(self)
             self._auto_refresh_timer.timeout.connect(self._refresh_app_list)
-        self._auto_refresh_timer.start(3000)
+        self._auto_refresh_timer.start(5000)
 
     def _stop_auto_refresh(self):
         if self._auto_refresh_timer:
             self._auto_refresh_timer.stop()
 
     def set_recording_active(self, active):
-        """Switch to faster polling (1s) during recording for quicker call-end detection."""
+        """Switch to faster polling (2s) during recording for quicker call-end detection."""
+        if self._com_poller is not None:
+            self._com_poller.set_interval(2.0 if active else 5.0)
         if self._auto_refresh_timer and self._auto_refresh_timer.isActive():
-            self._auto_refresh_timer.start(1000 if active else 3000)
+            self._auto_refresh_timer.start(2000 if active else 5000)
 
     def _refresh_app_list(self):
         """Update the app list with currently active audio apps."""
         if self.app_list is None:
             return
-
-        try:
-            from app.utils.audio_session_monitor import get_active_audio_apps
-            apps = get_active_audio_apps()
-        except Exception as e:
-            print(f"[SourceSelector] Error refreshing app list: {e}")
+        if self._com_poller is None:
             return
+
+        apps = self._com_poller.get_snapshot()["audio_apps"]
 
         # Filter out hidden apps
         hidden = []

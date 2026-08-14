@@ -247,7 +247,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.capture_region)
 
         # Audio sources (collapsible). Stretch is toggled dynamically below.
-        self.source_selector = SourceSelector(config=self.config)
+        self.source_selector = SourceSelector(config=self.config, com_poller=self._com_poller)
         left_layout.addWidget(self.source_selector)
 
         # Recordings list wrapped in a CollapsibleSection
