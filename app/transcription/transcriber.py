@@ -18,8 +18,13 @@ def _get_model(model_size, device, compute_type):
     with _MODEL_CACHE_LOCK:
         if key not in _MODEL_CACHE:
             from faster_whisper import WhisperModel
+            # Capped at half the CPU count (min 1) so CTranslate2's internal
+            # thread pool leaves headroom for the real-time audio capture
+            # callback when a transcription runs during a live recording.
+            cpu_threads = max(1, (os.cpu_count() or 4) // 2)
             _MODEL_CACHE[key] = WhisperModel(
                 model_size, device=device, compute_type=compute_type,
+                cpu_threads=cpu_threads,
             )
         return _MODEL_CACHE[key]
 

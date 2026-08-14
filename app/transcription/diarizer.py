@@ -63,8 +63,14 @@ class DiarizationWorker(QThread):
 
             # Pre-load audio via soundfile to avoid torchcodec dependency.
             # pyannote 4.0 accepts {"waveform": tensor, "sample_rate": int}.
+            import os
             import soundfile as sf
             import torch
+
+            # Capped at half the CPU count (min 1) so torch's internal thread
+            # pool leaves headroom for the real-time audio capture callback
+            # when diarization runs during a live recording.
+            torch.set_num_threads(max(1, (os.cpu_count() or 4) // 2))
 
             audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
             if audio_data.ndim == 1:
