@@ -24,11 +24,20 @@ logger = logging.getLogger(__name__)
 class _RecordingRow(QWidget):
     """Row widget for the recordings list.
 
-    Elides its name/date labels to their actually-assigned width on every
-    resize. Without this, an unbounded-length recording name inflates this
-    row's sizeHint, and QListWidget then widens EVERY row (even short-named
-    ones) to match the widest row's sizeHint — triggering a horizontal
-    scrollbar whose viewport edge clips the right-aligned duration/badge.
+    Elides its text labels to their actually-assigned width on every resize.
+    Two things this protects against, both of which previously showed up as
+    truncated text:
+
+    1. An unbounded-length recording name inflates the row's sizeHint, and
+       QListWidget then widens EVERY row to match the widest one — forcing a
+       horizontal scrollbar whose viewport edge clips the row's right side.
+    2. A label sized to its own pixel-exact text width has zero slack, so any
+       font-metric difference between where sizeHint is computed and where the
+       text is actually rendered chops the final glyph ("51s" rendering "51c").
+
+    Elision is the graceful failure mode: when space really is short the text
+    ends in an ellipsis, which reads as intentional, instead of a half-drawn
+    character that reads as a bug.
     """
 
     def __init__(self):
@@ -36,6 +45,7 @@ class _RecordingRow(QWidget):
         self._elidable = []  # list of (label, full_text)
 
     def register_elidable(self, label, full_text):
+        label.setToolTip(full_text)
         self._elidable.append((label, full_text))
         self._reelide(label, full_text)
 
@@ -281,20 +291,18 @@ class RecordingsList(QWidget):
             self.list_widget.setItemWidget(item, row_widget)
 
     def _build_row_widget(self, metadata):
-        """Build a two-line recording row: bold name over muted date, with
-        duration and a transcribed badge right-aligned. Replaces the old
-        single-line "name | date | dur [T]" text, which gave every field
-        (name, date, duration, transcript flag) equal visual weight even
-        though name is what you actually scan a list of recordings for."""
+        """Build a two-line recording row: bold name over a muted
+        "date · duration" line, with a Transcribed pill.
+
+        Everything is left-aligned, and the only field allowed to shrink is
+        the date, which elides. Nothing is right-aligned against the row's
+        edge sized to a pixel-exact text fit — that arrangement is what
+        produced the clipped "51s"/"Transcribed" text this layout replaces.
+        """
         widget = _RecordingRow()
-        outer = QHBoxLayout(widget)
-        # Extra right margin reserves space for the list's vertical
-        # scrollbar — without it, the row widget's size hint is computed
-        # against the full viewport width, and once a scrollbar appears
-        # it eats into that width, clipping the right-aligned duration/
-        # transcribed badge underneath it.
-        outer.setContentsMargins(4, 2, 18, 2)
-        outer.setSpacing(8)
+        outer = QVBoxLayout(widget)
+        outer.setContentsMargins(8, 4, 10, 4)
+        outer.setSpacing(2)
 
         name = metadata.get("name", "")
         started = metadata.get("started_at", "")
@@ -304,53 +312,63 @@ class RecordingsList(QWidget):
         except (ValueError, TypeError):
             date_str = started
 
-        text_col = QVBoxLayout()
-        text_col.setSpacing(1)
-
         # Ignored horizontal policy keeps an unbounded-length name from
         # contributing its full text width to this row's sizeHint — see
         # _RecordingRow's docstring for why that matters.
-        name_label = QLabel(name or date_str)
+        #
+        # Font sizes live in each label's own stylesheet, never in setFont():
+        # the global "QWidget { font-size: 10pt }" rule in style.qss overrides
+        # setFont() once a widget is polished, but a widget's own stylesheet is
+        # more specific and wins. Widths are then left to Qt's own sizeHint,
+        # which measures with the correctly-polished font — hand-measuring with
+        # QFontMetrics here reads the wrong font and produces wrong widths.
+        name_label = QLabel()
         name_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #cdd6f4;")
         name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        text_col.addWidget(name_label)
+        outer.addWidget(name_label)
         widget.register_elidable(name_label, name or date_str)
 
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(6)
+
+        # The date is the only thing here allowed to shrink: it is the
+        # longest field and the least precise, so it absorbs all the elision
+        # pressure and keeps it off the duration and the pill.
         if name:
-            date_label = QLabel(date_str)
+            date_label = QLabel()
             date_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
             date_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            text_col.addWidget(date_label)
+            meta_row.addWidget(date_label, 1)
             widget.register_elidable(date_label, date_str)
+        else:
+            meta_row.addStretch(1)
 
-        outer.addLayout(text_col, 1)
-
-        meta_col = QVBoxLayout()
-        meta_col.setSpacing(1)
-        meta_col.setAlignment(Qt.AlignmentFlag.AlignRight)
-
-        # padding-right pads these labels' own sizeHint, not just their
-        # container's margin — a zero-stretch layout item gets exactly its
-        # sizeHint width, so with no buffer here the text was sized to fit
-        # its own pixel-perfect measurement and clipped the moment actual
-        # rendering (a different font/DPI than sizeHint was computed under)
-        # needed even one pixel more.
+        # Duration is short and bounded ("1h 23m 45s" at worst), so it keeps
+        # its natural width and never elides — it is information the list
+        # exists to show, and it was the field visibly losing its final glyph
+        # ("51s" drawing as "51c") back when it was right-aligned at the edge.
+        # The horizontal padding is the slack: it is baked into this label's
+        # own sizeHint by Qt, using the real polished font, so the box is
+        # always wider than the glyphs regardless of DPI or font substitution.
         dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
-        dur_label.setStyleSheet(
-            "color: #a6adc8; font-size: 10px; padding-right: 4px; "
-            "font-family: Consolas, 'Courier New', monospace;"
-        )
-        dur_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        meta_col.addWidget(dur_label)
+        dur_label.setStyleSheet("color: #a6adc8; font-size: 10px; padding: 0px 4px;")
+        meta_row.addWidget(dur_label, 0)
 
         has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
         if has_transcript:
-            badge = QLabel("● Transcribed")
-            badge.setStyleSheet("color: #a6e3a1; font-size: 9px; padding-right: 4px;")
-            badge.setAlignment(Qt.AlignmentFlag.AlignRight)
-            meta_col.addWidget(badge)
+            # Generous padding gives the pill its shape and its slack at once.
+            # It never shrinks — all shrink pressure lands on the elidable
+            # date label beside it, which is the only Ignored-policy item here.
+            badge = QLabel("Transcribed")
+            badge.setStyleSheet(
+                "color: #a6e3a1; font-size: 9px; font-weight: bold;"
+                "background-color: rgba(166, 227, 161, 0.15);"
+                "border-radius: 7px; padding: 2px 8px;"
+            )
+            meta_row.addWidget(badge, 0)
 
-        outer.addLayout(meta_col)
+        outer.addLayout(meta_row)
         return widget
 
     def _on_item_double_clicked(self, item):
