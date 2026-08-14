@@ -60,14 +60,21 @@ sys.stderr = _StderrToLog(logger)
 warnings.filterwarnings("ignore", module=r"pyannote\.audio\.core\.io")
 warnings.filterwarnings("ignore", message=".*std\\(\\).*degrees of freedom.*")
 
-# Fix DLL search path for PyTorch before QApplication init.
+# Fix DLL search path for PyTorch before QApplication init. Resolved via
+# find_spec rather than a full `import torch` — the DLL path is on disk
+# either way, but executing torch's own __init__ (C extension load, CUDA
+# probe) costs ~4s that's pure dead time here since nothing is on screen
+# yet (this runs before QApplication/the splash screen exist). torch still
+# gets its real, full import later, lazily, the first time it's needed.
 try:
-    import torch as _torch
-    _torch_lib = os.path.join(os.path.dirname(_torch.__file__), "lib")
-    if os.path.isdir(_torch_lib):
-        os.add_dll_directory(_torch_lib)
-    del _torch, _torch_lib
-except ImportError:
+    import importlib.util
+    _torch_spec = importlib.util.find_spec("torch")
+    if _torch_spec and _torch_spec.origin:
+        _torch_lib = os.path.join(os.path.dirname(_torch_spec.origin), "lib")
+        if os.path.isdir(_torch_lib):
+            os.add_dll_directory(_torch_lib)
+    del _torch_spec
+except (ImportError, ValueError):
     pass
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
