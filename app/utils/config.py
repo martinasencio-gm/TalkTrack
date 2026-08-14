@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 
+from app.utils.config_migration import apply_meeting_detection_migration
+
 
 DEFAULT_CONFIG = {
     "audio": {
@@ -59,6 +61,17 @@ DEFAULT_CONFIG = {
         "show_tray_hint": True,
         "start_menu_offer_done": False,
     },
+    "meeting_detection": {
+        "mode": "suggest",          # "off" | "suggest" | "auto"
+        "threshold_seconds": 5,     # sustained activity before acting on a start
+        "detect_end": True,         # suggest stop/pause when the meeting ends
+        "end_grace_seconds": 60,    # absence before a meeting counts as ended
+        "end_action": "stop",       # auto mode only: "stop" | "pause"
+        "use_mic_capture": True,    # strongest signal; opt-out for privacy/perf
+        "use_calendar": True,       # reuses the existing Outlook integration
+        "use_window_title": False,  # brittle across app versions and locales
+        "apps": ["ms-teams", "Teams", "Zoom", "Webex"],
+    },
     "ui": {
         "theme": "dark",
         "speakers_collapsed": False,
@@ -79,6 +92,7 @@ class Config:
 
     def load(self):
         self._data = None
+        saved = None
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, "r") as f:
@@ -87,9 +101,11 @@ class Config:
                     raise ValueError("settings root is not an object")
                 self._data = self._deep_merge(DEFAULT_CONFIG, saved)
             except (json.JSONDecodeError, ValueError, OSError):
+                saved = None
                 self._backup_corrupt_file()
         if self._data is None:
             self._data = copy.deepcopy(DEFAULT_CONFIG)
+        self._data = apply_meeting_detection_migration(saved, self._data)
         try:
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
         except OSError:
