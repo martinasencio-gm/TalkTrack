@@ -44,6 +44,9 @@ from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
+from app.ui.meeting_banner import MeetingBanner
+from app.integrations.meeting_detector import MeetingDetector
+from app.utils import meeting_signals
 from app.ui.calendar_lookup_worker import CalendarLookupWorker
 from app.ui.import_timestamp_dialog import ImportTimestampDialog
 from app.recording.import_session import build_import_metadata, needs_conversion
@@ -70,14 +73,16 @@ class MainWindow(QMainWindow):
         self._gain_save_timer.setSingleShot(True)
         self._gain_save_timer.timeout.connect(self._flush_gain_to_config)
 
-        # Auto-record threshold: require sustained app activity before
-        # actually starting recording, so brief blips (Teams chime, a
-        # single notification sound) don't kick off a session that then
-        # silence-stops. Timer started on apps_became_active, rechecks
-        # state on fire.
-        self._auto_record_timer = QTimer(self)
-        self._auto_record_timer.setSingleShot(True)
-        self._auto_record_timer.timeout.connect(self._on_auto_record_timer_fired)
+        # Meeting detection. The detector holds all the decision logic and the
+        # timing rules; this window only polls the signals and carries out what
+        # it decides. It replaces the old apps_became_active auto-record path,
+        # which triggered on any audio from a selected app.
+        self._meeting_detector = MeetingDetector()
+        self._last_meeting_snapshot = None
+        self._current_calendar_event = None
+        self._meeting_poll_timer = QTimer(self)
+        self._meeting_poll_timer.timeout.connect(self._poll_meeting_signals)
+        self._meeting_poll_timer.start(3000)
 
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1000, 700)
@@ -268,6 +273,12 @@ class MainWindow(QMainWindow):
         self.calendar_banner.dismissed.connect(self._on_calendar_dismissed)
         right_layout.addWidget(self.calendar_banner)
 
+        self.meeting_banner = MeetingBanner()
+        self.meeting_banner.start_accepted.connect(self._on_meeting_start_accepted)
+        self.meeting_banner.start_dismissed.connect(self._on_meeting_start_dismissed)
+        self.meeting_banner.end_chosen.connect(self._on_meeting_end_chosen)
+        right_layout.addWidget(self.meeting_banner)
+
         self.tabs = QTabWidget()
 
         # Transcript tab
@@ -351,7 +362,6 @@ class MainWindow(QMainWindow):
 
         # Auto-stop when call ends / auto-start when call begins
         self.source_selector.apps_went_inactive.connect(self._on_apps_went_inactive)
-        self.source_selector.apps_became_active.connect(self._on_apps_became_active)
         self.recorder.silence_detected.connect(self._on_silence_detected)
         self.recorder.capture_status.connect(self._on_capture_status)
         self.recorder.pid_lost.connect(self._on_pid_lost)
@@ -371,9 +381,6 @@ class MainWindow(QMainWindow):
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
     def _start_recording(self):
-        # Any pending auto-record arm becomes moot once recording starts.
-        if self._auto_record_timer.isActive():
-            self._auto_record_timer.stop()
         self._silent_capture_warned = False
 
         mic = self.source_selector.get_selected_mic()
@@ -570,12 +577,6 @@ class MainWindow(QMainWindow):
 
     def _on_apps_went_inactive(self):
         """Auto-stop recording when all selected apps leave their call."""
-        # Also cancel a pending auto-record arm: activity dropped before
-        # the sustained-activity threshold elapsed.
-        if self._auto_record_timer.isActive():
-            self._auto_record_timer.stop()
-            logger.info("Auto-record cancelled: apps went inactive before threshold")
-            self.status_label.setText("Ready")
         if self.recorder.state in (RecordingState.RECORDING, RecordingState.PAUSED):
             if self.source_selector.is_per_app_mode():
                 logger.warning("Auto-stop: selected apps went inactive (per-app mode)")
@@ -596,48 +597,75 @@ class MainWindow(QMainWindow):
             )
             self.recorder.stop_recording()
 
-    def _on_apps_became_active(self):
-        """Schedule auto-record after a sustained-activity threshold.
+    # --- meeting detection ----------------------------------------------
+    def _meeting_settings(self):
+        return self.config.data.get("meeting_detection", {})
 
-        A bare pycaw active-session edge isn't enough — a Teams message
-        chime flips the edge briefly, then the session clears and the
-        recorder silence-stops. The threshold delays the start and
-        rechecks app activity before firing; short blips miss the cutoff.
-        """
-        if self.recorder.state != RecordingState.IDLE:
+    def _poll_meeting_signals(self):
+        settings = self._meeting_settings()
+        if settings.get("mode", "off") == "off":
             return
-        if not self.config.get("general", "auto_record"):
-            return
-        if not self.source_selector.is_per_app_mode():
-            return
+        snapshot = meeting_signals.probe(
+            settings, calendar_event=self._current_calendar_event)
+        self._last_meeting_snapshot = snapshot
+        decision = self._meeting_detector.update(snapshot, settings)
+        if decision.action != "none":
+            logger.info("Meeting detection decision: %s (%s)",
+                        decision.action, decision.meeting_name)
+            self._handle_meeting_decision(decision, snapshot)
 
-        threshold = max(0, int(self.config.get("general", "auto_record_threshold")))
-        if threshold == 0:
-            self.status_label.setText("Call detected — auto-recording...")
+    def _handle_meeting_decision(self, decision, snapshot):
+        action = decision.action
+        if action == "suggest_start":
+            self.meeting_banner.show_start(
+                decision.meeting_name, self._meeting_elapsed(snapshot))
+            if hasattr(self, "tray") and self.tray.is_supported():
+                self.tray.notify_meeting(
+                    "Meeting detected",
+                    f"{decision.meeting_name or 'A meeting'} is running — "
+                    "open TalkTrack to record it."
+                )
+        elif action == "start":
+            self.status_label.setText("Meeting detected — auto-recording...")
             self._start_recording()
-            return
+        elif action == "suggest_end":
+            self.meeting_banner.show_end(
+                decision.meeting_name, self.recorder.get_elapsed_time())
+            if hasattr(self, "tray") and self.tray.is_supported():
+                self.tray.notify_meeting(
+                    "Meeting ended",
+                    "TalkTrack is still recording — open it to stop or pause."
+                )
+        elif action == "stop":
+            self.status_label.setText("Meeting ended — stopping recording...")
+            self.recorder.stop_recording()
+        elif action == "pause":
+            self.status_label.setText("Meeting ended — recording paused.")
+            self.recorder.pause_recording()
+        elif action == "resume":
+            self.status_label.setText("Meeting resumed — recording.")
+            self.recorder.resume_recording()
 
-        self.status_label.setText(
-            f"Call detected — confirming {threshold}s of sustained activity..."
-        )
-        self._auto_record_timer.start(threshold * 1000)
-        logger.info("Auto-record armed: waiting %ds for sustained activity", threshold)
+    def _meeting_elapsed(self, snapshot):
+        """Seconds since this meeting's signals first appeared."""
+        started = self._meeting_detector.active_since
+        if started is None:
+            return 0
+        return max(0, snapshot["timestamp"] - started)
 
-    def _on_auto_record_timer_fired(self):
-        """Threshold elapsed — start only if apps still active."""
-        if self.recorder.state != RecordingState.IDLE:
-            return
-        if not self.config.get("general", "auto_record"):
-            return
-        if not self.source_selector.is_per_app_mode():
-            return
-        if not self.source_selector.has_active_checked_apps():
-            logger.info("Auto-record cancelled: activity did not persist past threshold")
-            self.status_label.setText("Ready")
-            return
-        logger.info("Auto-record firing after sustained-activity threshold")
-        self.status_label.setText("Call detected — auto-recording...")
+    def _on_meeting_start_accepted(self):
+        self._meeting_detector.accept_start()
         self._start_recording()
+
+    def _on_meeting_start_dismissed(self):
+        self._meeting_detector.dismiss_start()
+
+    def _on_meeting_end_chosen(self, action):
+        self._meeting_detector.choose_end(action)
+        if action == "stop":
+            self.recorder.stop_recording()
+        elif action == "pause":
+            self.recorder.pause_recording()
 
     def _on_recording_discarded(self, duration):
         """Handle recording discarded due to min length."""
@@ -662,6 +690,9 @@ class MainWindow(QMainWindow):
                 self.waveform.start()
             else:
                 self.waveform._paint_timer.start()
+            if self._last_meeting_snapshot and self._meeting_detector.state not in (
+                    "recording", "paused_by_detection"):
+                self._meeting_detector.note_recording_started(self._last_meeting_snapshot)
         elif state == RecordingState.PAUSED:
             self.waveform._paint_timer.stop()
         elif state == RecordingState.IDLE:
@@ -673,6 +704,8 @@ class MainWindow(QMainWindow):
             self.waveform.set_mic_muted(False)
             self._current_capture_failures = {}
             self.source_selector.mark_capture_failures({})
+            self._meeting_detector.note_recording_stopped()
+            self.meeting_banner.hide_and_clear()
 
     def _on_recording_tick(self, seconds):
         if hasattr(self, "tray") and self.tray.is_supported():
@@ -1921,8 +1954,8 @@ class MainWindow(QMainWindow):
         if self._gain_save_timer.isActive():
             self._gain_save_timer.stop()
             self._flush_gain_to_config()
-        if self._auto_record_timer.isActive():
-            self._auto_record_timer.stop()
+        if self._meeting_poll_timer.isActive():
+            self._meeting_poll_timer.stop()
         if hasattr(self, "mic_monitor"):
             self.mic_monitor.stop()
         if hasattr(self, "mic_monitor_2"):

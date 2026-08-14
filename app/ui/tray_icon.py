@@ -143,6 +143,12 @@ class TrayIcon(QObject):
             5000,
         )
 
+    def notify_meeting(self, title, message):
+        """Balloon for meeting start/end suggestions."""
+        self._tray.showMessage(
+            title, message, QSystemTrayIcon.MessageIcon.Information, 8000
+        )
+
     def _on_activated(self, reason):
         if reason in (
             QSystemTrayIcon.ActivationReason.Trigger,
