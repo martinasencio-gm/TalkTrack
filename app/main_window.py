@@ -392,6 +392,8 @@ class MainWindow(QMainWindow):
         self.recordings_list.recording_deleted.connect(self._on_recording_deleted)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
         self.recordings_list.import_requested.connect(self._on_import_requested)
+        self.recordings_list.transcribe_selected_requested.connect(self._on_transcribe_selected)
+        self.recordings_list.export_selected_requested.connect(self._on_export_selected)
 
         # Mic device change: restart monitor on new device if it's running
         self.source_selector.mic_changed.connect(self._on_mic_device_changed)
@@ -959,6 +961,23 @@ class MainWindow(QMainWindow):
             or (self._diarization_worker is not None and self._diarization_worker.isRunning())
             or (self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning())
         )
+
+    def _on_transcribe_selected(self, recordings):
+        queued = 0
+        for metadata in recordings:
+            audio_files = metadata.get("audio_files", {})
+            audio_path = (audio_files.get("combined") or audio_files.get("system")
+                          or audio_files.get("mic"))
+            if audio_path:
+                self._start_transcription(audio_path, session=metadata)
+                queued += 1
+        if queued:
+            self.status_label.setText(f"Queued {queued} recording(s) for transcription.")
+
+    def _on_export_selected(self, recordings):
+        for metadata in recordings:
+            self._export_transcript(metadata)
+        self.status_label.setText(f"Exported {len(recordings)} transcript(s).")
 
     def _start_transcription(self, audio_path, session=None):
         if self._closing:
