@@ -10,6 +10,9 @@ Detect that a meeting is underway in Teams, Zoom or another conferencing app and
 suggest starting a recording, instead of requiring the user to have pre-configured
 per-app capture and pre-ticked the right app.
 
+Symmetrically, detect when that meeting **ends** and suggest stopping or pausing,
+instead of inferring the end from audio silence alone.
+
 ## Background: what already exists
 
 TalkTrack already auto-records, in `main_window.py:599` (`_on_apps_became_active`):
@@ -23,6 +26,22 @@ It already solves one hard sub-problem worth preserving: a bare pycaw active-ses
 edge is not enough, because a Teams message chime flips the edge briefly. The existing
 `auto_record_threshold` delays the start and re-checks activity before firing, so short
 blips miss the cutoff.
+
+**Stopping already exists too**, and has the mirror-image problem. `silence_auto_stop`
+defaults to **on** with `silence_duration: 120`, and `audio_capture.py:681`
+(`_check_silence`) stops the recording after sustained RMS silence. It is mic-aware —
+it will not fire while the user is talking — and it latches so it fires only once.
+
+But silence is a weak proxy for "the meeting is over", and it fails in both directions:
+
+- **False stop:** two minutes of quiet mid-meeting — a silent screen-share, someone
+  reading a document, the user muted and listening — looks identical to an ended call.
+- **Missed stop:** a call that ends while hold music, a departure chime or a lingering
+  browser tab keeps playing audio never goes silent, so nothing fires.
+
+The meeting-app signals this design already collects answer the question directly:
+a conferencing app **releases the microphone** when the user leaves a call. That is
+close to definitive, and it arrives immediately rather than after a 120-second wait.
 
 Other reusable pieces:
 
@@ -57,6 +76,62 @@ confirm, never trigger, and ships disabled by default.
 
 Any single signal failing degrades detection gracefully rather than breaking it.
 
+## End-detection rule
+
+The end is the disappearance of the same signals, held for `end_grace_seconds`
+(default 60, the same constant that defines session identity — a meeting ending and a
+session ending are the same event, so they must not be able to disagree).
+
+- **Necessary:** the app that triggered the session no longer holds an active audio
+  session, and — when `use_mic_capture` is on — no longer holds the microphone.
+- **Grace:** the signals must stay absent for the full window. A network blip, a
+  device switch or a rejoin inside the window is not an ending.
+- **Corroboration:** a calendar event whose end time has passed raises confidence and
+  lets the prompt say *"Sprint Planning ended"* rather than *"the call seems to have
+  ended"*.
+
+Mic release is the strongest indicator and usually arrives within a second or two of
+leaving a call, which is why end detection is worth having even though
+`silence_auto_stop` already exists: it is both more accurate and roughly two minutes
+faster.
+
+### Stop or pause
+
+The suggestion offers both, because the right answer depends on something TalkTrack
+cannot know — whether the user is done or between calls:
+
+- **Stop & save** — finalizes the recording and runs the normal post-recording flow.
+- **Pause** — keeps the session open and recoverable. The safe choice when the signal
+  might be wrong, since a wrong pause costs a few seconds of silence while a wrong stop
+  costs the rest of the meeting.
+- **Keep recording** — dismisses end detection for this session, so it will not ask
+  again for the same meeting.
+
+In `auto` mode there is no prompt, and `end_action` decides: `"stop"` (default,
+matching today's `silence_auto_stop` behavior) or `"pause"`.
+
+### Resuming
+
+If a session was paused by end detection and the trigger signals return, the meeting
+was not over — a dropped call, a rejoin, or a second call in the same block. In
+`suggest` mode the banner offers **Resume**; in `auto` mode it resumes automatically.
+This is what makes pause genuinely safe rather than merely deferred: the recovery path
+is automatic, so a false positive costs nothing but a gap.
+
+### Guard: only end what we started watching
+
+End detection fires only when a meeting session was active during the recording. A
+user recording something unrelated must never be told to stop because an unrelated
+Teams call happened to end in the background.
+
+### Relationship to `silence_auto_stop`
+
+`silence_auto_stop` is **kept, unchanged, as the backstop**. Meeting-end detection is
+fast and consent-based but can be ignored or missed; silence auto-stop is the safety
+net that prevents an unattended recording from filling the disk after the user has
+walked away. The two answer different questions — "did the meeting end?" versus "has
+anything happened for two minutes?" — and the slow one remains the fallback.
+
 ## Components
 
 Four units with clear boundaries. The decision logic is deliberately isolated from
@@ -66,7 +141,7 @@ both Qt and Windows so it can be tested as pure functions.
 |---|---|---|
 | `app/utils/meeting_signals.py` | Probe raw signals: meeting apps with audio, mic-capture holders, matching window titles. Reports facts, makes no decisions. | pycaw, psutil |
 | `app/integrations/meeting_detector.py` | Pure state machine. Given a signal snapshot, config and an injected clock, decide what should happen. No Qt, no Windows, no I/O. | — |
-| `app/ui/meeting_banner.py` | In-app banner: meeting name, elapsed time, Record / Not now. Mirrors `calendar_banner.py`. | Qt |
+| `app/ui/meeting_banner.py` | In-app banner for both prompts: start (Record / Not now) and end (Stop & save / Pause / Keep recording). Mirrors `calendar_banner.py`. | Qt |
 | `MainWindow` wiring | Poll signals, feed the detector, route its decisions to tray and banner. | all above |
 
 ### Signal snapshot
@@ -87,16 +162,32 @@ detector testable without Windows:
 ## State machine
 
 ```
-IDLE       --meeting-app audio starts-->            CANDIDATE
-CANDIDATE  --sustained N s AND >=1 confirming-->    SUGGESTED
-CANDIDATE  --signals stop before N s-->             IDLE        (chime filtered)
-SUGGESTED  --user accepts-->                        RECORDING
-SUGGESTED  --user dismisses-->                      DISMISSED   (silent this session)
-any        --signals absent for M s-->              IDLE        (session ends)
+IDLE        --meeting-app audio starts-->           CANDIDATE
+CANDIDATE   --sustained N s AND >=1 confirming-->   SUGGESTED
+CANDIDATE   --signals stop before N s-->            IDLE        (chime filtered)
+SUGGESTED   --user accepts-->                       RECORDING
+SUGGESTED   --user dismisses-->                     DISMISSED   (silent this session)
+
+RECORDING   --signals absent for M s-->             ENDING      (suggest stop/pause)
+ENDING      --signals return within M s-->          RECORDING   (blip, not an ending)
+ENDING      --user stops-->                         IDLE
+ENDING      --user pauses-->                        PAUSED_BY_DETECTION
+ENDING      --user keeps recording-->               RECORDING   (end silent this session)
+
+PAUSED_BY_DETECTION --signals return-->             RECORDING   (resume)
+PAUSED_BY_DETECTION --user stops-->                 IDLE
+
+DISMISSED   --signals absent for M s-->             IDLE        (session ends)
 ```
 
+`N` is `threshold_seconds`, `M` is `end_grace_seconds`. Start and end are deliberately
+governed by two different constants: confirming a start should be quick (a few
+seconds) while confirming an end should be patient (a minute), because the costs are
+asymmetric — a premature suggestion is a minor annoyance, a premature stop loses
+audio.
+
 A **session** is a continuous run of activity from one app. It ends only after signals
-stay absent for `session_end_seconds` (default 60). This matters: without it a brief
+stay absent for `end_grace_seconds` (default 60). This matters: without it a brief
 audio dropout would split one meeting into two sessions and re-prompt mid-call.
 
 Dismissal is keyed to the session, so "Not now" means no for this meeting while
@@ -113,8 +204,10 @@ section:
 ```python
 "meeting_detection": {
     "mode": "suggest",          # "off" | "suggest" | "auto"
-    "threshold_seconds": 5,     # sustained activity before acting
-    "session_end_seconds": 60,  # absence before a session is considered over
+    "threshold_seconds": 5,     # sustained activity before acting on a start
+    "detect_end": True,         # suggest stop/pause when the meeting ends
+    "end_grace_seconds": 60,    # absence before a meeting counts as ended
+    "end_action": "stop",       # auto mode only: "stop" | "pause"
     "use_mic_capture": True,    # strongest signal; opt-out for privacy/perf
     "use_calendar": True,       # reuses the existing Outlook integration
     "use_window_title": False,  # brittle across versions/locales
@@ -161,6 +254,12 @@ Accepting tags the recording with that calendar event immediately, reusing the
 existing calendar plumbing. Without a calendar match it falls back to the app name:
 "A Microsoft Teams call started 2 minutes ago."
 
+The end prompt is the mirror, and states the recording length so the choice is
+informed:
+
+> **Sprint Planning** ended — stop recording? (24 minutes captured)
+> `[Stop & save]  [Pause]  [Keep recording]`
+
 ## Missed audio
 
 Detection needs `threshold_seconds` to confirm, and the user needs time to react, so
@@ -199,10 +298,27 @@ functions with no sleeping:
 - sustained activity with no confirming signal never reaches SUGGESTED
 - mic capture alone reaches SUGGESTED
 - a dismissed session does not re-prompt while it remains active
-- an audio dropout shorter than `session_end_seconds` does not split a session
+- an audio dropout shorter than `end_grace_seconds` does not split a session
 - a dropout longer than it ends the session and clears the dismissal
 - Spotify or Discord activity never triggers, even while a real meeting app is idle
 - `mode: "off"` produces no decisions at all
+
+End detection:
+
+- signals disappearing for less than `end_grace_seconds` never reaches ENDING
+- signals returning during ENDING goes back to RECORDING without prompting
+- mic release with the audio session still active still counts as an ending when
+  `use_mic_capture` is on, and does not when it is off
+- "Keep recording" suppresses further end prompts for that session only
+- a session paused by detection resumes when trigger signals return
+- end detection does not fire for a recording that began with no meeting session
+  active (the unrelated-recording guard)
+- `detect_end: False` produces no end decisions while start detection still works
+- in `auto` mode, `end_action` of `"stop"` and `"pause"` each produce the right
+  decision and neither prompts
+
+Config:
+
 - config migration: legacy `auto_record` true/false map to the right modes, and an
   existing config with `auto_record: false` ends up at `"off"` rather than inheriting
   the new `"suggest"` default
@@ -223,3 +339,11 @@ a smoke test plus pure-helper unit tests for its text formatting.
   second timer.
 - **`mode: "suggest"` as the new-user default** is a behavior change for fresh
   installs only; existing users keep their current setting through migration.
+- **End detection depends most on the least-proven signal.** Mic release is what makes
+  it accurate and fast; without `use_mic_capture` it degrades to audio-session absence,
+  which a lingering browser tab or hold music can mask. If the mic-capture spike fails,
+  end detection is materially weaker than start detection, and `silence_auto_stop`
+  remains the real backstop. This is an argument for running the spike first.
+- **A wrong stop is the most expensive failure in the whole design** — it loses
+  meeting audio irrecoverably. This is why the end path is patient (60s vs 5s), why
+  `suggest` mode asks rather than acts, and why Pause exists with an automatic resume.
