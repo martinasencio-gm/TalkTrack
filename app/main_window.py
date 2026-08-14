@@ -904,6 +904,7 @@ class MainWindow(QMainWindow):
         )
         self._transcription_worker.session = session
         self._transcription_worker.progress.connect(self._on_transcription_progress)
+        self._transcription_worker.progress_percent.connect(self.transcript_viewer.set_progress_percent)
         self._transcription_worker.finished.connect(self._on_transcription_finished)
         self._transcription_worker.error.connect(self._on_transcription_error)
         self._transcription_worker.cancelled.connect(self._on_transcription_cancelled)
@@ -1192,6 +1193,8 @@ class MainWindow(QMainWindow):
                 self._current_session,
                 speaker_count=self.transcript_viewer.get_speaker_count(),
                 calendar_event=calendar_event,
+                model_size=result.model_size,
+                transcribe_seconds=result.transcribe_seconds,
             )
 
         # Save transcript
@@ -1277,6 +1280,8 @@ class MainWindow(QMainWindow):
 
         # Load existing transcript if available
         transcript_path = Path(metadata["directory"]) / "transcript.json"
+        loaded_model_size = ""
+        loaded_transcribe_seconds = 0.0
         if transcript_path.exists():
             try:
                 with open(transcript_path, "r", encoding="utf-8") as f:
@@ -1286,11 +1291,15 @@ class MainWindow(QMainWindow):
                     segments=[TranscriptSegment.from_dict(s) for s in data["segments"]],
                     language=data.get("language", ""),
                     duration=data.get("duration", 0),
+                    model_size=data.get("model_size", ""),
+                    transcribe_seconds=data.get("transcribe_seconds", 0.0),
                 )
                 self.transcript_viewer.display_transcript(
                     result, speaker_names=speaker_names, attendees=calendar_attendees
                 )
                 self._transcript = result
+                loaded_model_size = result.model_size
+                loaded_transcribe_seconds = result.transcribe_seconds
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
 
@@ -1299,6 +1308,8 @@ class MainWindow(QMainWindow):
             metadata,
             speaker_count=self.transcript_viewer.get_speaker_count(),
             calendar_event=calendar_event,
+            model_size=loaded_model_size,
+            transcribe_seconds=loaded_transcribe_seconds,
         )
 
         # Persist any edits to the previously loaded recording's notes

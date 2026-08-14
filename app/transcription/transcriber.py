@@ -1,6 +1,7 @@
 import math
 import os
 import threading
+import time
 from pathlib import Path
 from dataclasses import dataclass, field, fields
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
@@ -56,6 +57,8 @@ class TranscriptResult:
     segments: list = field(default_factory=list)
     language: str = ""
     duration: float = 0.0
+    model_size: str = ""
+    transcribe_seconds: float = 0.0
 
     def _display_speaker(self, seg, speaker_names=None):
         """Return the display name for a segment's speaker."""
@@ -100,6 +103,8 @@ class TranscriptResult:
             "segments": segments,
             "language": self.language,
             "duration": self.duration,
+            "model_size": self.model_size,
+            "transcribe_seconds": self.transcribe_seconds,
         }
 
     def to_text(self, speaker_names=None):
@@ -161,6 +166,7 @@ class TranscriptionWorker(QThread):
     """Runs transcription in a background thread."""
 
     progress = pyqtSignal(str)
+    progress_percent = pyqtSignal(int)
     finished = pyqtSignal(TranscriptResult)
     error = pyqtSignal(str)
 
@@ -179,6 +185,7 @@ class TranscriptionWorker(QThread):
         self._cancel_requested = True
 
     def run(self):
+        start_time = time.monotonic()
         try:
             self.progress.emit("Loading transcription model...")
 
@@ -228,8 +235,15 @@ class TranscriptionWorker(QThread):
                 )
                 result.segments.append(ts)
                 self.progress.emit(f"Transcribed: {_format_time(segment.end)}")
+                if info.duration:
+                    pct = int(min(100, (segment.end / info.duration) * 100))
+                    self.progress_percent.emit(pct)
+
+            result.model_size = self.model_size
+            result.transcribe_seconds = time.monotonic() - start_time
 
             self.progress.emit("Transcription complete.")
+            self.progress_percent.emit(100)
             self.finished.emit(result)
 
         except ImportError:

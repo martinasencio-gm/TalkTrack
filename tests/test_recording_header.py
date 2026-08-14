@@ -48,6 +48,24 @@ class TestRecordingHeaderHelpers(unittest.TestCase):
         event = {"subject": "Focus Block", "attendees": []}
         self.assertEqual(_format_calendar_line(event), "\U0001F4C5 Focus Block")
 
+    def test_format_transcribe_line_with_model(self):
+        from app.ui.recording_header import _format_transcribe_line
+        self.assertEqual(
+            _format_transcribe_line("small", 72.0),
+            "Transcribed in 1m 12s using small model",
+        )
+
+    def test_format_transcribe_line_no_model(self):
+        from app.ui.recording_header import _format_transcribe_line
+        self.assertEqual(
+            _format_transcribe_line("", 5.0),
+            "Transcribed in 5s",
+        )
+
+    def test_format_transcribe_line_no_time_yet(self):
+        from app.ui.recording_header import _format_transcribe_line
+        self.assertEqual(_format_transcribe_line("small", 0.0), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,47 @@ class TestRunSegmentMapping(unittest.TestCase):
         kwargs = model.transcribe.call_args.kwargs
         self.assertNotIn("word_timestamps", kwargs)
 
+    def test_result_records_model_size_used(self):
+        results, _ = self._run_worker([])
+        self.assertEqual(results[0].model_size, "base")
+
+    def test_progress_percent_emitted_relative_to_duration(self):
+        fw = _FwMocks(
+            segments=[
+                MagicMock(start=0.0, end=5.0, text="a", avg_logprob=-0.1),
+                MagicMock(start=5.0, end=10.0, text="b", avg_logprob=-0.1),
+            ],
+            duration=10.0,
+        )
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            worker = tr.TranscriptionWorker("a.wav", model_size="base", device="cpu")
+            percents = []
+            worker.progress_percent.connect(percents.append)
+            worker.run()
+        # Per-segment percents, plus a guaranteed final 100% so the bar
+        # always visually completes even if trailing silence trimmed by
+        # VAD means the last segment.end never quite reaches info.duration.
+        self.assertEqual(percents, [50, 100, 100])
+
+
+class TestTranscriptionTiming(unittest.TestCase):
+    """Wall-clock time taken is recorded on the result for display/persistence."""
+
+    def test_transcribe_seconds_recorded_on_result(self):
+        fw = _FwMocks(segments=[])
+        clock = iter([100.0, 107.5])
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}), \
+             patch("app.transcription.transcriber.time.monotonic", side_effect=lambda: next(clock)):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            worker = tr.TranscriptionWorker("a.wav", model_size="small", device="cpu")
+            results = []
+            worker.finished.connect(results.append)
+            worker.run()
+        self.assertEqual(results[0].transcribe_seconds, 7.5)
+
 
 class TestTranscriptSegment(unittest.TestCase):
 
@@ -125,6 +166,14 @@ class TestTranscriptResultExports(unittest.TestCase):
         text = result.to_text()
         self.assertIn("[SPEAKER_00]", text)
         self.assertIn("[SPEAKER_01]", text)
+
+    def test_to_dict_includes_model_size_and_transcribe_seconds(self):
+        result = self._make_result()
+        result.model_size = "small"
+        result.transcribe_seconds = 12.5
+        d = result.to_dict()
+        self.assertEqual(d["model_size"], "small")
+        self.assertEqual(d["transcribe_seconds"], 12.5)
 
     def test_to_text_with_speaker_names(self):
         result = self._make_result()

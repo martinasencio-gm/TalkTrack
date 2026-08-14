@@ -1,4 +1,5 @@
 """Transcript viewer with interactive segment editing, playback, and speaker naming."""
+import time
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -6,7 +7,7 @@ from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QFileDialog, QScrollArea, QCheckBox,
     QApplication, QToolTip,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QShortcut, QKeySequence
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
@@ -55,6 +56,11 @@ class TranscriptViewer(QWidget):
         self._continuous_play = False
         self._user_scrolled = False  # True when user manually scrolled during playback
         self._programmatic_scroll = False  # guard to ignore our own scrolls
+        self._progress_message = ""
+        self._progress_start_time = None
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._tick_elapsed)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -214,15 +220,44 @@ class TranscriptViewer(QWidget):
             self.transcribe_requested.emit(self._audio_path)
 
     def show_progress(self, message):
+        self._progress_message = message
+        # Reset to indeterminate for this update; set_progress_percent (fed
+        # by TranscriptionWorker.progress_percent, emitted right after this
+        # same text update) flips it back to determinate for stages where
+        # we actually know how far through the audio we are. Stages with no
+        # percent data (model loading, diarization) just stay indeterminate.
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self.cancel_btn.show()
-        self.status_label.setText(message)
+        if self._progress_start_time is None:
+            self._progress_start_time = time.monotonic()
+            self._elapsed_timer.start()
+        self._update_status_label()
         self.status_label.show()
+
+    def set_progress_percent(self, percent):
+        """Switch the progress bar to determinate mode at the given percent."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(percent)
+
+    def _tick_elapsed(self):
+        self._update_status_label()
+
+    def _update_status_label(self):
+        if self._progress_start_time is not None:
+            elapsed = int(time.monotonic() - self._progress_start_time)
+            m, s = divmod(elapsed, 60)
+            self.status_label.setText(f"{self._progress_message}  ({m:02d}:{s:02d} elapsed)")
+        else:
+            self.status_label.setText(self._progress_message)
 
     def hide_progress(self):
         self.progress_bar.hide()
         self.cancel_btn.hide()
         self.status_label.hide()
+        self._elapsed_timer.stop()
+        self._progress_start_time = None
+        self.progress_bar.setRange(0, 0)
 
     def _on_cancel_clicked(self):
         self.cancel_requested.emit()

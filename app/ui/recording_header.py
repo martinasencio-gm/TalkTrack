@@ -29,6 +29,16 @@ def _format_duration(seconds):
     return f"{s}s"
 
 
+def _format_transcribe_line(model_size, transcribe_seconds):
+    """Format the 'transcribed in Xs using Y model' line, if timing is known."""
+    if not transcribe_seconds:
+        return ""
+    time_str = _format_duration(transcribe_seconds)
+    if model_size:
+        return f"Transcribed in {time_str} using {model_size} model"
+    return f"Transcribed in {time_str}"
+
+
 def _format_calendar_line(calendar_event):
     """Format a calendar_event.json dict as a display line."""
     subject = calendar_event.get("subject", "")
@@ -104,7 +114,8 @@ class RecordingHeader(QWidget):
         calendar_row.addStretch()
         layout.addLayout(calendar_row)
 
-    def set_recording(self, metadata, speaker_count=0, calendar_event=None):
+    def set_recording(self, metadata, speaker_count=0, calendar_event=None,
+                       model_size="", transcribe_seconds=0.0):
         """Display info for the given recording metadata."""
         self._metadata = metadata
         if metadata is None:
@@ -133,6 +144,10 @@ class RecordingHeader(QWidget):
 
         if speaker_count > 0:
             parts.append(f"{speaker_count} speaker{'s' if speaker_count != 1 else ''}")
+
+        transcribe_line = _format_transcribe_line(model_size, transcribe_seconds)
+        if transcribe_line:
+            parts.append(transcribe_line)
 
         self.info_label.setText("  |  ".join(parts))
 
