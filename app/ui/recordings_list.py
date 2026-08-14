@@ -11,14 +11,43 @@ import shutil
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QMenu, QMessageBox, QFileDialog
+    QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QFontMetrics
 
 from app.ui.search_bar import SearchBar
 
 logger = logging.getLogger(__name__)
+
+
+class _RecordingRow(QWidget):
+    """Row widget for the recordings list.
+
+    Elides its name/date labels to their actually-assigned width on every
+    resize. Without this, an unbounded-length recording name inflates this
+    row's sizeHint, and QListWidget then widens EVERY row (even short-named
+    ones) to match the widest row's sizeHint — triggering a horizontal
+    scrollbar whose viewport edge clips the right-aligned duration/badge.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._elidable = []  # list of (label, full_text)
+
+    def register_elidable(self, label, full_text):
+        self._elidable.append((label, full_text))
+        self._reelide(label, full_text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        for label, full_text in self._elidable:
+            self._reelide(label, full_text)
+
+    @staticmethod
+    def _reelide(label, full_text):
+        metrics = QFontMetrics(label.font())
+        label.setText(metrics.elidedText(full_text, Qt.TextElideMode.ElideRight, label.width()))
 
 
 class _SearchWorker(QThread):
@@ -213,6 +242,7 @@ class RecordingsList(QWidget):
         self.list_widget = QListWidget()
         self.list_widget.setMinimumHeight(100)
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -256,7 +286,7 @@ class RecordingsList(QWidget):
         single-line "name | date | dur [T]" text, which gave every field
         (name, date, duration, transcript flag) equal visual weight even
         though name is what you actually scan a list of recordings for."""
-        widget = QWidget()
+        widget = _RecordingRow()
         outer = QHBoxLayout(widget)
         # Extra right margin reserves space for the list's vertical
         # scrollbar — without it, the row widget's size hint is computed
@@ -277,14 +307,21 @@ class RecordingsList(QWidget):
         text_col = QVBoxLayout()
         text_col.setSpacing(1)
 
+        # Ignored horizontal policy keeps an unbounded-length name from
+        # contributing its full text width to this row's sizeHint — see
+        # _RecordingRow's docstring for why that matters.
         name_label = QLabel(name or date_str)
         name_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #cdd6f4;")
+        name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         text_col.addWidget(name_label)
+        widget.register_elidable(name_label, name or date_str)
 
         if name:
             date_label = QLabel(date_str)
             date_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+            date_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             text_col.addWidget(date_label)
+            widget.register_elidable(date_label, date_str)
 
         outer.addLayout(text_col, 1)
 
