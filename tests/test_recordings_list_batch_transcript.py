@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
@@ -111,6 +112,81 @@ class TestRecordingsListBatchTranscript(unittest.TestCase):
         widget = RecordingsList(self.recordings_dir)
         items = self._select_all(widget)
         self.assertEqual(widget._selected_transcribed(items), [])
+
+    def _open_context_menu(self, widget):
+        """Select all items, trigger the real context menu handler with QMenu.exec
+        patched out, and return the captured menu instance."""
+        widget.list_widget.selectAll()
+        first_item = widget.list_widget.item(0)
+        position = widget.list_widget.visualItemRect(first_item).center()
+
+        captured = {}
+
+        def _fake_exec(self, *args, **kwargs):
+            captured["menu"] = self
+            return None
+
+        with patch("PyQt6.QtWidgets.QMenu.exec", _fake_exec):
+            widget._show_context_menu(position)
+
+        return captured["menu"]
+
+    @staticmethod
+    def _action_by_text_prefix(menu, prefix):
+        for action in menu.actions():
+            if action.text().startswith(prefix):
+                return action
+        return None
+
+    def test_context_menu_mixed_selection_enables_both_batch_actions(self):
+        self._make_recording("rec_a", transcribed=False)
+        self._make_recording("rec_b", transcribed=True)
+        widget = RecordingsList(self.recordings_dir)
+
+        menu = self._open_context_menu(widget)
+
+        transcribe_action = self._action_by_text_prefix(menu, "Transcribe")
+        export_action = self._action_by_text_prefix(menu, "Export")
+
+        self.assertIsNotNone(transcribe_action)
+        self.assertIsNotNone(export_action)
+        self.assertEqual(transcribe_action.text(), "Transcribe 1 Recordings")
+        self.assertEqual(export_action.text(), "Export 1 Transcripts")
+        self.assertTrue(transcribe_action.isEnabled())
+        self.assertTrue(export_action.isEnabled())
+
+        transcribe_seen = []
+        export_seen = []
+        widget.transcribe_selected_requested.connect(transcribe_seen.append)
+        widget.export_selected_requested.connect(export_seen.append)
+
+        transcribe_action.trigger()
+        export_action.trigger()
+
+        self.assertEqual(len(transcribe_seen), 1)
+        self.assertEqual(len(transcribe_seen[0]), 1)
+        self.assertEqual(Path(transcribe_seen[0][0]["directory"]).name, "rec_a")
+
+        self.assertEqual(len(export_seen), 1)
+        self.assertEqual(len(export_seen[0]), 1)
+        self.assertEqual(Path(export_seen[0][0]["directory"]).name, "rec_b")
+
+    def test_context_menu_all_transcribed_disables_transcribe_action(self):
+        self._make_recording("rec_a", transcribed=True)
+        self._make_recording("rec_b", transcribed=True)
+        widget = RecordingsList(self.recordings_dir)
+
+        menu = self._open_context_menu(widget)
+
+        transcribe_action = self._action_by_text_prefix(menu, "Transcribe")
+        export_action = self._action_by_text_prefix(menu, "Export")
+
+        self.assertIsNotNone(transcribe_action)
+        self.assertIsNotNone(export_action)
+        self.assertEqual(transcribe_action.text(), "Transcribe 0 Recordings")
+        self.assertFalse(transcribe_action.isEnabled())
+        self.assertEqual(export_action.text(), "Export 2 Transcripts")
+        self.assertTrue(export_action.isEnabled())
 
 
 if __name__ == "__main__":

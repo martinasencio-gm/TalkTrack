@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -968,7 +969,7 @@ class MainWindow(QMainWindow):
             audio_files = metadata.get("audio_files", {})
             audio_path = (audio_files.get("combined") or audio_files.get("system")
                           or audio_files.get("mic"))
-            if audio_path:
+            if audio_path and os.path.exists(audio_path):
                 self._start_transcription(audio_path, session=metadata)
                 queued += 1
         if queued:

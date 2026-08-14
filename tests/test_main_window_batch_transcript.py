@@ -44,7 +44,8 @@ class TestMainWindowBatchTranscript(unittest.TestCase):
             {"directory": "/r1", "audio_files": {"combined": "/r1/combined_audio.wav"}},
             {"directory": "/r2", "audio_files": {"mic": "/r2/mic_audio.wav"}},
         ]
-        with patch.object(window, "_start_transcription") as mock_start:
+        with patch.object(window, "_start_transcription") as mock_start, \
+             patch("app.main_window.os.path.exists", return_value=True):
             window._on_transcribe_selected(recordings)
         self.assertEqual(mock_start.call_count, 2)
         mock_start.assert_any_call("/r1/combined_audio.wav", session=recordings[0])
@@ -53,7 +54,8 @@ class TestMainWindowBatchTranscript(unittest.TestCase):
     def test_on_transcribe_selected_skips_recordings_with_no_audio_files(self):
         window = self._make_window()
         recordings = [{"directory": "/r1", "audio_files": {}}]
-        with patch.object(window, "_start_transcription") as mock_start:
+        with patch.object(window, "_start_transcription") as mock_start, \
+             patch("app.main_window.os.path.exists", return_value=True):
             window._on_transcribe_selected(recordings)
         mock_start.assert_not_called()
 
@@ -67,7 +69,23 @@ class TestMainWindowBatchTranscript(unittest.TestCase):
                 "combined": "/r1/combined_audio.wav",
             },
         }]
-        with patch.object(window, "_start_transcription") as mock_start:
+        with patch.object(window, "_start_transcription") as mock_start, \
+             patch("app.main_window.os.path.exists", return_value=True):
+            window._on_transcribe_selected(recordings)
+        mock_start.assert_called_once_with("/r1/combined_audio.wav", session=recordings[0])
+
+    def test_on_transcribe_selected_skips_recordings_whose_audio_path_does_not_exist(self):
+        window = self._make_window()
+        recordings = [
+            {"directory": "/r1", "audio_files": {"combined": "/r1/combined_audio.wav"}},
+            {"directory": "/r2", "audio_files": {"combined": "/r2/combined_audio.wav"}},
+        ]
+
+        def _exists(path):
+            return path == "/r1/combined_audio.wav"
+
+        with patch.object(window, "_start_transcription") as mock_start, \
+             patch("app.main_window.os.path.exists", side_effect=_exists):
             window._on_transcribe_selected(recordings)
         mock_start.assert_called_once_with("/r1/combined_audio.wav", session=recordings[0])
 
