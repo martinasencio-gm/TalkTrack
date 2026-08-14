@@ -75,6 +75,7 @@ DEFAULT_CONFIG = {
     "ui": {
         "theme": "dark",
         "speakers_collapsed": False,
+        "right_panel_collapsed": False,
     },
     "calendar": {
         "enabled": False,
