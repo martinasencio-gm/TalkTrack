@@ -177,14 +177,19 @@ class TranscriptViewer(QWidget):
 
         layout.addWidget(self.scroll_area, 1)
 
-        # Bottom row: play all + export buttons
+        # Bottom row: play all + export buttons. Widgets are explicitly
+        # vertically centered \u2014 QCheckBox's natural height (~18px indicator)
+        # is much shorter than a padded QPushButton's (~38px from the
+        # global stylesheet), and without an explicit alignment flag the
+        # two don't reliably line up on the same visual center.
         export_row = QHBoxLayout()
+        row_align = Qt.AlignmentFlag.AlignVCenter
 
         self.play_all_btn = QPushButton("\u25b6 Play All")
         self.play_all_btn.setEnabled(False)
         self.play_all_btn.setFixedWidth(90)
         self.play_all_btn.clicked.connect(self._on_play_all_clicked)
-        export_row.addWidget(self.play_all_btn)
+        export_row.addWidget(self.play_all_btn, 0, row_align)
 
         self.continue_from_cb = QCheckBox("Continue playing")
         self.continue_from_cb.setChecked(True)
@@ -194,7 +199,7 @@ class TranscriptViewer(QWidget):
         )
         self.continue_from_cb.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self.continue_from_cb.toggled.connect(self._on_continue_toggled)
-        export_row.addWidget(self.continue_from_cb)
+        export_row.addWidget(self.continue_from_cb, 0, row_align)
 
         export_row.addStretch()
 
@@ -205,17 +210,17 @@ class TranscriptViewer(QWidget):
             "(speakers + text, no timestamps)."
         )
         self.copy_all_btn.clicked.connect(self._on_copy_all_clicked)
-        export_row.addWidget(self.copy_all_btn)
+        export_row.addWidget(self.copy_all_btn, 0, row_align)
 
         self.export_txt_btn = QPushButton("Export TXT")
         self.export_txt_btn.setEnabled(False)
         self.export_txt_btn.clicked.connect(lambda: self._export("txt"))
-        export_row.addWidget(self.export_txt_btn)
+        export_row.addWidget(self.export_txt_btn, 0, row_align)
 
         self.export_srt_btn = QPushButton("Export SRT")
         self.export_srt_btn.setEnabled(False)
         self.export_srt_btn.clicked.connect(lambda: self._export("srt"))
-        export_row.addWidget(self.export_srt_btn)
+        export_row.addWidget(self.export_srt_btn, 0, row_align)
 
         layout.addLayout(export_row)
 
