@@ -254,7 +254,8 @@ TalkTrack/
 - Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
-- General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
+- General settings: min_recording_length, silence_auto_stop, silence_duration
+- Meeting detection settings (`meeting_detection`): mode ("off"/"suggest"/"auto"), threshold_seconds, detect_end, end_grace_seconds, end_action ("stop"/"pause"), use_mic_capture, use_calendar, use_window_title, apps. Replaces the old `general.auto_record` flag, which `app/utils/config_migration.py` migrates into `mode` ("auto" or "off") on first load after upgrade — `silence_auto_stop` is unaffected and still applies as an independent backstop.
 - Output settings: `output.directory` (recordings output folder), `transcripts.directory` (Markdown export folder, default sibling `transcripts/` dir, auto-created)
 
 ### Data Files Per Recording
