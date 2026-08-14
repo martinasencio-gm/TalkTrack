@@ -47,7 +47,12 @@ class SegmentPlayer(QObject):
         if len(segment) == 0:
             return
 
-        sd.play(segment, samplerate=self._cached_sr)
+        # 'high' latency asks the host API (WASAPI, on Windows) for a safer
+        # buffer size. Left unspecified, PortAudio's default is marginal for
+        # this stream (a Python callback pulls each buffer from the cached
+        # array under the GIL) — it fills fine at start, then underruns once
+        # running, producing exactly "clean start, choppy after" every time.
+        sd.play(segment, samplerate=self._cached_sr, latency="high")
         self._playing = True
         self._check_timer.start()
 

@@ -64,6 +64,25 @@ class TestSegmentPlayer(unittest.TestCase):
 
     @patch("app.audio.segment_player.sf")
     @patch("app.audio.segment_player.sd")
+    def test_play_segment_requests_high_latency(self, mock_sd, mock_sf):
+        """Default (unspecified) PortAudio latency on Windows WASAPI shared
+        mode is marginal for a Python-callback-driven stream — the buffer
+        fills fine at start, then underruns once playback is running,
+        producing exactly the reported symptom: clean start, glitchy after.
+        Explicitly requesting 'high' latency asks the host API for a safer
+        buffer size."""
+        from app.audio.segment_player import SegmentPlayer
+
+        audio_data = np.zeros(80000, dtype=np.float32)
+        mock_sf.read.return_value = (audio_data, 16000)
+
+        player = SegmentPlayer()
+        player.play_segment("test.wav", 0.0, 1.0)
+
+        self.assertEqual(mock_sd.play.call_args[1].get("latency"), "high")
+
+    @patch("app.audio.segment_player.sf")
+    @patch("app.audio.segment_player.sd")
     def test_play_clamps_to_audio_length(self, mock_sd, mock_sf):
         """End time beyond audio length should clamp to end of file."""
         from app.audio.segment_player import SegmentPlayer
