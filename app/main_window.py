@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
 
         # Main splitter: left (controls) | right (tabs)
         splitter = CollapsibleSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(12)
 
         # Left panel: controls at top, sources collapsible, recordings below
         left_panel = QWidget()

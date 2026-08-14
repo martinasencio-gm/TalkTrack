@@ -17,7 +17,13 @@ class CollapsibleSplitterHandle(QSplitterHandle):
 
         self._button = QToolButton(self)
         self._button.setAutoRaise(True)
-        self._button.setFixedSize(12, 24)
+        self._button.setFixedSize(12, 28)
+        self._button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._button.setStyleSheet(
+            "QToolButton { background-color: rgba(255, 255, 255, 30); "
+            "border: none; border-radius: 3px; color: #cdd6f4; }"
+            "QToolButton:hover { background-color: rgba(255, 255, 255, 60); }"
+        )
         self._button.clicked.connect(self.splitter().toggle_collapse)
         layout.addWidget(self._button)
 
