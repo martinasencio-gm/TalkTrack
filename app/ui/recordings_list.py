@@ -292,9 +292,15 @@ class RecordingsList(QWidget):
         meta_col.setSpacing(1)
         meta_col.setAlignment(Qt.AlignmentFlag.AlignRight)
 
+        # padding-right pads these labels' own sizeHint, not just their
+        # container's margin — a zero-stretch layout item gets exactly its
+        # sizeHint width, so with no buffer here the text was sized to fit
+        # its own pixel-perfect measurement and clipped the moment actual
+        # rendering (a different font/DPI than sizeHint was computed under)
+        # needed even one pixel more.
         dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
         dur_label.setStyleSheet(
-            "color: #a6adc8; font-size: 10px; "
+            "color: #a6adc8; font-size: 10px; padding-right: 4px; "
             "font-family: Consolas, 'Courier New', monospace;"
         )
         dur_label.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -303,7 +309,7 @@ class RecordingsList(QWidget):
         has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
         if has_transcript:
             badge = QLabel("● Transcribed")
-            badge.setStyleSheet("color: #a6e3a1; font-size: 9px;")
+            badge.setStyleSheet("color: #a6e3a1; font-size: 9px; padding-right: 4px;")
             badge.setAlignment(Qt.AlignmentFlag.AlignRight)
             meta_col.addWidget(badge)
 
