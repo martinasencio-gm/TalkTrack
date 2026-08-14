@@ -258,7 +258,12 @@ class RecordingsList(QWidget):
         though name is what you actually scan a list of recordings for."""
         widget = QWidget()
         outer = QHBoxLayout(widget)
-        outer.setContentsMargins(4, 2, 4, 2)
+        # Extra right margin reserves space for the list's vertical
+        # scrollbar — without it, the row widget's size hint is computed
+        # against the full viewport width, and once a scrollbar appears
+        # it eats into that width, clipping the right-aligned duration/
+        # transcribed badge underneath it.
+        outer.setContentsMargins(4, 2, 18, 2)
         outer.setSpacing(8)
 
         name = metadata.get("name", "")
