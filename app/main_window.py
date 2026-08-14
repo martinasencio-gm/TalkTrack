@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog,
     QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtCore import Qt, QTimer, QEvent, QThread
 from PyQt6.QtGui import QAction
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
@@ -1011,7 +1011,7 @@ class MainWindow(QMainWindow):
         self._transcription_worker.finished.connect(self._on_transcription_finished)
         self._transcription_worker.error.connect(self._on_transcription_error)
         self._transcription_worker.cancelled.connect(self._on_transcription_cancelled)
-        self._transcription_worker.start()
+        self._transcription_worker.start(QThread.Priority.LowPriority)
 
         self.transcript_viewer.show_progress("Starting transcription...")
         self.status_label.setText("Transcribing...")
@@ -1067,7 +1067,7 @@ class MainWindow(QMainWindow):
         self._simple_diarize_worker.session = session
         self._simple_diarize_worker.finished.connect(self._on_simple_diarization_finished)
         self._simple_diarize_worker.error.connect(self._on_simple_diarization_error)
-        self._simple_diarize_worker.start()
+        self._simple_diarize_worker.start(QThread.Priority.LowPriority)
         self.transcript_viewer.show_progress("Labeling speakers...")
 
     def _on_simple_diarization_finished(self, result):
@@ -1111,7 +1111,7 @@ class MainWindow(QMainWindow):
         self._diarization_worker.progress.connect(self._on_transcription_progress)
         self._diarization_worker.finished.connect(self._on_diarization_finished)
         self._diarization_worker.error.connect(self._on_diarization_error)
-        self._diarization_worker.start()
+        self._diarization_worker.start(QThread.Priority.LowPriority)
 
         self.transcript_viewer.show_progress("Running speaker diarization...")
 
