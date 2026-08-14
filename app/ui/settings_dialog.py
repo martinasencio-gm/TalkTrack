@@ -39,25 +39,63 @@ class SettingsDialog(QDialog):
         )
         recording_form.addRow("Min recording length:", self.min_recording_spin)
 
-        self.auto_record_cb = QCheckBox("Auto-record when selected app starts a call")
-        self.auto_record_cb.setToolTip(
-            "Automatically start recording when a checked app in the\n"
-            "per-app picker becomes active (joins a call).\n"
-            "Requires per-app capture mode on Windows 11."
+        self.meeting_mode_combo = QComboBox()
+        self.meeting_mode_combo.addItem("Off", "off")
+        self.meeting_mode_combo.addItem("Suggest recording", "suggest")
+        self.meeting_mode_combo.addItem("Record automatically", "auto")
+        self.meeting_mode_combo.setToolTip(
+            "What to do when a meeting is detected in Teams, Zoom or\n"
+            "another configured app."
         )
-        recording_form.addRow(self.auto_record_cb)
+        recording_form.addRow("When a meeting starts:", self.meeting_mode_combo)
 
         self.auto_record_threshold_spin = QSpinBox()
         self.auto_record_threshold_spin.setRange(0, 60)
         self.auto_record_threshold_spin.setSuffix(" seconds")
-        self.auto_record_threshold_spin.setSpecialValueText("Start immediately")
+        self.auto_record_threshold_spin.setSpecialValueText("Act immediately")
         self.auto_record_threshold_spin.setToolTip(
-            "Require sustained app activity for this many seconds before\n"
-            "auto-recording actually starts. Prevents brief sounds (like\n"
-            "a Teams message chime) from kicking off a recording that\n"
-            "then silence-stops. Set to 0 to disable the threshold."
+            "Require sustained meeting activity for this many seconds\n"
+            "before acting. Prevents brief sounds (like a Teams message\n"
+            "chime) from triggering a suggestion. Set to 0 to disable\n"
+            "the threshold."
         )
-        recording_form.addRow("Auto-record threshold:", self.auto_record_threshold_spin)
+        recording_form.addRow("Confirm meeting for:", self.auto_record_threshold_spin)
+
+        self.detect_end_cb = QCheckBox("Suggest stopping when the meeting ends")
+        self.detect_end_cb.setToolTip(
+            "Detects the end of a call from the meeting app releasing the\n"
+            "microphone. Silence auto-stop below still applies as a backstop."
+        )
+        recording_form.addRow(self.detect_end_cb)
+
+        self.end_action_combo = QComboBox()
+        self.end_action_combo.addItem("Stop and save", "stop")
+        self.end_action_combo.addItem("Pause", "pause")
+        self.end_action_combo.setToolTip(
+            "Only used when the mode above is 'Record automatically'."
+        )
+        recording_form.addRow("When a meeting ends:", self.end_action_combo)
+
+        self.use_mic_capture_cb = QCheckBox(
+            "Use microphone activity to detect meetings")
+        self.use_mic_capture_cb.setToolTip(
+            "The most reliable signal - a meeting app only holds the\n"
+            "microphone during a real call. Turn off if you would rather\n"
+            "TalkTrack not inspect which apps are using the microphone."
+        )
+        recording_form.addRow(self.use_mic_capture_cb)
+
+        self.use_calendar_signal_cb = QCheckBox(
+            "Use calendar events to confirm meetings")
+        recording_form.addRow(self.use_calendar_signal_cb)
+
+        self.use_window_title_cb = QCheckBox(
+            "Use window titles to confirm meetings")
+        self.use_window_title_cb.setToolTip(
+            "Off by default - window titles vary between app versions and\n"
+            "languages, so this signal is the least reliable."
+        )
+        recording_form.addRow(self.use_window_title_cb)
 
         self.auto_transcribe_cb = QCheckBox("Automatically transcribe after recording")
         self.auto_transcribe_cb.setToolTip(
@@ -397,10 +435,23 @@ class SettingsDialog(QDialog):
         # General
         min_rec = self.config.get("general", "min_recording_length")
         self.min_recording_spin.setValue(min_rec if min_rec else 0)
-        self.auto_record_cb.setChecked(self.config.get("general", "auto_record"))
+        mode_index = self.meeting_mode_combo.findData(
+            self.config.get("meeting_detection", "mode"))
+        self.meeting_mode_combo.setCurrentIndex(max(0, mode_index))
         self.auto_record_threshold_spin.setValue(
-            self.config.get("general", "auto_record_threshold")
+            self.config.get("meeting_detection", "threshold_seconds")
         )
+        self.detect_end_cb.setChecked(
+            self.config.get("meeting_detection", "detect_end"))
+        end_index = self.end_action_combo.findData(
+            self.config.get("meeting_detection", "end_action"))
+        self.end_action_combo.setCurrentIndex(max(0, end_index))
+        self.use_mic_capture_cb.setChecked(
+            self.config.get("meeting_detection", "use_mic_capture"))
+        self.use_calendar_signal_cb.setChecked(
+            self.config.get("meeting_detection", "use_calendar"))
+        self.use_window_title_cb.setChecked(
+            self.config.get("meeting_detection", "use_window_title"))
         self.auto_transcribe_cb.setChecked(self.config.get("general", "auto_transcribe"))
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
@@ -492,10 +543,20 @@ class SettingsDialog(QDialog):
 
     def _save_and_close(self):
         self.config.set("general", "min_recording_length", self.min_recording_spin.value())
-        self.config.set("general", "auto_record", self.auto_record_cb.isChecked())
-        self.config.set(
-            "general", "auto_record_threshold", self.auto_record_threshold_spin.value()
-        )
+        self.config.set("meeting_detection", "mode",
+                        self.meeting_mode_combo.currentData())
+        self.config.set("meeting_detection", "threshold_seconds",
+                        self.auto_record_threshold_spin.value())
+        self.config.set("meeting_detection", "detect_end",
+                        self.detect_end_cb.isChecked())
+        self.config.set("meeting_detection", "end_action",
+                        self.end_action_combo.currentData())
+        self.config.set("meeting_detection", "use_mic_capture",
+                        self.use_mic_capture_cb.isChecked())
+        self.config.set("meeting_detection", "use_calendar",
+                        self.use_calendar_signal_cb.isChecked())
+        self.config.set("meeting_detection", "use_window_title",
+                        self.use_window_title_cb.isChecked())
         self.config.set("general", "auto_transcribe", self.auto_transcribe_cb.isChecked())
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
