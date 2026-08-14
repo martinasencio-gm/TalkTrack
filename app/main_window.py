@@ -26,6 +26,7 @@ from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
+from app.ui.collapsible_splitter import CollapsibleSplitter
 from app.ui.recording_controls import RecordingControls
 from app.ui.meters_panel import MetersPanel
 from app.ui.source_selector import SourceSelector
@@ -180,7 +181,7 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
 
         # Main splitter: left (controls) | right (tabs)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = CollapsibleSplitter(Qt.Orientation.Horizontal)
 
         # Left panel: controls at top, sources collapsible, recordings below
         left_panel = QWidget()
@@ -306,6 +307,14 @@ class MainWindow(QMainWindow):
 
         splitter.setSizes([400, 860])
         main_layout.addWidget(splitter)
+
+        self._main_splitter = splitter
+        splitter.collapse_changed.connect(self._on_right_panel_collapse_changed)
+        if self.config.get("ui", "right_panel_collapsed"):
+            splitter.set_collapsed(True)
+
+    def _on_right_panel_collapse_changed(self, collapsed):
+        self.config.set("ui", "right_panel_collapsed", collapsed)
 
     def _update_left_panel_stretch(self, *_):
         audio_expanded = self.source_selector._section.is_expanded()
