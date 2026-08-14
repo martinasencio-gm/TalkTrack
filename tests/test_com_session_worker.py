@@ -3,6 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time
 import unittest
+from unittest import mock
 
 from app.utils.com_session_worker import ComSessionPoller
 
@@ -100,6 +101,36 @@ class TestComSessionPoller(unittest.TestCase):
             lambda: poller.get_snapshot() if poller.get_snapshot().get("interval_seen") == 2.5 else None
         )
         self.assertIsNotNone(snapshot)
+
+    def test_get_snapshot_returns_cached_when_queue_read_raises(self):
+        """get_snapshot() returns cached snapshot when queue.get_nowait() raises EOFError."""
+        poller = self._make(_fake_worker_blocks_forever)
+        poller.start()
+        # Set a known cached value
+        poller._cached_snapshot = {"audio_apps": ["TestApp"], "mic_pids": {999}}
+        # Mock queue to raise EOFError (simulating corrupted pipe mid-read)
+        with mock.patch.object(poller._queue, "get_nowait", side_effect=EOFError("pipe closed")):
+            snapshot = poller.get_snapshot()
+        # Should return the cached snapshot, not raise
+        self.assertEqual(snapshot["audio_apps"], ["TestApp"])
+        self.assertEqual(snapshot["mic_pids"], {999})
+
+    def test_get_snapshot_returns_cached_when_respawn_raises(self):
+        """get_snapshot() returns cached snapshot when start() raises during respawn."""
+        poller = self._make(_fake_worker_dies_immediately)
+        poller.start()
+        # Wait for worker to die
+        _wait_until(lambda: True if not poller._process.is_alive() else None)
+        # Set a known cached value
+        poller._cached_snapshot = {"audio_apps": ["CachedApp"], "mic_pids": {777}}
+        # Bypass backoff window
+        poller._last_restart_ts = time.monotonic() - 10.0
+        # Mock start() to raise OSError (simulating resource exhaustion)
+        with mock.patch.object(poller, "start", side_effect=OSError("Resource temporarily unavailable")):
+            snapshot = poller.get_snapshot()
+        # Should return the cached snapshot, not raise
+        self.assertEqual(snapshot["audio_apps"], ["CachedApp"])
+        self.assertEqual(snapshot["mic_pids"], {777})
 
 
 if __name__ == "__main__":

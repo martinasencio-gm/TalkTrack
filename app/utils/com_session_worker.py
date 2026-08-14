@@ -78,12 +78,17 @@ class ComSessionPoller:
             self._cached_snapshot = self._queue.get_nowait()
         except queue.Empty:
             pass
+        except Exception:
+            logger.exception("Failed to read snapshot from worker queue; returning cached")
 
         if self._process is not None and not self._process.is_alive():
             now = time.monotonic()
             if now - self._last_restart_ts >= _RESTART_BACKOFF_SECONDS:
                 logger.error("COM session worker process died - restarting")
-                self.start()
+                try:
+                    self.start()
+                except Exception:
+                    logger.exception("Failed to respawn worker process; returning cached snapshot")
 
         return self._cached_snapshot
 
