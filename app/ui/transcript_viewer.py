@@ -85,7 +85,11 @@ class TranscriptViewer(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Bottom margin matches the 4px spacing above the toolbar row (the
+        # gap between it and the scroll area's border above) — without it,
+        # the row sits flush against the tab pane's bottom edge while
+        # having visible breathing room above, reading as "not centered".
+        layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(4)
 
         # Header row: title + transcribe button
