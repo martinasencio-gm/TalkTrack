@@ -132,6 +132,31 @@ class TestComSessionPoller(unittest.TestCase):
         self.assertEqual(snapshot["audio_apps"], ["CachedApp"])
         self.assertEqual(snapshot["mic_pids"], {777})
 
+    def test_failed_respawn_respects_backoff_on_next_call(self):
+        """Failed respawn respects backoff window on next get_snapshot() call."""
+        poller = self._make(_fake_worker_dies_immediately)
+        poller.start()
+        # Wait for worker to die
+        _wait_until(lambda: True if not poller._process.is_alive() else None)
+        # Bypass backoff window so first respawn attempt will be tried
+        poller._last_restart_ts = time.monotonic() - 10.0
+
+        # Mock start() to raise and track call count
+        call_count = [0]
+        def mock_start_raises():
+            call_count[0] += 1
+            raise OSError("Resource temporarily unavailable")
+
+        with mock.patch.object(poller, "start", side_effect=mock_start_raises):
+            # First call: respawn attempt fails, _last_restart_ts updated
+            poller.get_snapshot()
+            self.assertEqual(call_count[0], 1)
+
+            # Second call immediately after (within 5s backoff): respawn NOT attempted
+            poller.get_snapshot()
+            # start() should NOT be called a second time due to backoff
+            self.assertEqual(call_count[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,7 @@ class ComSessionPoller:
                     self.start()
                 except Exception:
                     logger.exception("Failed to respawn worker process; returning cached snapshot")
+                    self._last_restart_ts = time.monotonic()
 
         return self._cached_snapshot
 
