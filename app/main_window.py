@@ -608,6 +608,15 @@ class MainWindow(QMainWindow):
         snapshot = meeting_signals.probe(
             settings, calendar_event=self._current_calendar_event)
         self._last_meeting_snapshot = snapshot
+
+        # A recording can start (or already be running) through a route the
+        # detector never saw — e.g. it began while mode was "off", or the user
+        # clicked Record manually. Resync before every tick so a start
+        # suggestion is never produced for a meeting we're already recording.
+        if (self.recorder.state != RecordingState.IDLE
+                and self._meeting_detector.state not in ("recording", "paused_by_detection")):
+            self._meeting_detector.note_recording_started(snapshot)
+
         decision = self._meeting_detector.update(snapshot, settings)
         if decision.action != "none":
             logger.info("Meeting detection decision: %s (%s)",
@@ -616,6 +625,10 @@ class MainWindow(QMainWindow):
 
     def _handle_meeting_decision(self, decision, snapshot):
         action = decision.action
+        if action in ("suggest_start", "start") and self.recorder.state != RecordingState.IDLE:
+            # Belt-and-suspenders: never offer or auto-start a recording on
+            # top of one already running.
+            return
         if action == "suggest_start":
             self.meeting_banner.show_start(
                 decision.meeting_name, self._meeting_elapsed(snapshot))
@@ -655,7 +668,8 @@ class MainWindow(QMainWindow):
 
     def _on_meeting_start_accepted(self):
         self._meeting_detector.accept_start()
-        self._start_recording()
+        if self.recorder.state == RecordingState.IDLE:
+            self._start_recording()
 
     def _on_meeting_start_dismissed(self):
         self._meeting_detector.dismiss_start()

@@ -55,6 +55,7 @@ def get_mic_capture_pids(exclude_pid=None):
     collection = enumerator.EnumAudioEndpoints(
         EDataFlow.eCapture.value, DEVICE_STATE.ACTIVE.value)
     for i in range(collection.GetCount()):
+        device = manager = sessions = None
         try:
             device = collection.Item(i)
             manager = cast(
@@ -62,6 +63,7 @@ def get_mic_capture_pids(exclude_pid=None):
                 POINTER(IAudioSessionManager2))
             sessions = manager.GetSessionEnumerator()
             for j in range(sessions.GetCount()):
+                control = None
                 try:
                     control = sessions.GetSession(j)
                     if control.GetState() != _SESSION_ACTIVE:
@@ -70,9 +72,19 @@ def get_mic_capture_pids(exclude_pid=None):
                     if pid and pid != exclude_pid:
                         pids.add(pid)
                 except Exception:
+                    # A session can vanish mid-enumeration (a participant's
+                    # audio session tears down while we're reading it). The
+                    # COM proxy is then a dangling pointer - dropping our
+                    # reference now, instead of letting the GC finalize it
+                    # later on an unrelated call stack, avoids releasing a
+                    # VTable that is no longer valid.
                     continue
+                finally:
+                    del control
         except Exception:
             continue  # one bad endpoint must not lose the others
+        finally:
+            del sessions, manager, device
     return pids
 
 
