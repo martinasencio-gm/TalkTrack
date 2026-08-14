@@ -14,6 +14,25 @@ from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 from app.ui.transcript_search_bar import TranscriptSearchBar
 
 
+def _format_progress_text(message, elapsed_seconds, percent=None):
+    """Format the progress status line, including ETA when percent is known."""
+    if elapsed_seconds is None:
+        return message
+
+    em, es = divmod(int(elapsed_seconds), 60)
+    elapsed_str = f"{em:02d}:{es:02d}"
+
+    if percent is None:
+        return f"{message}  ({elapsed_str} elapsed)"
+
+    if 0 < percent < 100:
+        remaining = elapsed_seconds * (100 - percent) / percent
+        rm, rs = divmod(int(remaining), 60)
+        return f"{message}  {percent}%  ({elapsed_str} elapsed · ~{rm:02d}:{rs:02d} remaining)"
+
+    return f"{message}  {percent}%  ({elapsed_str} elapsed)"
+
+
 # Speaker colors for visual distinction — shared constant
 SPEAKER_COLORS = [
     "#89b4fa",  # blue
@@ -58,6 +77,7 @@ class TranscriptViewer(QWidget):
         self._programmatic_scroll = False  # guard to ignore our own scrolls
         self._progress_message = ""
         self._progress_start_time = None
+        self._progress_percent = None
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
@@ -86,6 +106,16 @@ class TranscriptViewer(QWidget):
         progress_row = QHBoxLayout()
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)  # indeterminate
+        self.progress_bar.setTextVisible(False)
+        # Explicit chunk styling forces Qt off the native Windows style's
+        # animated shimmer sweep, which stutters under the GIL contention
+        # from background transcription work — flat fill reads as smoother
+        # even though it's actually less "animated".
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { border: 1px solid #313244; border-radius: 4px; "
+            "background-color: #181825; }"
+            "QProgressBar::chunk { background-color: #89b4fa; border-radius: 3px; }"
+        )
         self.progress_bar.hide()
         progress_row.addWidget(self.progress_bar)
 
@@ -226,6 +256,7 @@ class TranscriptViewer(QWidget):
         # same text update) flips it back to determinate for stages where
         # we actually know how far through the audio we are. Stages with no
         # percent data (model loading, diarization) just stay indeterminate.
+        self._progress_percent = None
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self.cancel_btn.show()
@@ -237,19 +268,22 @@ class TranscriptViewer(QWidget):
 
     def set_progress_percent(self, percent):
         """Switch the progress bar to determinate mode at the given percent."""
+        self._progress_percent = percent
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(percent)
+        self._update_status_label()
 
     def _tick_elapsed(self):
         self._update_status_label()
 
     def _update_status_label(self):
-        if self._progress_start_time is not None:
-            elapsed = int(time.monotonic() - self._progress_start_time)
-            m, s = divmod(elapsed, 60)
-            self.status_label.setText(f"{self._progress_message}  ({m:02d}:{s:02d} elapsed)")
-        else:
-            self.status_label.setText(self._progress_message)
+        elapsed = (
+            time.monotonic() - self._progress_start_time
+            if self._progress_start_time is not None else None
+        )
+        self.status_label.setText(
+            _format_progress_text(self._progress_message, elapsed, self._progress_percent)
+        )
 
     def hide_progress(self):
         self.progress_bar.hide()
@@ -257,6 +291,7 @@ class TranscriptViewer(QWidget):
         self.status_label.hide()
         self._elapsed_timer.stop()
         self._progress_start_time = None
+        self._progress_percent = None
         self.progress_bar.setRange(0, 0)
 
     def _on_cancel_clicked(self):
