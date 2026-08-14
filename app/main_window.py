@@ -49,6 +49,7 @@ from app.ui.calendar_banner import CalendarSuggestionBanner
 from app.ui.meeting_banner import MeetingBanner
 from app.integrations.meeting_detector import MeetingDetector
 from app.utils import meeting_signals
+from app.utils.com_session_worker import ComSessionPoller
 from app.ui.calendar_lookup_worker import CalendarLookupWorker
 from app.ui.import_timestamp_dialog import ImportTimestampDialog
 from app.recording.import_session import build_import_metadata, needs_conversion
@@ -85,6 +86,9 @@ class MainWindow(QMainWindow):
         self._meeting_poll_timer = QTimer(self)
         self._meeting_poll_timer.timeout.connect(self._poll_meeting_signals)
         self._meeting_poll_timer.start(3000)
+
+        self._com_poller = ComSessionPoller(main_pid=os.getpid())
+        self._com_poller.start()
 
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1000, 700)
@@ -2032,6 +2036,7 @@ class MainWindow(QMainWindow):
             self._flush_gain_to_config()
         if self._meeting_poll_timer.isActive():
             self._meeting_poll_timer.stop()
+        self._com_poller.stop()
         if hasattr(self, "mic_monitor"):
             self.mic_monitor.stop()
         if hasattr(self, "mic_monitor_2"):
