@@ -132,6 +132,10 @@ class MainWindow(QMainWindow):
         open_recordings_action.triggered.connect(self._open_recordings_folder)
         file_menu.addAction(open_recordings_action)
 
+        open_transcripts_action = QAction("Open &Transcripts Folder", self)
+        open_transcripts_action.triggered.connect(self._open_transcripts_folder)
+        file_menu.addAction(open_transcripts_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
@@ -1557,6 +1561,12 @@ class MainWindow(QMainWindow):
         recordings_dir = self.config.get("output", "directory")
         os.makedirs(recordings_dir, exist_ok=True)
         os.startfile(recordings_dir)
+
+    def _open_transcripts_folder(self):
+        import os
+        transcripts_dir = self.config.get("transcripts", "directory")
+        os.makedirs(transcripts_dir, exist_ok=True)
+        os.startfile(transcripts_dir)
 
     def _show_system_status(self):
         dialog = SystemStatusDialog(self.config, self)
