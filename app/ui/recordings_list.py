@@ -209,6 +209,8 @@ class RecordingsList(QWidget):
     recording_deleted = pyqtSignal(str)    # directory path of deleted recording
     search_result_selected = pyqtSignal(str, float)  # recording_id, timestamp
     import_requested = pyqtSignal(str)  # chosen audio file path
+    transcribe_selected_requested = pyqtSignal(list)  # list[dict] metadata, untranscribed only
+    export_selected_requested = pyqtSignal(list)      # list[dict] metadata, transcribed only
 
     def __init__(self, recordings_dir, parent=None, config=None):
         super().__init__(parent)
@@ -409,6 +411,24 @@ class RecordingsList(QWidget):
 
             menu.addSeparator()
 
+            untranscribed = self._selected_untranscribed(selected_items)
+            transcribe_action = QAction(f"Transcribe {len(untranscribed)} Recordings", self)
+            transcribe_action.setEnabled(len(untranscribed) > 0)
+            transcribe_action.triggered.connect(
+                lambda: self.transcribe_selected_requested.emit(untranscribed)
+            )
+            menu.addAction(transcribe_action)
+
+            transcribed = self._selected_transcribed(selected_items)
+            export_action = QAction(f"Export {len(transcribed)} Transcripts", self)
+            export_action.setEnabled(len(transcribed) > 0)
+            export_action.triggered.connect(
+                lambda: self.export_selected_requested.emit(transcribed)
+            )
+            menu.addAction(export_action)
+
+            menu.addSeparator()
+
             count = len(selected_items)
             delete_action = QAction(f"Delete {count} Recordings", self)
             delete_action.triggered.connect(
@@ -455,6 +475,26 @@ class RecordingsList(QWidget):
         transcripts_dir = self.config.get("transcripts", "directory")
         os.makedirs(transcripts_dir, exist_ok=True)
         os.startfile(transcripts_dir)
+
+    def _selected_untranscribed(self, items):
+        result = []
+        for item in items:
+            metadata = item.data(Qt.ItemDataRole.UserRole)
+            if not metadata or "directory" not in metadata:
+                continue
+            if not (Path(metadata["directory"]) / "transcript.json").exists():
+                result.append(metadata)
+        return result
+
+    def _selected_transcribed(self, items):
+        result = []
+        for item in items:
+            metadata = item.data(Qt.ItemDataRole.UserRole)
+            if not metadata or "directory" not in metadata:
+                continue
+            if (Path(metadata["directory"]) / "transcript.json").exists():
+                result.append(metadata)
+        return result
 
     def _delete_recording(self, metadata):
         directory = metadata.get("directory", "")
