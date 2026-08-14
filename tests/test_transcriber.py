@@ -163,6 +163,84 @@ class TestTranscriptResultExports(unittest.TestCase):
         self.assertNotIn("speaker_name", d["segments"][0])
 
 
+class TestMergeAdjacentSameSpeaker(unittest.TestCase):
+    """Whisper splits one continuous turn into many small segments — often
+    with zero gap between them. Without merging, each of those boundaries
+    is also a hard cut point during continuous playback, where Whisper's
+    imprecise timestamps can audibly clip a word. Merging same-speaker
+    segments separated by a short gap fixes both the fragmented display
+    and the playback clipping in one move."""
+
+    def _make_result(self, segs):
+        return TranscriptResult(segments=segs, language="en", duration=10.0)
+
+    def test_merges_touching_same_speaker_segments(self):
+        segs = [
+            TranscriptSegment(0.0, 4.0, "Hello there,", speaker="SPEAKER_00"),
+            TranscriptSegment(4.0, 7.0, "how are you?", speaker="SPEAKER_00"),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker()
+        self.assertEqual(len(r.segments), 1)
+        self.assertEqual(r.segments[0].start, 0.0)
+        self.assertEqual(r.segments[0].end, 7.0)
+        self.assertEqual(r.segments[0].text, "Hello there, how are you?")
+
+    def test_merges_across_short_gap(self):
+        segs = [
+            TranscriptSegment(0.0, 4.0, "First part.", speaker="SPEAKER_00"),
+            TranscriptSegment(4.3, 6.0, "Second part.", speaker="SPEAKER_00"),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker(max_gap=0.5)
+        self.assertEqual(len(r.segments), 1)
+        self.assertEqual(r.segments[0].text, "First part. Second part.")
+
+    def test_does_not_merge_across_long_gap(self):
+        segs = [
+            TranscriptSegment(0.0, 4.0, "First part.", speaker="SPEAKER_00"),
+            TranscriptSegment(6.0, 8.0, "Much later.", speaker="SPEAKER_00"),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker(max_gap=0.5)
+        self.assertEqual(len(r.segments), 2)
+
+    def test_does_not_merge_different_speakers(self):
+        segs = [
+            TranscriptSegment(0.0, 4.0, "First part.", speaker="SPEAKER_00"),
+            TranscriptSegment(4.0, 6.0, "Reply.", speaker="SPEAKER_01"),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker()
+        self.assertEqual(len(r.segments), 2)
+
+    def test_merged_confidence_is_the_minimum_of_the_parts(self):
+        segs = [
+            TranscriptSegment(0.0, 4.0, "Sure thing.", speaker="SPEAKER_00", confidence=0.9),
+            TranscriptSegment(4.0, 6.0, "No problem.", speaker="SPEAKER_00", confidence=0.4),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker()
+        self.assertEqual(r.segments[0].confidence, 0.4)
+
+    def test_empty_transcript_is_a_no_op(self):
+        r = self._make_result([])
+        r.merge_adjacent_same_speaker()
+        self.assertEqual(r.segments, [])
+
+    def test_chains_three_or_more_consecutive_segments(self):
+        segs = [
+            TranscriptSegment(0.0, 2.0, "One.", speaker="SPEAKER_00"),
+            TranscriptSegment(2.0, 4.0, "Two.", speaker="SPEAKER_00"),
+            TranscriptSegment(4.0, 6.0, "Three.", speaker="SPEAKER_00"),
+        ]
+        r = self._make_result(segs)
+        r.merge_adjacent_same_speaker()
+        self.assertEqual(len(r.segments), 1)
+        self.assertEqual(r.segments[0].text, "One. Two. Three.")
+        self.assertEqual(r.segments[0].end, 6.0)
+
+
 class TestToPlainText(unittest.TestCase):
     """TranscriptResult.to_plain_text: clipboard-friendly, no timestamps."""
 

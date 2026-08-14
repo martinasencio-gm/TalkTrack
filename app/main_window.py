@@ -1147,6 +1147,8 @@ class MainWindow(QMainWindow):
         return calendar_event, attendees
 
     def _display_final_transcript(self, result, session=None):
+        result.merge_adjacent_same_speaker()
+
         if session is None:
             session = self._current_session
 

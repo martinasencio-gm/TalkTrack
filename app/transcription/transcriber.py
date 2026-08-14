@@ -65,6 +65,30 @@ class TranscriptResult:
             return speaker_names[seg.speaker]
         return seg.speaker
 
+    def merge_adjacent_same_speaker(self, max_gap=0.5):
+        """Merge consecutive same-speaker segments separated by <= max_gap seconds.
+
+        Whisper's own segmentation splits a single continuous turn into many
+        small segments at clause/sentence boundaries, often with zero gap
+        between them — independent of any real pause. Left unmerged, each of
+        those boundaries also becomes a hard cut point during per-segment /
+        continuous playback, where Whisper's imprecise timestamps can
+        audibly clip a word. Merging fixes both the fragmented display and
+        the playback clipping at once.
+        """
+        if not self.segments:
+            return
+        merged = [self.segments[0]]
+        for seg in self.segments[1:]:
+            prev = merged[-1]
+            if seg.speaker == prev.speaker and seg.start - prev.end <= max_gap:
+                prev.end = seg.end
+                prev.text = f"{prev.text} {seg.text}".strip()
+                prev.confidence = min(prev.confidence, seg.confidence)
+            else:
+                merged.append(seg)
+        self.segments = merged
+
     def to_dict(self, speaker_names=None):
         segments = []
         for s in self.segments:
