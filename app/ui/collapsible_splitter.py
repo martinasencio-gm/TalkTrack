@@ -39,6 +39,12 @@ class CollapsibleSplitterHandle(QSplitterHandle):
 class CollapsibleSplitter(QSplitter):
     """Two-pane splitter; index 1 (the right/second pane) is what collapses."""
 
+    # Fired first, before any size is touched, with the state being toggled
+    # to. A listener that needs to resize the containing window (so there's
+    # no leftover width for Qt to hand back to the right pane, or enough
+    # width to actually restore into) must do it here, synchronously - by
+    # the time collapse_changed fires the resize is too late to matter.
+    about_to_toggle = pyqtSignal(bool)
     collapse_changed = pyqtSignal(bool)
 
     def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
@@ -53,18 +59,21 @@ class CollapsibleSplitter(QSplitter):
         return self._collapsed
 
     def toggle_collapse(self):
+        target = not self._collapsed
+        self.about_to_toggle.emit(target)
+
         sizes = self.sizes()
         if len(sizes) < 2:
             return
-        if self._collapsed:
-            total = sum(sizes)
+        total = sum(sizes)
+        if target:
+            self._expanded_size = sizes[1]
+            self.setSizes([total, 0])
+        else:
             restore = self._expanded_size or max(total // 3, 1)
             restore = min(restore, total)
             self.setSizes([total - restore, restore])
-        else:
-            self._expanded_size = sizes[1]
-            self.setSizes([sum(sizes), 0])
-        self._collapsed = not self._collapsed
+        self._collapsed = target
         self.collapse_changed.emit(self._collapsed)
 
     def set_collapsed(self, collapsed):

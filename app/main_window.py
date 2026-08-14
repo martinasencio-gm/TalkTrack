@@ -10,7 +10,7 @@ import sounddevice as sd
 logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog,
     QFrame
 )
@@ -314,9 +314,31 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(splitter)
 
         self._main_splitter = splitter
+        self._left_panel = left_panel
+        margins = main_layout.contentsMargins()
+        self._collapsed_window_width = (
+            left_panel.width() + splitter.handleWidth()
+            + margins.left() + margins.right()
+        )
+        self._min_window_width = self.minimumWidth()
+        self._expanded_window_width = self.width()
+        splitter.about_to_toggle.connect(self._apply_collapsed_window_size)
         splitter.collapse_changed.connect(self._on_right_panel_collapse_changed)
         if self.config.get("ui", "right_panel_collapsed"):
             splitter.set_collapsed(True)
+
+    def _apply_collapsed_window_size(self, collapsing):
+        if collapsing:
+            self._expanded_window_width = self.width()
+            self.setMinimumWidth(self._collapsed_window_width)
+            self.resize(self._collapsed_window_width, self.height())
+        else:
+            self.setMinimumWidth(self._min_window_width)
+            self.resize(self._expanded_window_width, self.height())
+        # resize() doesn't propagate to child layouts synchronously - the
+        # splitter must already report its new width when toggle_collapse()
+        # reads sizes() right after this signal returns.
+        QApplication.processEvents()
 
     def _on_right_panel_collapse_changed(self, collapsed):
         self.config.set("ui", "right_panel_collapsed", collapsed)

@@ -20,14 +20,36 @@ def _get_app():
 
 class TestCollapsibleSplitter(unittest.TestCase):
     def _make(self, total_width=600):
+        # Mirrors production: MainWindow's left panel is a fixed-width pane
+        # (setFixedWidth), so only the right pane actually resizes. A left
+        # widget without that constraint lets QSplitter free-stretch it to
+        # fill any leftover space, which production never does.
+        #
+        # Production also shrinks/grows the containing window on
+        # about_to_toggle before toggle_collapse() reads sizes() - without
+        # that, a fixed-width left pane can never let the right pane reach
+        # zero, since QSplitter always hands leftover space back to the only
+        # resizable pane. Emulate that here by resizing the splitter itself.
         _get_app()
+        left_width = total_width * 2 // 3
         splitter = CollapsibleSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
+        left.setFixedWidth(left_width)
         right = QWidget()
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.resize(total_width, 400)
-        splitter.setSizes([total_width * 2 // 3, total_width // 3])
+        splitter.setSizes([left_width, total_width - left_width])
+
+        def _on_about_to_toggle(collapsing):
+            handle = splitter.handleWidth()
+            if collapsing:
+                splitter.resize(left_width + handle, 400)
+            else:
+                splitter.resize(total_width, 400)
+            QApplication.processEvents()
+
+        splitter.about_to_toggle.connect(_on_about_to_toggle)
         return splitter
 
     def test_toggle_collapses_right_pane_to_zero(self):
