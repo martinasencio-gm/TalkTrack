@@ -234,7 +234,6 @@ class TranscriptionWorker(QThread):
                     confidence=math.exp(segment.avg_logprob),
                 )
                 result.segments.append(ts)
-                self.progress.emit(f"Transcribed: {_format_time(segment.end)}")
                 if info.duration:
                     pct = int(min(100, (segment.end / info.duration) * 100))
                     self.progress_percent.emit(pct)

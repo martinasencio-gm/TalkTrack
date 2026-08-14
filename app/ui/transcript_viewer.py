@@ -251,11 +251,11 @@ class TranscriptViewer(QWidget):
 
     def show_progress(self, message):
         self._progress_message = message
-        # Reset to indeterminate for this update; set_progress_percent (fed
-        # by TranscriptionWorker.progress_percent, emitted right after this
-        # same text update) flips it back to determinate for stages where
-        # we actually know how far through the audio we are. Stages with no
-        # percent data (model loading, diarization) just stay indeterminate.
+        # Called only at phase boundaries (model loading, transcribing
+        # start/end, diarization) — NOT per segment, since a reset here
+        # flashes the bar back to indeterminate. Per-segment ticks go
+        # through set_progress_percent alone, which just updates the
+        # existing determinate value and the status text.
         self._progress_percent = None
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()

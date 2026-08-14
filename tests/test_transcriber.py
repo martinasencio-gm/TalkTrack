@@ -90,6 +90,34 @@ class TestRunSegmentMapping(unittest.TestCase):
         # VAD means the last segment.end never quite reaches info.duration.
         self.assertEqual(percents, [50, 100, 100])
 
+    def test_progress_text_not_reemitted_per_segment(self):
+        # Each `progress` (text) emission resets the UI progress bar to
+        # indeterminate mode (see TranscriptViewer.show_progress) — firing
+        # it per segment made the bar visibly flash/flicker on every
+        # segment. Only phase-boundary messages should use it; per-segment
+        # ticks must go through progress_percent alone.
+        fw = _FwMocks(
+            segments=[
+                MagicMock(start=0.0, end=5.0, text="a", avg_logprob=-0.1),
+                MagicMock(start=5.0, end=10.0, text="b", avg_logprob=-0.1),
+                MagicMock(start=10.0, end=15.0, text="c", avg_logprob=-0.1),
+            ],
+            duration=15.0,
+        )
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            worker = tr.TranscriptionWorker("a.wav", model_size="base", device="cpu")
+            texts = []
+            worker.progress.connect(texts.append)
+            worker.run()
+        # Phase-boundary messages only: loading, transcribing-start, complete.
+        # None of them should repeat per segment (3 segments here).
+        self.assertEqual(
+            texts,
+            ["Loading transcription model...", "Transcribing audio...", "Transcription complete."],
+        )
+
 
 class TestTranscriptionTiming(unittest.TestCase):
     """Wall-clock time taken is recorded on the result for display/persistence."""
