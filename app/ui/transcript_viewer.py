@@ -104,13 +104,15 @@ class TranscriptViewer(QWidget):
 
         # Progress row (bar + cancel button)
         progress_row = QHBoxLayout()
+        # Qt's indeterminate QProgressBar animates a moving block on every
+        # style, not just Windows' native theme — there's no stylesheet
+        # that turns it off. So we never use indeterminate mode: the bar
+        # stays hidden until we have a real percent to show (during the
+        # transcription loop), and status_label alone carries progress
+        # for phases with no percent data (model loading, diarization).
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # indeterminate
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setTextVisible(False)
-        # Explicit chunk styling forces Qt off the native Windows style's
-        # animated shimmer sweep, which stutters under the GIL contention
-        # from background transcription work — flat fill reads as smoother
-        # even though it's actually less "animated".
         self.progress_bar.setStyleSheet(
             "QProgressBar { border: 1px solid #313244; border-radius: 4px; "
             "background-color: #181825; }"
@@ -251,14 +253,12 @@ class TranscriptViewer(QWidget):
 
     def show_progress(self, message):
         self._progress_message = message
-        # Called only at phase boundaries (model loading, transcribing
-        # start/end, diarization) — NOT per segment, since a reset here
-        # flashes the bar back to indeterminate. Per-segment ticks go
-        # through set_progress_percent alone, which just updates the
-        # existing determinate value and the status text.
+        # No percent data yet for this phase (model loading, diarization,
+        # or before the first segment lands) — hide the bar rather than
+        # show it in indeterminate mode, since status_label + the elapsed
+        # timer already say "work is happening" without any animation.
         self._progress_percent = None
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.show()
+        self.progress_bar.hide()
         self.cancel_btn.show()
         if self._progress_start_time is None:
             self._progress_start_time = time.monotonic()
@@ -267,10 +267,10 @@ class TranscriptViewer(QWidget):
         self.status_label.show()
 
     def set_progress_percent(self, percent):
-        """Switch the progress bar to determinate mode at the given percent."""
+        """Show the bar at a real percent — the only mode it's ever shown in."""
         self._progress_percent = percent
-        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(percent)
+        self.progress_bar.show()
         self._update_status_label()
 
     def _tick_elapsed(self):
@@ -292,7 +292,6 @@ class TranscriptViewer(QWidget):
         self._elapsed_timer.stop()
         self._progress_start_time = None
         self._progress_percent = None
-        self.progress_bar.setRange(0, 0)
 
     def _on_cancel_clicked(self):
         self.cancel_requested.emit()
