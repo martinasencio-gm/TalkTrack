@@ -153,7 +153,7 @@ detector testable without Windows:
 {
     "timestamp": float,          # monotonic seconds
     "audio_apps": [str, ...],    # curated meeting apps with an ACTIVE audio session
-    "mic_capture_apps": [str, ...],  # apps holding an active capture session
+    "mic_capture_apps": [str, ...],  # apps ACTIVE on any capture device, self excluded
     "meeting_titles": [str, ...],    # window titles matching meeting patterns
     "calendar_event": dict | None,   # overlapping event, or None
 }
@@ -329,21 +329,31 @@ a smoke test plus pure-helper unit tests for its text formatting.
 
 ## Risks
 
-- **Mic-capture enumeration is unproven.** pycaw's `GetAllSessions()` returns render
-  sessions; capture sessions need enumeration over a different data-flow direction.
-  This warrants a spike before the main build. If it proves unreliable the design
-  still stands on calendar and title corroboration, with reduced accuracy — which is
-  precisely why the rule does not depend on any single signal.
+- ~~**Mic-capture enumeration is unproven.**~~ **RESOLVED by spike, 2026-08-14.**
+  Enumerating `EDataFlow.eCapture` endpoints and activating `IAudioSessionManager2` on
+  each returns per-session PID and state, confirmed working on this machine. A second
+  method — the `CapabilityAccessManager\ConsentStore\microphone` registry, where
+  `LastUsedTimeStop == 0` means in-use-right-now — independently agreed. COM is the
+  primary because it yields PIDs, which map onto the process-name model
+  `audio_session_monitor.py` already uses; the registry is the documented fallback.
+
+  Two constraints the spike surfaced, both now requirements:
+
+  - **TalkTrack must exclude its own PID.** Its idle `MicMonitor` holds a capture
+    session, so without this the app detects itself as a meeting.
+  - **A process may be ACTIVE on one capture device and INACTIVE on another**
+    (observed with `ms-teams`). The rule is therefore "active on *any* capture
+    device", never a single default-device check.
 - **Polling cost.** Window-title enumeration is the most expensive probe and is off by
   default. The audio probe reuses the existing 3-second cadence rather than adding a
   second timer.
 - **`mode: "suggest"` as the new-user default** is a behavior change for fresh
   installs only; existing users keep their current setting through migration.
-- **End detection depends most on the least-proven signal.** Mic release is what makes
-  it accurate and fast; without `use_mic_capture` it degrades to audio-session absence,
-  which a lingering browser tab or hold music can mask. If the mic-capture spike fails,
-  end detection is materially weaker than start detection, and `silence_auto_stop`
-  remains the real backstop. This is an argument for running the spike first.
+- **End detection leans hardest on mic release.** Now that the spike has confirmed the
+  signal is available, this is a much smaller risk than when the design was written.
+  It remains true that with `use_mic_capture` disabled, end detection degrades to
+  audio-session absence, which a lingering browser tab or hold music can mask — so
+  `silence_auto_stop` stays as the backstop.
 - **A wrong stop is the most expensive failure in the whole design** — it loses
   meeting audio irrecoverably. This is why the end path is patient (60s vs 5s), why
   `suggest` mode asks rather than acts, and why Pause exists with an automatic resume.
