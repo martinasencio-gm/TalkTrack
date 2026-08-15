@@ -46,12 +46,13 @@ class TestEventOverlapsWindow(unittest.TestCase):
 
 
 class _FakeAppointment:
-    def __init__(self, subject, start, end, organizer, attendees):
+    def __init__(self, subject, start, end, organizer, attendees, all_day=False):
         self.Subject = subject
         self.Start = start
         self.End = end
         self.Organizer = organizer
         self.RequiredAttendees = attendees  # semicolon-separated, as Outlook returns it
+        self.AllDayEvent = all_day
 
 
 class TestFindOverlappingEvents(unittest.TestCase):
@@ -138,6 +139,39 @@ class TestFindOverlappingEvents(unittest.TestCase):
                 datetime(2026, 8, 13, 14, 0), datetime(2026, 8, 13, 14, 45)
             )
         self.assertEqual(results, [])
+
+    def test_all_day_event_is_excluded_even_though_it_overlaps(self):
+        from app.integrations.outlook_calendar import find_overlapping_events
+        appt = _FakeAppointment(
+            "Company Holiday", datetime(2026, 8, 13, 0, 0), datetime(2026, 8, 14, 0, 0),
+            "", "", all_day=True,
+        )
+        mock_app = self._mock_outlook([appt])
+        with patch("app.integrations.outlook_calendar.win32com.client.Dispatch",
+                    return_value=mock_app):
+            results = find_overlapping_events(
+                datetime(2026, 8, 13, 14, 0), datetime(2026, 8, 13, 14, 45)
+            )
+        self.assertEqual(results, [])
+
+    def test_all_day_event_excluded_alongside_real_match(self):
+        from app.integrations.outlook_calendar import find_overlapping_events
+        all_day = _FakeAppointment(
+            "Out of Office", datetime(2026, 8, 13, 0, 0), datetime(2026, 8, 14, 0, 0),
+            "", "", all_day=True,
+        )
+        real_meeting = _FakeAppointment(
+            "Q3 Roadmap Sync", datetime(2026, 8, 13, 14, 0), datetime(2026, 8, 13, 14, 45),
+            "Jane Smith", "Jane Smith",
+        )
+        mock_app = self._mock_outlook([all_day, real_meeting])
+        with patch("app.integrations.outlook_calendar.win32com.client.Dispatch",
+                    return_value=mock_app):
+            results = find_overlapping_events(
+                datetime(2026, 8, 13, 14, 0), datetime(2026, 8, 13, 14, 45)
+            )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["subject"], "Q3 Roadmap Sync")
 
     def test_empty_attendees_string_returns_empty_list_not_list_with_blank(self):
         from app.integrations.outlook_calendar import find_overlapping_events

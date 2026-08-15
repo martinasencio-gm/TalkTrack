@@ -70,6 +70,12 @@ def find_overlapping_events(start: datetime, end: datetime, tolerance_minutes: i
 
         results = []
         for appt in items:
+            # All-day events (Out of Office, holidays, "Focus Time" banners)
+            # span midnight-to-midnight, so they'd spuriously "overlap" any
+            # recording made that day and get suggested as if they were the
+            # actual meeting. They're never a real meeting match — skip them.
+            if getattr(appt, "AllDayEvent", False):
+                continue
             try:
                 event_start = _to_datetime(appt.Start)
                 event_end = _to_datetime(appt.End)
