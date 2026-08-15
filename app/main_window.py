@@ -1102,6 +1102,11 @@ class MainWindow(QMainWindow):
         # Labeling is best-effort — show the unlabeled transcript.
         worker = self._simple_diarize_worker
         self.status_label.setText(error_msg)
+        # worker is only None if _simple_diarize_worker were reset elsewhere,
+        # which nothing in this file does today — this branch is unreachable
+        # in practice. If that ever changes, the else must still reach
+        # _process_pending_transcriptions() (via _display_final_transcript),
+        # or the activity widget can get stuck showing "transcribing".
         if worker is not None:
             self._display_final_transcript(
                 worker.transcript_result, getattr(worker, "session", None)
@@ -1145,6 +1150,11 @@ class MainWindow(QMainWindow):
 
     def _on_diarization_error(self, error_msg):
         # Transcription itself succeeded — render it without speaker labels.
+        # _diarization_worker is only None if it were reset elsewhere, which
+        # nothing in this file does today — this else is unreachable in
+        # practice. If that ever changes, it must still reach
+        # _process_pending_transcriptions() (e.g. via _display_final_transcript),
+        # or the activity widget can get stuck showing "transcribing".
         if self._diarization_worker is not None:
             self._display_final_transcript(
                 self._diarization_worker.transcript_result,
