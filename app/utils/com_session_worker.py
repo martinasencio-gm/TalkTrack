@@ -57,7 +57,7 @@ class ComSessionPoller:
         self._main_pid = main_pid
         self._worker_target = worker_target
         self._queue = None
-        self._interval = multiprocessing.Value("d", 5.0)
+        self._interval = multiprocessing.Value("d", 2.0)
         self._stop_event = multiprocessing.Event()
         self._process = None
         self._cached_snapshot = {"audio_apps": [], "mic_pids": set()}

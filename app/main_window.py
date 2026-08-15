@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
         self._current_calendar_event = None
         self._meeting_poll_timer = QTimer(self)
         self._meeting_poll_timer.timeout.connect(self._poll_meeting_signals)
-        self._meeting_poll_timer.start(3000)
+        self._meeting_poll_timer.start(1000)
 
         self._com_poller = ComSessionPoller(main_pid=os.getpid())
         self._com_poller.start()

@@ -301,9 +301,9 @@ class SourceSelector(QWidget):
             self._auto_refresh_timer.stop()
 
     def set_recording_active(self, active):
-        """Switch to faster polling (2s) during recording for quicker call-end detection."""
+        """Switch to faster polling (1s) during recording for quicker call-end detection."""
         if self._com_poller is not None:
-            self._com_poller.set_interval(2.0 if active else 5.0)
+            self._com_poller.set_interval(1.0 if active else 2.0)
         if self._auto_refresh_timer and self._auto_refresh_timer.isActive():
             self._auto_refresh_timer.start(2000 if active else 5000)
 

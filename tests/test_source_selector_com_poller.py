@@ -48,9 +48,9 @@ class TestSourceSelectorComPoller(unittest.TestCase):
         if selector._auto_refresh_timer is None:
             self.skipTest("Per-app UI not available on this Windows version")
         selector.set_recording_active(True)
-        poller.set_interval.assert_called_with(2.0)
+        poller.set_interval.assert_called_with(1.0)
         selector.set_recording_active(False)
-        poller.set_interval.assert_called_with(5.0)
+        poller.set_interval.assert_called_with(2.0)
 
     def test_auto_refresh_timer_uses_relaxed_interval(self):
         selector, poller = self._make_selector()
