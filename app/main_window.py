@@ -648,8 +648,11 @@ class MainWindow(QMainWindow):
         settings = self._meeting_settings()
         if settings.get("mode", "off") == "off":
             return
+        com_snapshot = self._com_poller.get_snapshot()
         snapshot = meeting_signals.probe(
-            settings, calendar_event=self._current_calendar_event)
+            settings, calendar_event=self._current_calendar_event,
+            _audio_apps_fn=lambda: com_snapshot["audio_apps"],
+            _mic_pids_fn=lambda: com_snapshot["mic_pids"])
         self._last_meeting_snapshot = snapshot
 
         # A recording can start (or already be running) through a route the
