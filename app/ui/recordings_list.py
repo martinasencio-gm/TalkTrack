@@ -17,8 +17,19 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QFontMetrics
 
 from app.ui.search_bar import SearchBar
+from app.ui.delete_scope_dialog import (
+    DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
+)
 
 logger = logging.getLogger(__name__)
+
+# Fixed filenames the app itself writes for transcript-derived artifacts.
+# Unlike audio (see _delete_audio_files), these names are never user- or
+# import-controlled, so a static list is safe.
+TRANSCRIPTION_FILENAMES = [
+    "transcript.json", "transcript.txt", "summary.md",
+    "action_items.json", "speaker_names.json",
+]
 
 
 class _RecordingRow(QWidget):
@@ -199,6 +210,50 @@ def _rmtree_robust(directory, retries=4, initial_delay=0.1):
     raise last_exc
 
 
+def _remove_file_robust(path):
+    """os.remove with a chmod-and-retry fallback for Windows read-only locks."""
+    try:
+        os.remove(path)
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        os.remove(path)
+
+
+def _delete_audio_files(directory, metadata):
+    """Remove this session's audio files and clear them from metadata.json.
+
+    Paths come from metadata["audio_files"] rather than a fixed filename
+    list — imported recordings can carry a non-standard filename — so this
+    stays correct without needing to enumerate every naming scheme. Clearing
+    audio_files afterward avoids leaving stale paths that would otherwise
+    make Play Audio silently no-op (both callers already guard with
+    os.path.exists, but an empty dict is honest about what's left).
+    """
+    audio_files = metadata.get("audio_files", {}) or {}
+    for path in audio_files.values():
+        if path and os.path.exists(path):
+            _remove_file_robust(path)
+
+    updated = dict(metadata)
+    updated["audio_files"] = {}
+    meta_path = Path(directory) / "metadata.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(updated, f, indent=2)
+
+
+def _delete_transcription_files(directory):
+    """Remove this session's transcript-derived artifacts.
+
+    metadata.json needs no update: transcribed status is derived live from
+    transcript.json's existence (see _selected_transcribed/_build_row_widget),
+    so removing the file alone is enough to flip that state.
+    """
+    for filename in TRANSCRIPTION_FILENAMES:
+        path = Path(directory) / filename
+        if path.exists():
+            _remove_file_robust(path)
+
+
 class RecordingsList(QWidget):
     """Browse and manage past recordings."""
 
@@ -207,6 +262,10 @@ class RecordingsList(QWidget):
                                            # so main_window can release caches and
                                            # stop playback on the target files
     recording_deleted = pyqtSignal(str)    # directory path of deleted recording
+    recording_files_changed = pyqtSignal(str)  # directory path — partial delete
+                                           # (recordings-only or transcriptions-
+                                           # only); the session survives but its
+                                           # displayed content is now stale
     search_result_selected = pyqtSignal(str, float)  # recording_id, timestamp
     import_requested = pyqtSignal(str)  # chosen audio file path
     transcribe_selected_requested = pyqtSignal(list)  # list[dict] metadata, untranscribed only
@@ -497,34 +556,15 @@ class RecordingsList(QWidget):
         return result
 
     def _delete_recording(self, metadata):
-        directory = metadata.get("directory", "")
-        name = metadata.get("name", "") or Path(directory).name
-
-        reply = QMessageBox.question(
-            self, "Delete Recording",
-            f"Delete \"{name}\" and all its files?\n\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        dialog = DeleteScopeDialog(count=1, parent=self)
+        if not dialog.exec():
             return
 
-        # Notify listeners FIRST so they can stop playback, clear caches,
-        # and release any file handles before the tree comes down.
-        self.about_to_delete.emit(directory)
-
-        try:
-            _rmtree_robust(directory)
-        except Exception as e:
-            logger.exception("Failed to delete recording dir: %s", directory)
-            QMessageBox.warning(self, "Error", f"Failed to delete: {e}")
-            return
-
-        self.recording_deleted.emit(directory)
+        self._perform_delete(metadata, dialog.selected_scope())
         self.refresh()
 
     def _delete_selected_recordings(self, items):
-        """Delete multiple selected recordings."""
+        """Delete multiple selected recordings, all with the same scope."""
         recordings = []
         for item in items:
             meta = item.data(Qt.ItemDataRole.UserRole)
@@ -534,28 +574,41 @@ class RecordingsList(QWidget):
         if not recordings:
             return
 
-        count = len(recordings)
-        reply = QMessageBox.question(
-            self, "Delete Recordings",
-            f"Delete {count} recording{'s' if count > 1 else ''} and all their files?\n\n"
-            "This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        dialog = DeleteScopeDialog(count=len(recordings), parent=self)
+        if not dialog.exec():
             return
+        scope = dialog.selected_scope()
 
         for meta in recordings:
-            directory = meta.get("directory", "")
-            self.about_to_delete.emit(directory)
-            try:
-                _rmtree_robust(directory)
-                self.recording_deleted.emit(directory)
-            except Exception as e:
-                logger.exception("Failed to delete recording dir: %s", directory)
-                QMessageBox.warning(self, "Error", f"Failed to delete {Path(directory).name}: {e}")
+            self._perform_delete(meta, scope)
 
         self.refresh()
+
+    def _perform_delete(self, metadata, scope):
+        """Delete a single recording's files per scope.
+
+        Notifies listeners BEFORE touching audio so playback stops and any
+        file handle is released before removal — this only matters when
+        audio is actually part of the scope (recordings-only or both).
+        """
+        directory = metadata.get("directory", "")
+
+        if scope in (DELETE_RECORDINGS, DELETE_BOTH):
+            self.about_to_delete.emit(directory)
+
+        try:
+            if scope == DELETE_BOTH:
+                _rmtree_robust(directory)
+                self.recording_deleted.emit(directory)
+            elif scope == DELETE_RECORDINGS:
+                _delete_audio_files(directory, metadata)
+                self.recording_files_changed.emit(directory)
+            elif scope == DELETE_TRANSCRIPTIONS:
+                _delete_transcription_files(directory)
+                self.recording_files_changed.emit(directory)
+        except Exception as e:
+            logger.exception("Failed to delete recording files (%s): %s", scope, directory)
+            QMessageBox.warning(self, "Error", f"Failed to delete: {e}")
 
     def _play_audio(self, metadata):
         audio_files = metadata.get("audio_files", {})

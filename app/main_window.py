@@ -401,6 +401,7 @@ class MainWindow(QMainWindow):
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
         self.recordings_list.about_to_delete.connect(self._on_recording_about_to_delete)
         self.recordings_list.recording_deleted.connect(self._on_recording_deleted)
+        self.recordings_list.recording_files_changed.connect(self._on_recording_files_changed)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
         self.recordings_list.import_requested.connect(self._on_import_requested)
         self.recordings_list.transcribe_selected_requested.connect(self._on_transcribe_selected)
@@ -1382,6 +1383,24 @@ class MainWindow(QMainWindow):
             self.summary_panel.clear()
             self.action_items_panel.clear()
             self.status_label.setText("Recording deleted.")
+
+    def _on_recording_files_changed(self, directory):
+        """Clear UI if a partial delete (recordings-only or transcriptions-
+        only) touched the currently loaded session.
+
+        The session itself survives a partial delete, but its displayed
+        transcript/audio may now reference a file that's gone — clearing
+        and letting the user reselect avoids showing stale state without
+        needing separate audio-only/transcript-only refresh logic.
+        """
+        if self._current_session and self._current_session.get("directory") == directory:
+            self._current_session = None
+            self._transcript = None
+            self.transcript_viewer.clear()
+            self.recording_header.clear()
+            self.summary_panel.clear()
+            self.action_items_panel.clear()
+            self.status_label.setText("Recording updated.")
 
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
