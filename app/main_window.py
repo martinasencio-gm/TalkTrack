@@ -38,6 +38,7 @@ from app.ui.collapsible_section import CollapsibleSection
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.tray_icon import TrayIcon
+from app.ui.activity_indicator import ActivityIndicator, resolve_activity_state
 from app.ui.recording_header import RecordingHeader
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
@@ -118,6 +119,11 @@ class MainWindow(QMainWindow):
             logging.getLogger("talktrack").warning(
                 "System tray not available; minimize-to-tray is disabled."
             )
+
+        self._current_transcription_percent = None
+        self._activity_widget = ActivityIndicator()
+        self._activity_widget.restore_requested.connect(self._restore_from_tray)
+        self._activity_widget.position_changed.connect(self._on_activity_widget_moved)
 
         QTimer.singleShot(500, self._check_startup_status)
 
@@ -767,10 +773,13 @@ class MainWindow(QMainWindow):
             self._meeting_detector.note_recording_stopped()
             self.meeting_banner.hide_and_clear()
 
+        self._update_activity_visibility()
+
     def _on_recording_tick(self, seconds):
         if hasattr(self, "tray") and self.tray.is_supported():
             self.tray.set_state(self.recorder.state, int(seconds))
         self._check_silent_capture(seconds)
+        self._update_activity_visibility()
 
     def _check_silent_capture(self, seconds):
         """Warn once if per-app capture has produced zero audio.
@@ -1006,6 +1015,7 @@ class MainWindow(QMainWindow):
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
 
+        self._current_transcription_percent = None
         self._transcription_worker = TranscriptionWorker(
             audio_path=audio_path,
             model_size=model_size,
@@ -1015,6 +1025,7 @@ class MainWindow(QMainWindow):
         self._transcription_worker.session = session
         self._transcription_worker.progress.connect(self._on_transcription_progress)
         self._transcription_worker.progress_percent.connect(self.transcript_viewer.set_progress_percent)
+        self._transcription_worker.progress_percent.connect(self._on_transcription_percent)
         self._transcription_worker.finished.connect(self._on_transcription_finished)
         self._transcription_worker.error.connect(self._on_transcription_error)
         self._transcription_worker.cancelled.connect(self._on_transcription_cancelled)
@@ -1022,6 +1033,11 @@ class MainWindow(QMainWindow):
 
         self.transcript_viewer.show_progress("Starting transcription...")
         self.status_label.setText("Transcribing...")
+        self._update_activity_visibility()
+
+    def _on_transcription_percent(self, pct):
+        self._current_transcription_percent = pct
+        self._update_activity_visibility()
 
     def _cancel_transcription(self):
         if self._transcription_worker and self._transcription_worker.isRunning():
@@ -1034,6 +1050,7 @@ class MainWindow(QMainWindow):
         self._process_pending_transcriptions()
 
     def _process_pending_transcriptions(self):
+        self._update_activity_visibility()
         if self._closing or self._transcription_busy():
             return
         if not self._pending_transcriptions:
@@ -1591,6 +1608,7 @@ class MainWindow(QMainWindow):
         self._success_pending = False
         self._error_pending = False
         self.tray.set_overlay(None)
+        self._update_activity_visibility()
 
     def _quit_from_tray(self):
         self.close()
@@ -2012,7 +2030,11 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
             if self.windowState() & Qt.WindowState.WindowMinimized:
-                if self.config.get("general", "minimize_to_tray") and self.tray.is_supported():
+                busy_state = resolve_activity_state(
+                    self.recorder.state, self._transcription_busy()
+                )
+                if (busy_state is None and self.config.get("general", "minimize_to_tray")
+                        and self.tray.is_supported()):
                     self.setWindowState(Qt.WindowState.WindowNoState)
                     self.hide()
                     if self.config.get("general", "show_tray_hint"):
@@ -2020,6 +2042,7 @@ class MainWindow(QMainWindow):
                         self.config.set("general", "show_tray_hint", False)
                     event.accept()
                     return
+            self._update_activity_visibility()
         super().changeEvent(event)
 
     def closeEvent(self, event):
@@ -2040,6 +2063,7 @@ class MainWindow(QMainWindow):
         if self._meeting_poll_timer.isActive():
             self._meeting_poll_timer.stop()
         self._com_poller.stop()
+        self._activity_widget.close()
         if hasattr(self, "mic_monitor"):
             self.mic_monitor.stop()
         if hasattr(self, "mic_monitor_2"):
@@ -2053,6 +2077,36 @@ class MainWindow(QMainWindow):
         if hasattr(self, "tray"):
             self.tray.hide()
         event.accept()
+
+    def _update_activity_visibility(self):
+        busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
+        should_show = busy_state is not None and (self.isMinimized() or self.isHidden())
+        if should_show:
+            elapsed = (
+                int(self.recorder.get_elapsed_time())
+                if busy_state in ("recording", "paused") else None
+            )
+            percent = (
+                self._current_transcription_percent
+                if busy_state == "transcribing" else None
+            )
+            if not self._activity_widget.isVisible():
+                x, y = self._activity_widget_position()
+                self._activity_widget.show_at(x, y)
+            self._activity_widget.set_activity(busy_state, elapsed, percent)
+        elif self._activity_widget.isVisible():
+            self._activity_widget.hide()
+
+    def _activity_widget_position(self):
+        saved = self.config.get("ui", "activity_widget_position")
+        if saved:
+            return saved[0], saved[1]
+        screen = QApplication.primaryScreen()
+        geo = screen.availableGeometry()
+        return geo.right() - 150, geo.top() + 20
+
+    def _on_activity_widget_moved(self, x, y):
+        self.config.set("ui", "activity_widget_position", [x, y])
 
     def _shutdown_workers(self):
         """Stop background QThreads before the event loop exits.
