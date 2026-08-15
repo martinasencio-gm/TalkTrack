@@ -162,8 +162,14 @@ class TestComSessionPoller(unittest.TestCase):
 
         # Prove it's not just a different object but an actually-usable,
         # unwedged channel: fresh data flows through it end-to-end.
+        # put_nowait() hands off to a background feeder thread that flushes
+        # asynchronously, so poll for the result rather than reading once
+        # immediately (avoids a race against that thread).
         second_queue.put_nowait({"audio_apps": ["fresh"], "mic_pids": {42}})
-        snapshot = poller.get_snapshot()
+        snapshot = _wait_until(
+            lambda: poller.get_snapshot() if poller.get_snapshot()["audio_apps"] else None
+        )
+        self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot["audio_apps"], ["fresh"])
         self.assertEqual(snapshot["mic_pids"], {42})
 
