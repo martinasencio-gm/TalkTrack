@@ -417,11 +417,28 @@ class RecordingsList(QWidget):
         dur_label.setStyleSheet("color: #a6adc8; font-size: 10px; padding: 0px 4px;")
         meta_row.addWidget(dur_label, 0)
 
+        # Checked live against disk, like has_transcript below, rather than
+        # trusting metadata's presence alone — a "recordings only" or
+        # "transcriptions only" delete (see DeleteScopeDialog) can remove
+        # one without the other, and the row needs to reflect that on the
+        # very next refresh() with no other state to go stale.
+        audio_files = metadata.get("audio_files", {}) or {}
+        has_audio = any(p and Path(p).exists() for p in audio_files.values())
         has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
+
+        # Generous padding gives each pill its shape and its slack at once.
+        # Neither ever shrinks — all shrink pressure lands on the elidable
+        # date label beside them, which is the only Ignored-policy item here.
+        if has_audio:
+            audio_badge = QLabel("Audio")
+            audio_badge.setStyleSheet(
+                "color: #89b4fa; font-size: 9px; font-weight: bold;"
+                "background-color: rgba(137, 180, 250, 0.15);"
+                "border-radius: 7px; padding: 2px 8px;"
+            )
+            meta_row.addWidget(audio_badge, 0)
+
         if has_transcript:
-            # Generous padding gives the pill its shape and its slack at once.
-            # It never shrinks — all shrink pressure lands on the elidable
-            # date label beside it, which is the only Ignored-policy item here.
             badge = QLabel("Transcribed")
             badge.setStyleSheet(
                 "color: #a6e3a1; font-size: 9px; font-weight: bold;"

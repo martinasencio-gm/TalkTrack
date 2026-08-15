@@ -1,0 +1,105 @@
+"""Tests for the Audio/Transcribed presence badges on each recordings-list row."""
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+from PyQt6.QtWidgets import QApplication, QLabel
+
+from app.ui.recordings_list import RecordingsList
+
+_app = None
+
+
+def _get_app():
+    global _app
+    if _app is None:
+        _app = QApplication.instance() or QApplication([])
+    return _app
+
+
+class TestRecordingsListBadges(unittest.TestCase):
+    def setUp(self):
+        _get_app()
+        self.tmp = tempfile.mkdtemp()
+        self.recordings_dir = Path(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make_session(self, name, with_audio, with_transcript):
+        d = self.recordings_dir / name
+        d.mkdir()
+        audio_files = {}
+        if with_audio:
+            audio_path = d / "combined_audio.wav"
+            audio_path.write_text("wav", encoding="utf-8")
+            audio_files["combined"] = str(audio_path)
+        if with_transcript:
+            (d / "transcript.json").write_text("{}", encoding="utf-8")
+        metadata = {
+            "directory": str(d),
+            "name": name,
+            "started_at": "2026-08-14T10:00:00",
+            "duration": 60,
+            "audio_files": audio_files,
+        }
+        (d / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+        return metadata
+
+    def _badge_texts(self, widget, metadata):
+        row = widget._build_row_widget(metadata)
+        return {label.text() for label in row.findChildren(QLabel)}
+
+    def test_shows_both_badges_when_audio_and_transcript_exist(self):
+        widget = RecordingsList(self.recordings_dir)
+        metadata = self._make_session("both", with_audio=True, with_transcript=True)
+        texts = self._badge_texts(widget, metadata)
+        self.assertIn("Audio", texts)
+        self.assertIn("Transcribed", texts)
+
+    def test_shows_only_audio_badge_when_no_transcript(self):
+        widget = RecordingsList(self.recordings_dir)
+        metadata = self._make_session("audio_only", with_audio=True, with_transcript=False)
+        texts = self._badge_texts(widget, metadata)
+        self.assertIn("Audio", texts)
+        self.assertNotIn("Transcribed", texts)
+
+    def test_shows_only_transcribed_badge_when_no_audio(self):
+        widget = RecordingsList(self.recordings_dir)
+        metadata = self._make_session("transcript_only", with_audio=False, with_transcript=True)
+        texts = self._badge_texts(widget, metadata)
+        self.assertNotIn("Audio", texts)
+        self.assertIn("Transcribed", texts)
+
+    def test_shows_neither_badge_when_both_deleted(self):
+        widget = RecordingsList(self.recordings_dir)
+        metadata = self._make_session("neither", with_audio=False, with_transcript=False)
+        texts = self._badge_texts(widget, metadata)
+        self.assertNotIn("Audio", texts)
+        self.assertNotIn("Transcribed", texts)
+
+    def test_stale_audio_files_entry_pointing_at_deleted_file_is_not_a_badge(self):
+        # audio_files can list a path whose file is already gone (e.g. between
+        # a recordings-only delete and metadata.json being rewritten) — the
+        # badge must reflect the disk, not the dict.
+        widget = RecordingsList(self.recordings_dir)
+        d = self.recordings_dir / "stale"
+        d.mkdir()
+        metadata = {
+            "directory": str(d),
+            "name": "stale",
+            "started_at": "2026-08-14T10:00:00",
+            "duration": 60,
+            "audio_files": {"combined": str(d / "gone.wav")},
+        }
+        texts = self._badge_texts(widget, metadata)
+        self.assertNotIn("Audio", texts)
+
+
+if __name__ == "__main__":
+    unittest.main()
