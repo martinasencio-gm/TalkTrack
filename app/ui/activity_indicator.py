@@ -1,10 +1,9 @@
 """Floating activity indicator shown when TalkTrack is minimized while busy.
 
 Pure helpers are module-level and unit-testable, mirroring tray_icon.py's
-pattern. The Qt widget (ActivityIndicator) comes in a later task and
-composes them with QPainter.
+pattern. ActivityIndicator (below) is the Qt widget that composes them.
 """
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QApplication, QWidget
 
@@ -111,7 +110,14 @@ class ActivityIndicator(QWidget):
         self.update()
 
     def show_at(self, x, y):
-        screen = QApplication.primaryScreen()
+        # Clamp against whichever screen actually contains (x, y) — not
+        # always the primary — so a position saved on a secondary monitor
+        # doesn't get yanked back to the primary display on every show.
+        screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
+        if screen is None:
+            self.move(x, y)
+            self.show()
+            return
         geo = screen.availableGeometry()
         clamped_x = min(max(x, geo.left()), geo.right() - _WIDTH)
         clamped_y = min(max(y, geo.top()), geo.bottom() - _HEIGHT)

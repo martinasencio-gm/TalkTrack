@@ -2109,9 +2109,11 @@ class MainWindow(QMainWindow):
 
     def _activity_widget_position(self):
         saved = self.config.get("ui", "activity_widget_position")
-        if saved:
+        if isinstance(saved, (list, tuple)) and len(saved) == 2:
             return saved[0], saved[1]
         screen = QApplication.primaryScreen()
+        if screen is None:
+            return 0, 0
         geo = screen.availableGeometry()
         return geo.right() - 150, geo.top() + 20
 
