@@ -91,12 +91,15 @@ class ActivityIndicator(QWidget):
         self._moved_distance = 0
 
     def set_activity(self, state, elapsed_seconds=None, progress_percent=None):
+        prev_state = self._state
         self._state = state
         self._label = format_activity_label(state, elapsed_seconds, progress_percent)
         self._dot_color = resolve_dot_color(state)
+
+        # Only reset pulse phase when transitioning into "recording", not on same-state refreshes
         if state == "recording":
-            self._dot_visible = True
-            if not self._pulse_timer.isActive():
+            if prev_state != "recording":
+                self._dot_visible = True
                 self._pulse_timer.start()
         else:
             self._pulse_timer.stop()

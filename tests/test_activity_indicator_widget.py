@@ -100,6 +100,17 @@ class TestActivityIndicatorWidget(unittest.TestCase):
         self.assertEqual(moved, [])
         widget.close()
 
+    def test_pulse_phase_preserved_across_same_state_calls(self):
+        widget = ActivityIndicator()
+        widget.set_activity("recording", elapsed_seconds=1)
+        # Simulate a pulse tick by toggling the dot visibility
+        widget._dot_visible = False
+        # Refresh with the same state (e.g., updating elapsed time)
+        widget.set_activity("recording", elapsed_seconds=2)
+        # Verify pulse phase was preserved (dot still hidden)
+        self.assertFalse(widget._dot_visible)
+        widget.close()
+
 
 if __name__ == "__main__":
     unittest.main()
