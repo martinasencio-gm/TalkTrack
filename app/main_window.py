@@ -2116,6 +2116,14 @@ class MainWindow(QMainWindow):
                 # duplicate that decision here.
                 event.ignore()
                 self.showMinimized()
+                # When that hides the window entirely (idle + minimize_to_tray),
+                # there's otherwise zero visible feedback that anything
+                # happened — the tray icon was already showing before this
+                # click. changeEvent's own hint is one-time-ever and may
+                # already be spent, so this explicit, occasional action gets
+                # its own reminder every time, independent of that gate.
+                if self.config.get("general", "minimize_to_tray") and self.tray.is_supported():
+                    self.tray.show_hint_balloon()
                 return
             if outcome != "quit":
                 event.ignore()
