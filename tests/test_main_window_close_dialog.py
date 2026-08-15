@@ -110,6 +110,28 @@ class TestCloseEventBranching(unittest.TestCase):
         window._really_quit = True
         window.close()
 
+    def test_minimize_to_tray_does_not_go_through_showMinimized(self):
+        """Regression test for the root cause: showMinimized() re-enters
+        changeEvent synchronously to hide the window, but showMinimized()'s
+        own internal "ensure the widget is visible" follow-up runs right
+        after and silently undoes that hide() before control even returns —
+        confirmed live via diagnostic logging (window ended up isVisible=True
+        immediately after showMinimized() despite changeEvent's hide() having
+        taken effect in between). The tray-hide path must hide() directly and
+        never call showMinimized() at all."""
+        from app.main_window import MainWindow
+        window = MainWindow()
+        window.config.set("general", "minimize_to_tray", True)
+        with patch.object(window, "_confirm_exit", return_value="minimize"), \
+             patch.object(window, "showMinimized") as mock_minimize, \
+             patch.object(window.tray, "is_supported", return_value=True), \
+             patch.object(window.tray, "show_hint_balloon"):
+            window.close()
+        mock_minimize.assert_not_called()
+        self.assertFalse(window.isVisible())
+        window._really_quit = True
+        window.close()
+
     def test_minimize_without_tray_hiding_does_not_show_balloon(self):
         from app.main_window import MainWindow
         window = MainWindow()

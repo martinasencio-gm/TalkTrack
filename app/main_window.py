@@ -2086,14 +2086,21 @@ class MainWindow(QMainWindow):
                 return
             self._export_transcript()
 
+    def _should_hide_to_tray(self):
+        """Whether a minimize right now should fully hide to the tray rather
+        than leave a normal taskbar-minimized window (e.g. so the activity
+        pill has something to replace while busy)."""
+        busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
+        return (
+            busy_state is None
+            and self.config.get("general", "minimize_to_tray")
+            and self.tray.is_supported()
+        )
+
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
             if self.windowState() & Qt.WindowState.WindowMinimized:
-                busy_state = resolve_activity_state(
-                    self.recorder.state, self._transcription_busy()
-                )
-                if (busy_state is None and self.config.get("general", "minimize_to_tray")
-                        and self.tray.is_supported()):
+                if self._should_hide_to_tray():
                     self.setWindowState(Qt.WindowState.WindowNoState)
                     self.hide()
                     if self.config.get("general", "show_tray_hint"):
@@ -2108,22 +2115,27 @@ class MainWindow(QMainWindow):
         if not self._really_quit:
             outcome = self._confirm_exit()
             if outcome == "minimize":
-                # showMinimized() re-enters through changeEvent, which
-                # already knows whether to hide fully to tray (idle, tray
-                # supported, minimize_to_tray enabled) or leave a normal
-                # taskbar-minimized window up (e.g. while recording, so the
-                # activity pill has something to replace) — no need to
-                # duplicate that decision here.
                 event.ignore()
-                self.showMinimized()
-                # When that hides the window entirely (idle + minimize_to_tray),
-                # there's otherwise zero visible feedback that anything
-                # happened — the tray icon was already showing before this
-                # click. changeEvent's own hint is one-time-ever and may
-                # already be spent, so this explicit, occasional action gets
-                # its own reminder every time, independent of that gate.
-                if self.config.get("general", "minimize_to_tray") and self.tray.is_supported():
+                if self._should_hide_to_tray():
+                    # showMinimized() would re-enter changeEvent synchronously
+                    # to do this same hide — but showMinimized()'s own
+                    # internal "ensure the widget is visible" follow-up runs
+                    # immediately after and silently undoes that hide()
+                    # before control even returns here (confirmed via
+                    # diagnostic logging: the window ends up isVisible=True
+                    # right after showMinimized() despite changeEvent's
+                    # hide() having taken effect in between). Hide directly
+                    # instead of going through showMinimized() at all.
+                    self.hide()
+                    # There's otherwise zero visible feedback that anything
+                    # happened — the tray icon was already showing before
+                    # this click. changeEvent's own hint is one-time-ever
+                    # and may already be spent, so this explicit, occasional
+                    # action gets its own reminder every time, independent
+                    # of that gate.
                     self.tray.show_hint_balloon()
+                else:
+                    self.showMinimized()
                 return
             if outcome != "quit":
                 event.ignore()
