@@ -21,7 +21,9 @@ except Exception:
     pass
 
 # --- Logging setup (before anything else) ---
-LOG_DIR = Path.home() / ".talktrack"
+from app.utils.app_paths import APP_DATA_DIR
+
+LOG_DIR = APP_DATA_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "talktrack.log"
 

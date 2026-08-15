@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from app.utils.app_paths import APP_DATA_DIR
 from app.utils.config_migration import apply_meeting_detection_migration
 
 
@@ -83,7 +84,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-CONFIG_DIR = Path.home() / ".talktrack"
+CONFIG_DIR = APP_DATA_DIR
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 
 
