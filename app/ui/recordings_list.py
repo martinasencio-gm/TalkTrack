@@ -20,6 +20,7 @@ from app.ui.search_bar import SearchBar
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
+from app.utils.transcript_export import export_path_for
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,23 @@ def _delete_transcription_files(directory):
         path = Path(directory) / filename
         if path.exists():
             _remove_file_robust(path)
+
+
+def _delete_exported_transcript(metadata, transcripts_dir):
+    """Remove the Markdown export copy from the separate transcripts/
+    folder (see app/utils/transcript_export.py), if one was ever written.
+
+    That export is a "convenience copy" living outside the recording's own
+    directory entirely, keyed off the same directory name + started_at used
+    to write it — deleting transcript.json inside the session folder does
+    not touch it, so a transcript delete is incomplete without this too.
+    """
+    if not transcripts_dir:
+        return
+    directory_name = Path(metadata.get("directory", "")).name
+    path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
+    if path.exists():
+        _remove_file_robust(path)
 
 
 class RecordingsList(QWidget):
@@ -613,15 +631,19 @@ class RecordingsList(QWidget):
         if scope in (DELETE_RECORDINGS, DELETE_BOTH):
             self.about_to_delete.emit(directory)
 
+        transcripts_dir = self.config.get("transcripts", "directory") if self.config else None
+
         try:
             if scope == DELETE_BOTH:
                 _rmtree_robust(directory)
+                _delete_exported_transcript(metadata, transcripts_dir)
                 self.recording_deleted.emit(directory)
             elif scope == DELETE_RECORDINGS:
                 _delete_audio_files(directory, metadata)
                 self.recording_files_changed.emit(directory)
             elif scope == DELETE_TRANSCRIPTIONS:
                 _delete_transcription_files(directory)
+                _delete_exported_transcript(metadata, transcripts_dir)
                 self.recording_files_changed.emit(directory)
         except Exception as e:
             logger.exception("Failed to delete recording files (%s): %s", scope, directory)
