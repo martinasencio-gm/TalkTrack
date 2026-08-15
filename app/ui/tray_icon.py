@@ -71,6 +71,7 @@ class TrayIcon(QObject):
     resume_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     quit_requested = pyqtSignal()
+    message_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -80,6 +81,11 @@ class TrayIcon(QObject):
         self._tray = QSystemTrayIcon(self._base_icon, parent)
         self._tray.setToolTip("TalkTrack")
         self._tray.activated.connect(self._on_activated)
+        # The balloon body itself is the only clickable target the platform
+        # gives a QSystemTrayIcon message — there's no per-button action API
+        # — so a meeting notification's "start recording" affordance is this
+        # click, not a button on the toast.
+        self._tray.messageClicked.connect(self.message_clicked)
 
         self._menu = QMenu()
         self._action_show = QAction("Show TalkTrack", self._menu)
@@ -144,7 +150,12 @@ class TrayIcon(QObject):
         )
 
     def notify_meeting(self, title, message):
-        """Balloon for meeting start/end suggestions."""
+        """Balloon for meeting start/end suggestions.
+
+        Clicking it fires message_clicked; the owner decides what that click
+        means (start recording, or just bring the window forward) based on
+        which suggestion is currently pending.
+        """
         self._tray.showMessage(
             title, message, QSystemTrayIcon.MessageIcon.Information, 8000
         )

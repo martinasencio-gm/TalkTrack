@@ -83,6 +83,10 @@ class MainWindow(QMainWindow):
         # which triggered on any audio from a selected app.
         self._meeting_detector = MeetingDetector()
         self._last_meeting_snapshot = None
+        # "start" | "end" | None — which meeting suggestion the last tray
+        # balloon was for, so a click on it (see _on_tray_message_clicked)
+        # knows whether to start recording or just bring the window forward.
+        self._pending_meeting_notification = None
         self._current_calendar_event = None
         self._meeting_poll_timer = QTimer(self)
         self._meeting_poll_timer.timeout.connect(self._poll_meeting_signals)
@@ -114,6 +118,7 @@ class MainWindow(QMainWindow):
             self.tray.resume_requested.connect(self._toggle_pause)
             self.tray.stop_requested.connect(self._stop_recording)
             self.tray.quit_requested.connect(self._quit_from_tray)
+            self.tray.message_clicked.connect(self._on_tray_message_clicked)
         else:
             import logging
             logging.getLogger("talktrack").warning(
@@ -686,10 +691,11 @@ class MainWindow(QMainWindow):
             self.meeting_banner.show_start(
                 decision.meeting_name, self._meeting_elapsed(snapshot))
             if hasattr(self, "tray") and self.tray.is_supported():
+                self._pending_meeting_notification = "start"
                 self.tray.notify_meeting(
                     "Meeting detected",
                     f"{decision.meeting_name or 'A meeting'} is running — "
-                    "open TalkTrack to record it."
+                    "click here to record it."
                 )
         elif action == "start":
             self.status_label.setText("Meeting detected — auto-recording...")
@@ -698,9 +704,10 @@ class MainWindow(QMainWindow):
             self.meeting_banner.show_end(
                 decision.meeting_name, self.recorder.get_elapsed_time())
             if hasattr(self, "tray") and self.tray.is_supported():
+                self._pending_meeting_notification = "end"
                 self.tray.notify_meeting(
                     "Meeting ended",
-                    "TalkTrack is still recording — open it to stop or pause."
+                    "TalkTrack is still recording — click here to stop or pause."
                 )
         elif action == "stop":
             self.status_label.setText("Meeting ended — stopping recording...")
@@ -723,6 +730,25 @@ class MainWindow(QMainWindow):
         self._meeting_detector.accept_start()
         if self.recorder.state == RecordingState.IDLE:
             self._start_recording()
+
+    def _on_tray_message_clicked(self):
+        """Clicking the meeting-notification balloon acts on it directly.
+
+        A "start" notification starts recording without raising the window —
+        _start_recording's own _on_state_changed call already shows the
+        floating activity pill instead when the window is minimized/hidden,
+        same as starting from the tray menu's Record action. An "end"
+        notification instead brings the window forward, since stop/pause/keep
+        is a 3-way choice the banner already shows and a single click can't
+        collapse into one action.
+        """
+        kind = self._pending_meeting_notification
+        self._pending_meeting_notification = None
+        if kind == "start":
+            self.meeting_banner.hide_and_clear()
+            self._on_meeting_start_accepted()
+        elif kind == "end":
+            self._restore_from_tray()
 
     def _on_meeting_start_dismissed(self):
         self._meeting_detector.dismiss_start()

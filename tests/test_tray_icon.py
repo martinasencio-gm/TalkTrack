@@ -1,5 +1,11 @@
-"""Unit tests for tray icon pure helpers."""
+"""Unit tests for tray icon pure helpers and the TrayIcon Qt widget."""
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import sys
 import unittest
+
+from PyQt6.QtWidgets import QApplication
 
 from app.ui.tray_icon import (
     format_tray_tooltip,
@@ -7,6 +13,15 @@ from app.ui.tray_icon import (
     resolve_overlay,
 )
 from app.recording.recorder import RecordingState
+
+_app = None
+
+
+def _get_app():
+    global _app
+    if _app is None:
+        _app = QApplication.instance() or QApplication(sys.argv)
+    return _app
 
 
 class TestFormatTrayTooltip(unittest.TestCase):
@@ -81,6 +96,20 @@ class TestResolveOverlay(unittest.TestCase):
 
     def test_error_wins_when_both(self):
         self.assertEqual(resolve_overlay(True, True), "red")
+
+
+class TestTrayIconMessageClicked(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def test_message_clicked_relays_qsystemtrayicon_signal(self):
+        from app.ui.tray_icon import TrayIcon
+        tray = TrayIcon()
+        received = []
+        tray.message_clicked.connect(lambda: received.append(True))
+        tray._tray.messageClicked.emit()
+        self.assertEqual(received, [True])
 
 
 if __name__ == "__main__":
