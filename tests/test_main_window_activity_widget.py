@@ -129,6 +129,59 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             window.close()
             mock_instance.close.assert_called_once_with()
 
+    def test_start_diarization_resets_stale_percent_and_updates_widget(self):
+        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator, \
+             patch("app.main_window.DiarizationWorker") as MockDiarizationWorker:
+            mock_activity = MockActivityIndicator.return_value
+            mock_activity.isVisible.return_value = False
+            from app.main_window import MainWindow
+            window = MainWindow()
+            try:
+                window.isMinimized = lambda: True
+                # A just-finished transcription leaves a stale percent behind;
+                # diarization has no percent of its own, so it must be cleared
+                # rather than carried over and shown as if it were live.
+                window._current_transcription_percent = 87
+                window._start_diarization(
+                    transcript_result=object(),
+                    session={"audio_files": {"combined": "/fake/path.wav"}},
+                )
+                self.assertIsNone(window._current_transcription_percent)
+                MockDiarizationWorker.return_value.start.assert_called_once()
+                mock_activity.set_activity.assert_called_once()
+                args, _ = mock_activity.set_activity.call_args
+                self.assertEqual(args[0], "transcribing")
+                self.assertIsNone(args[2])
+            finally:
+                window._really_quit = True
+                window.close()
+
+    def test_start_simple_diarization_resets_stale_percent_and_updates_widget(self):
+        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator, \
+             patch("app.main_window.SimpleDiarizeWorker") as MockSimpleDiarizeWorker:
+            mock_activity = MockActivityIndicator.return_value
+            mock_activity.isVisible.return_value = False
+            from app.main_window import MainWindow
+            window = MainWindow()
+            try:
+                window.isMinimized = lambda: True
+                window._current_transcription_percent = 87
+                window._start_simple_diarization(
+                    transcript_result=object(),
+                    session={"audio_files": {}},
+                    mic_path="/fake/mic.wav",
+                    sys_path="/fake/sys.wav",
+                )
+                self.assertIsNone(window._current_transcription_percent)
+                MockSimpleDiarizeWorker.return_value.start.assert_called_once()
+                mock_activity.set_activity.assert_called_once()
+                args, _ = mock_activity.set_activity.call_args
+                self.assertEqual(args[0], "transcribing")
+                self.assertIsNone(args[2])
+            finally:
+                window._really_quit = True
+                window.close()
+
     def test_change_event_minimize_while_idle_still_hides_to_tray(self):
         with patch("app.main_window.ActivityIndicator") as MockActivityIndicator:
             mock_instance = MockActivityIndicator.return_value

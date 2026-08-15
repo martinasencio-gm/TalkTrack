@@ -1085,6 +1085,7 @@ class MainWindow(QMainWindow):
             self._display_final_transcript(result, session)
 
     def _start_simple_diarization(self, transcript_result, session, mic_path, sys_path):
+        self._current_transcription_percent = None
         self._simple_diarize_worker = SimpleDiarizeWorker(
             mic_path, sys_path, transcript_result
         )
@@ -1093,6 +1094,7 @@ class MainWindow(QMainWindow):
         self._simple_diarize_worker.error.connect(self._on_simple_diarization_error)
         self._simple_diarize_worker.start(QThread.Priority.LowPriority)
         self.transcript_viewer.show_progress("Labeling speakers...")
+        self._update_activity_visibility()
 
     def _on_simple_diarization_finished(self, result):
         session = getattr(self._simple_diarize_worker, "session", None)
@@ -1129,6 +1131,7 @@ class MainWindow(QMainWindow):
         min_speakers = self.config.get("diarization", "min_speakers")
         max_speakers = self.config.get("diarization", "max_speakers")
 
+        self._current_transcription_percent = None
         self._diarization_worker = DiarizationWorker(
             audio_path=audio_path,
             transcript_result=transcript_result,
@@ -1143,6 +1146,7 @@ class MainWindow(QMainWindow):
         self._diarization_worker.start(QThread.Priority.LowPriority)
 
         self.transcript_viewer.show_progress("Running speaker diarization...")
+        self._update_activity_visibility()
 
     def _on_diarization_finished(self, result):
         session = getattr(self._diarization_worker, "session", None)

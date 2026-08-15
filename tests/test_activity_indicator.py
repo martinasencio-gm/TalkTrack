@@ -56,8 +56,16 @@ class TestFormatActivityLabel(unittest.TestCase):
             format_activity_label("transcribing", progress_percent=42), "42%"
         )
 
-    def test_transcribing_defaults_to_zero_percent(self):
-        self.assertEqual(format_activity_label("transcribing"), "0%")
+    def test_transcribing_shows_ellipsis_when_percent_unknown(self):
+        # No percent means no progress data — e.g. diarization, which runs
+        # after transcription and reports no percent. "0%" would misread as
+        # "just started transcribing," so this must not fall back to 0.
+        self.assertEqual(format_activity_label("transcribing"), "…")
+
+    def test_transcribing_shows_zero_percent_explicitly(self):
+        self.assertEqual(
+            format_activity_label("transcribing", progress_percent=0), "0%"
+        )
 
 
 class TestResolveDotColor(unittest.TestCase):

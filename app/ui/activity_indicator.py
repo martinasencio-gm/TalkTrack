@@ -28,13 +28,22 @@ def resolve_activity_state(recording_state, transcription_busy):
 
 
 def format_activity_label(state, elapsed_seconds=None, progress_percent=None):
-    """"MM:SS" for "recording"/"paused"; "NN%" for "transcribing"."""
+    """"MM:SS" for "recording"/"paused"; "NN%" for "transcribing".
+
+    progress_percent=None means no percent is available yet — e.g. diarization
+    (speaker labeling), which runs as a second phase after transcription but
+    reports no progress fraction. That must render as "…", not "0%": 0% reads
+    as "just started transcribing," which is wrong once diarization has taken
+    over.
+    """
     if state in ("recording", "paused"):
         total = max(0, int(elapsed_seconds or 0))
         minutes, seconds = divmod(total, 60)
         return f"{minutes:02d}:{seconds:02d}"
     if state == "transcribing":
-        return f"{int(progress_percent or 0)}%"
+        if progress_percent is None:
+            return "…"
+        return f"{int(progress_percent)}%"
     return ""
 
 
