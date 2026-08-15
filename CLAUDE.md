@@ -213,7 +213,8 @@ TalkTrack/
   `meeting_signals.get_mic_capture_pids()`) run inside a separate OS process owned by
   `com_session_worker.ComSessionPoller` — comtypes' COM proxy finalization can crash the
   whole process natively (confirmed via production Windows Event Log correlation), so
-  isolating it means only the worker dies; `MainWindow` detects and silently respawns it.
+  isolating it means only the worker dies; `ComSessionPoller.get_snapshot()` detects and
+  silently respawns it.
 - Auto-refreshes every 5 seconds in the UI (2 seconds while recording), read from the
   poller's cached snapshot rather than calling pycaw directly
 

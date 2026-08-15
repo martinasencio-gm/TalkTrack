@@ -1,6 +1,7 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import queue
 import time
 import unittest
 from unittest import mock
@@ -131,6 +132,55 @@ class TestComSessionPoller(unittest.TestCase):
         # Should return the cached snapshot, not raise
         self.assertEqual(snapshot["audio_apps"], ["CachedApp"])
         self.assertEqual(snapshot["mic_pids"], {777})
+
+    def test_queue_is_recreated_on_each_start_not_reused_across_respawns(self):
+        """Reproduces the wedge scenario: a worker generation whose put()
+        drained the queue's internal semaphore (e.g. died mid-put after a
+        native crash) must not permanently block every future respawn's
+        put_nowait(). Proven by observing that a *second* start() (a
+        respawn) produces a queue that a fresh put/get still flows through,
+        which is only possible if start() built a brand new Queue rather
+        than reusing the one whose semaphore was left drained.
+        """
+        poller = self._make(_fake_worker_blocks_forever)
+        poller.start()
+        first_queue = poller._queue
+
+        # Simulate the crash-mid-put scenario: acquire the put semaphore by
+        # putting a value, and do NOT get() it, and do NOT let anything else
+        # get() it either. Then fill it again the way a stuck queue would
+        # reject a second put.
+        first_queue.put_nowait({"audio_apps": ["stale"], "mic_pids": set()})
+        with self.assertRaises(queue.Full):
+            first_queue.put_nowait({"audio_apps": ["should not fit"], "mic_pids": set()})
+
+        # A respawn (as triggered by get_snapshot() after the worker dies)
+        # must swap in a fresh queue rather than reusing the wedged one.
+        poller.start()
+        second_queue = poller._queue
+        self.assertIsNot(second_queue, first_queue)
+
+        # Prove it's not just a different object but an actually-usable,
+        # unwedged channel: fresh data flows through it end-to-end.
+        second_queue.put_nowait({"audio_apps": ["fresh"], "mic_pids": {42}})
+        snapshot = poller.get_snapshot()
+        self.assertEqual(snapshot["audio_apps"], ["fresh"])
+        self.assertEqual(snapshot["mic_pids"], {42})
+
+    def test_stop_then_get_snapshot_does_not_respawn(self):
+        """stop() must leave the poller in a state where a later
+        get_snapshot() (e.g. a QTimer tick racing shutdown) does not treat
+        the clean shutdown as a crash and spawn a fresh live worker.
+        """
+        poller = self._make(_fake_worker_blocks_forever)
+        poller.start()
+        poller.stop()
+        self.assertIsNone(poller._process)
+
+        snapshot = poller.get_snapshot()
+
+        self.assertIsNone(poller._process)
+        self.assertEqual(snapshot, {"audio_apps": [], "mic_pids": set()})
 
     def test_failed_respawn_respects_backoff_on_next_call(self):
         """Failed respawn respects backoff window on next get_snapshot() call."""

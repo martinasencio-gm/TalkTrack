@@ -3,7 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from PyQt6.QtWidgets import QApplication
 

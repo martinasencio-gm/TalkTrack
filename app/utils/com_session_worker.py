@@ -56,7 +56,7 @@ class ComSessionPoller:
     def __init__(self, main_pid=None, worker_target=_worker_loop):
         self._main_pid = main_pid
         self._worker_target = worker_target
-        self._queue = multiprocessing.Queue(maxsize=1)
+        self._queue = None
         self._interval = multiprocessing.Value("d", 5.0)
         self._stop_event = multiprocessing.Event()
         self._process = None
@@ -64,6 +64,13 @@ class ComSessionPoller:
         self._last_restart_ts = float("-inf")
 
     def start(self):
+        # Fresh queue per worker generation: multiprocessing.Queue's
+        # internal put semaphore is only released by a successful get, so if
+        # a worker dies (native access violation) after put() acquires it
+        # but before the feeder thread flushes bytes to the pipe, the
+        # semaphore is stuck at 0 forever. Reusing that queue across
+        # respawns would wedge every future worker's put_nowait() silently.
+        self._queue = multiprocessing.Queue(maxsize=1)
         self._stop_event.clear()
         self._process = multiprocessing.Process(
             target=self._worker_target,
@@ -74,12 +81,13 @@ class ComSessionPoller:
         self._last_restart_ts = time.monotonic()
 
     def get_snapshot(self):
-        try:
-            self._cached_snapshot = self._queue.get_nowait()
-        except queue.Empty:
-            pass
-        except Exception:
-            logger.exception("Failed to read snapshot from worker queue; returning cached")
+        if self._queue is not None:
+            try:
+                self._cached_snapshot = self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            except Exception:
+                logger.exception("Failed to read snapshot from worker queue; returning cached")
 
         if self._process is not None and not self._process.is_alive():
             now = time.monotonic()
@@ -104,3 +112,4 @@ class ComSessionPoller:
         if self._process.is_alive():
             self._process.terminate()
             self._process.join(_JOIN_TIMEOUT_SECONDS)
+        self._process = None
