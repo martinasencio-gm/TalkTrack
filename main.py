@@ -195,6 +195,21 @@ def main():
     app.setApplicationName("TalkTrack")
     app.setOrganizationName("TalkTrack")
 
+    # Refuse to start a second instance — instead, wake the one already
+    # running. Checked before any heavy imports/splash so a second launch
+    # exits quickly rather than paying the startup cost first.
+    from app.utils.single_instance import SingleInstanceGuard
+    guard = SingleInstanceGuard(LOG_DIR)
+    if not guard.try_acquire():
+        logger.info("Another TalkTrack instance is already running — exiting")
+        guard.notify_running_instance()
+        QMessageBox.information(
+            None,
+            "TalkTrack",
+            "TalkTrack is already running. Check your system tray.",
+        )
+        sys.exit(0)
+
     # Set app icon
     from PyQt6.QtGui import QIcon
     icon_path = Path(__file__).parent / "resources" / "talktrack.ico"
@@ -233,6 +248,7 @@ def main():
 
     from app.main_window import MainWindow
     window = MainWindow()
+    guard.show_requested.connect(window._restore_from_tray)
     if icon_path.exists():
         window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
