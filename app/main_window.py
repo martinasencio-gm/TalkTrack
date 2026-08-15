@@ -2106,7 +2106,18 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if not self._really_quit:
-            if not self._confirm_exit():
+            outcome = self._confirm_exit()
+            if outcome == "minimize":
+                # showMinimized() re-enters through changeEvent, which
+                # already knows whether to hide fully to tray (idle, tray
+                # supported, minimize_to_tray enabled) or leave a normal
+                # taskbar-minimized window up (e.g. while recording, so the
+                # activity pill has something to replace) — no need to
+                # duplicate that decision here.
+                event.ignore()
+                self.showMinimized()
+                return
+            if outcome != "quit":
                 event.ignore()
                 return
             self._really_quit = True
@@ -2195,19 +2206,31 @@ class MainWindow(QMainWindow):
                 worker.wait(1000)
 
     def _confirm_exit(self):
-        """Show the exit-confirmation dialog. Returns True if user wants to quit."""
+        """Show the close-confirmation dialog.
+
+        Returns "quit", "minimize", or "cancel".
+        """
         if self.recorder.state != RecordingState.IDLE:
             body = (
-                "A recording is in progress. Exiting will stop and save "
-                "the current recording. Continue?"
+                "A recording is in progress. Closing will stop and save it — "
+                "minimize instead to keep recording in the background."
             )
         else:
-            body = "Are you sure you want to exit?"
-        reply = QMessageBox.question(
-            self,
-            "Exit TalkTrack?",
-            body,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Yes,
-        )
-        return reply == QMessageBox.StandardButton.Yes
+            body = "Close TalkTrack, or minimize it to keep it running in the background?"
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Close TalkTrack?")
+        box.setText(body)
+        close_btn = box.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
+        minimize_btn = box.addButton("Minimize", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(minimize_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is close_btn:
+            return "quit"
+        if clicked is minimize_btn:
+            return "minimize"
+        return "cancel"
