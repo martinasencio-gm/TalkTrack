@@ -93,6 +93,7 @@ TalkTrack/
     utils/
       audio_devices.py                # Device enumeration (sounddevice)
       audio_session_monitor.py        # Per-app audio session enumeration (pycaw)
+      com_session_worker.py           # Isolated worker process for pycaw/comtypes COM polling
       config.py                       # JSON config management
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
@@ -208,7 +209,13 @@ TalkTrack/
 - Two sources: pycaw (apps with active audio sessions) + psutil (known audio apps like Teams/Zoom even when not in a call)
 - Groups by display name (deduplicates multi-process apps like Zoom)
 - Returns `{"pids": [int], "name": str, "process_name": str, "active": bool}`
-- Auto-refreshes every 3 seconds in the UI
+- All pycaw/comtypes COM calls (this module's `get_active_audio_apps()` and
+  `meeting_signals.get_mic_capture_pids()`) run inside a separate OS process owned by
+  `com_session_worker.ComSessionPoller` — comtypes' COM proxy finalization can crash the
+  whole process natively (confirmed via production Windows Event Log correlation), so
+  isolating it means only the worker dies; `MainWindow` detects and silently respawns it.
+- Auto-refreshes every 5 seconds in the UI (2 seconds while recording), read from the
+  poller's cached snapshot rather than calling pycaw directly
 
 ### Recording Pipeline
 - State machine: IDLE -> RECORDING -> PAUSED <-> RECORDING -> STOPPING -> IDLE
