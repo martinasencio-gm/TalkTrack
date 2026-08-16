@@ -12,10 +12,15 @@ Two mechanisms working together:
   (especially now that an idle instance can be sitting fully hidden in the
   tray with no taskbar entry — see minimize_to_tray).
 """
+import logging
+import os
 from pathlib import Path
 
+import psutil
 from PyQt6.QtCore import QObject, pyqtSignal, QLockFile
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+
+logger = logging.getLogger(__name__)
 
 SERVER_NAME = "TalkTrackSingleInstance"
 _LOCK_FILE_NAME = "talktrack.lock"
@@ -87,3 +92,50 @@ class SingleInstanceGuard(QObject):
         socket.readAll()
         self.show_requested.emit()
         socket.disconnectFromServer()
+
+
+def sweep_orphaned_processes(main_script_path):
+    """Terminate any other process still running this same main.py.
+
+    Call only after try_acquire() has confirmed this process holds the
+    single-instance lock. QLockFile's PID-liveness check is the source of
+    truth for "who's the real instance" — anything else out there running
+    the identical script at that point (a launcher stub or previous
+    instance's process that outlived its own shutdown) is, by definition,
+    not it, and safe to clean up rather than leak for the rest of the day.
+
+    Never touches this process or its own parent (the venv launcher's
+    trampoline process shares this exact command line and must stay alive).
+    Returns the list of PIDs it terminated, for logging.
+    """
+    own_pid = os.getpid()
+    own_parent_pid = None
+    try:
+        own_parent_pid = psutil.Process(own_pid).ppid()
+    except psutil.Error:
+        pass
+
+    target = str(Path(main_script_path).resolve()).lower()
+    killed = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        pid = proc.info["pid"]
+        if pid == own_pid or pid == own_parent_pid:
+            continue
+        cmdline = proc.info.get("cmdline") or []
+        if not any(arg.lower() == target for arg in cmdline):
+            continue
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            try:
+                proc.kill()
+            except psutil.Error:
+                pass
+        except psutil.Error:
+            continue
+        killed.append(pid)
+
+    if killed:
+        logger.warning("Cleaned up %d orphaned TalkTrack process(es): %s", len(killed), killed)
+    return killed

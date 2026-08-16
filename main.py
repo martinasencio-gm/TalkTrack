@@ -9,6 +9,16 @@ import warnings
 import ctypes
 from pathlib import Path
 
+# ctranslate2 (faster-whisper, used for transcription) and torch (pyannote,
+# used for diarization) each bundle their own copy of Intel's OpenMP runtime
+# (libiomp5md.dll). Loading both into one process — which happens every time
+# a transcription is immediately followed by diarization — makes Intel's
+# runtime hit its duplicate-initialization path, which on this codebase has
+# been observed to deadlock the whole process (zero CPU, totally
+# unresponsive) rather than the more commonly-documented hard crash. This is
+# the standard workaround; it must be set before either library is imported.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 # Set Windows AppUserModelID so the taskbar shows our icon, not Python's.
 # Must be called before QApplication is created. Uses explicit arg/res types
 # to ensure the wide string is passed correctly.
@@ -200,7 +210,7 @@ def main():
     # Refuse to start a second instance — instead, wake the one already
     # running. Checked before any heavy imports/splash so a second launch
     # exits quickly rather than paying the startup cost first.
-    from app.utils.single_instance import SingleInstanceGuard
+    from app.utils.single_instance import SingleInstanceGuard, sweep_orphaned_processes
     guard = SingleInstanceGuard(LOG_DIR)
     if not guard.try_acquire():
         logger.info("Another TalkTrack instance is already running — exiting")
@@ -211,6 +221,11 @@ def main():
             "TalkTrack is already running. Check your system tray.",
         )
         sys.exit(0)
+
+    # We're now the confirmed sole instance — anything else out there still
+    # running this same script didn't clean up after itself last time
+    # (e.g. a prior run that hung and got killed instead of closed).
+    sweep_orphaned_processes(__file__)
 
     # Set app icon
     from PyQt6.QtGui import QIcon
