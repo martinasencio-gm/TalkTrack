@@ -29,6 +29,20 @@ CONFERENCING_APPS = {
 }
 
 
+def _fullest_device_name(name, all_devices):
+    """Find the longest device name sharing this one's prefix.
+
+    Windows' MME host API truncates device names to ~31 characters, so the
+    same physical microphone often shows up twice in this list: once via
+    MME with a chopped-off name, once via WASAPI/DirectSound with the full
+    one. Used only to populate tooltips — the (possibly truncated) name
+    stays the value everything else (selection, persistence) keys off of.
+    """
+    prefix = name[:20]
+    candidates = [d["name"] for d in all_devices if d["name"].startswith(prefix)]
+    return max(candidates, key=len) if candidates else name
+
+
 def format_per_app_suffix(names):
     """Build the collapsed-title suffix for per-app capture mode.
 
@@ -109,6 +123,9 @@ class SourceSelector(QWidget):
         self.mic_combo = QComboBox()
         self.mic_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.mic_combo.currentIndexChanged.connect(self._save_mic_selection)
+        self.mic_combo.currentIndexChanged.connect(
+            lambda: self._sync_combo_tooltip(self.mic_combo)
+        )
         mic_row.addWidget(self.mic_combo, 1)
         content.addLayout(mic_row)
 
@@ -123,6 +140,9 @@ class SourceSelector(QWidget):
         self.mic2_combo = QComboBox()
         self.mic2_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.mic2_combo.currentIndexChanged.connect(self._save_mic_selection)
+        self.mic2_combo.currentIndexChanged.connect(
+            lambda: self._sync_combo_tooltip(self.mic2_combo)
+        )
         mic2_row.addWidget(self.mic2_combo, 1)
         content.addWidget(self._mic2_row_widget)
 
@@ -414,6 +434,11 @@ class SourceSelector(QWidget):
         for i, dev in enumerate(self._mic_devices):
             label = f"{dev['name']} ({dev['hostapi']})"
             self.mic_combo.addItem(label, dev["index"])
+            self.mic_combo.setItemData(
+                i + 1,
+                _fullest_device_name(dev["name"], self._mic_devices),
+                Qt.ItemDataRole.ToolTipRole,
+            )
             if dev["index"] == default_mic:
                 default_mic_idx = i + 1
 
@@ -440,6 +465,11 @@ class SourceSelector(QWidget):
         for i, dev in enumerate(self._mic_devices):
             label = f"{dev['name']} ({dev['hostapi']})"
             self.mic2_combo.addItem(label, dev["index"])
+            self.mic2_combo.setItemData(
+                i + 1,
+                _fullest_device_name(dev["name"], self._mic_devices),
+                Qt.ItemDataRole.ToolTipRole,
+            )
 
         # Restore saved mic 2
         last_mic2 = ""
@@ -455,6 +485,10 @@ class SourceSelector(QWidget):
 
         self.mic_combo.blockSignals(False)
         self.mic2_combo.blockSignals(False)
+        # blockSignals() suppressed currentIndexChanged above, so the
+        # tooltip sync that piggybacks on it needs an explicit call here.
+        self._sync_combo_tooltip(self.mic_combo)
+        self._sync_combo_tooltip(self.mic2_combo)
 
         # System audio dropdown - always populated
         self.loopback_combo.clear()
@@ -547,6 +581,13 @@ class SourceSelector(QWidget):
                     self.loopback_combo.setVisible(True)
             else:
                 self.radio_per_app.setChecked(True)
+
+    def _sync_combo_tooltip(self, combo):
+        """Mirror the current item's ToolTipRole data onto the combo box
+        itself, so hovering the closed dropdown (not just the open popup
+        list) surfaces the untruncated device name too."""
+        tip = combo.itemData(combo.currentIndex(), Qt.ItemDataRole.ToolTipRole)
+        combo.setToolTip(tip or "")
 
     def _save_mic_selection(self):
         """Persist mic choices immediately when the user changes a dropdown."""

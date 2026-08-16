@@ -78,7 +78,7 @@ QPushButton#recordButton:hover {
 }
 
 QPushButton#recordButton:disabled {
-    background-color: #45475a;
+    background-color: #1e1e2e;
     color: #585b70;
 }
 
@@ -97,7 +97,7 @@ QPushButton#stopButton:hover {
 }
 
 QPushButton#stopButton:disabled {
-    background-color: #45475a;
+    background-color: #1e1e2e;
     color: #585b70;
 }
 
@@ -116,7 +116,7 @@ QPushButton#pauseButton:hover {
 }
 
 QPushButton#pauseButton:disabled {
-    background-color: #45475a;
+    background-color: #1e1e2e;
     color: #585b70;
 }
 
