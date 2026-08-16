@@ -98,6 +98,7 @@ TalkTrack/
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
       transcript_export.py            # Pure Markdown builder for LLM-ready transcript export
+      transcripts_migration.py        # One-time move of stranded legacy-path exports into the configured transcripts folder
   tests/
     test_platform_info.py             # Windows version detection tests
     test_audio_session_monitor.py     # Audio session enumeration tests
@@ -176,6 +177,8 @@ TalkTrack/
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
 - **Multi-select bulk delete:** select multiple recordings and delete at once (Ctrl/Shift+click)
+- **Delete scopes:** deleting a recording offers three scopes — the recording folder (removes the whole session directory, keeps the Markdown export), transcriptions only (removes transcript/summary/action items plus the Markdown export, keeps audio), or everything
+- **Transcribed indicator:** the "Transcribed" pill in the recordings list reflects the Markdown export in the transcripts folder, not `transcript.json` inside the recording; the right-click Transcribe/Export actions still key off `transcript.json`
 - **Custom app icon:** Start Menu shortcut (offered on first run) targets the venv interpreter and carries the icon + AppUserModelID for a correct taskbar icon
 - **About dialog:** version info and Buy Me a Coffee donation link
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
@@ -265,6 +268,7 @@ TalkTrack/
 - General settings: min_recording_length, silence_auto_stop, silence_duration
 - Meeting detection settings (`meeting_detection`): mode ("off"/"suggest"/"auto"), threshold_seconds, detect_end, end_grace_seconds, end_action ("stop"/"pause"), use_mic_capture, use_calendar, use_window_title, apps. Replaces the old `general.auto_record` flag, which `app/utils/config_migration.py` migrates into `mode` ("auto" or "off") on first load after upgrade — `silence_auto_stop` is unaffected and still applies as an independent backstop.
 - Output settings: `output.directory` (recordings output folder), `transcripts.directory` (Markdown export folder, default sibling `transcripts/` dir, auto-created)
+- `transcripts.legacy_import_done`: one-time flag; once set, `app/utils/transcripts_migration.py` (called from `MainWindow.__init__`) skips re-scanning the old repo-relative `transcripts/` folder for exports stranded there before `transcripts.directory` was configurable
 
 ### Data Files Per Recording
 - summary.md: AI-generated meeting summary
