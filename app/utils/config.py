@@ -1,9 +1,11 @@
 import copy
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.utils.app_paths import APP_DATA_DIR
+from app.utils.atomic_io import atomic_write_json
 from app.utils.config_migration import apply_meeting_detection_migration
 
 
@@ -94,6 +96,8 @@ CONFIG_FILE = CONFIG_DIR / "settings.json"
 class Config:
     def __init__(self):
         self._data = {}
+        self._batch_depth = 0
+        self._batch_dirty = False
         self.load()
 
     def load(self):
@@ -119,11 +123,36 @@ class Config:
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
 
     def save(self):
+        """Persist settings, unless a batch() is collecting writes.
+
+        Goes through atomic_io rather than a bare replace: settings.json
+        lives under Documents, which is routinely redirected to OneDrive,
+        whose sync client holds brief locks that made os.replace fail with
+        WinError 5 and take the settings dialog down with it.
+        """
+        if self._batch_depth:
+            self._batch_dirty = True
+            return
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        tmp_path = CONFIG_FILE.parent / (CONFIG_FILE.name + ".tmp")
-        with open(tmp_path, "w") as f:
-            json.dump(self._data, f, indent=2)
-        os.replace(tmp_path, CONFIG_FILE)
+        atomic_write_json(CONFIG_FILE, self._data, indent=2)
+
+    @contextmanager
+    def batch(self):
+        """Collapse the enclosed set() calls into a single disk write.
+
+        The settings dialog assigns ~40 keys per OK click; one write each
+        meant 40 chances to collide with a sync lock, all to produce the
+        same file. Writes on exit even when the body raises, so values
+        already applied in memory aren't silently lost, and nests safely.
+        """
+        self._batch_depth += 1
+        try:
+            yield self
+        finally:
+            self._batch_depth -= 1
+            if self._batch_depth == 0 and self._batch_dirty:
+                self._batch_dirty = False
+                self.save()
 
     def _backup_corrupt_file(self):
         try:

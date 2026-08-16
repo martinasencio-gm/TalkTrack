@@ -3,7 +3,22 @@ leave a truncated file behind."""
 
 import json
 import os
+import stat
 import time
+
+
+def _clear_readonly(path):
+    """Drop the read-only attribute from an existing destination file.
+
+    OneDrive leaves synced files marked read-only often enough to matter,
+    and os.replace onto one fails with the same WinError 5 a transient lock
+    raises — except this one never clears on its own, so the retry loop
+    below would burn every attempt and still fail.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
 
 
 def atomic_write_text(path, text, encoding="utf-8", retries=4, initial_delay=0.1):
@@ -28,7 +43,14 @@ def atomic_write_text(path, text, encoding="utf-8", retries=4, initial_delay=0.1
             return
         except PermissionError:
             if attempt == retries - 1:
+                # A dead .tmp beside the real file confuses later inspection
+                # and gets synced around by OneDrive as if it were content.
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
                 raise
+            _clear_readonly(path)
             time.sleep(delay)
             delay *= 2
 

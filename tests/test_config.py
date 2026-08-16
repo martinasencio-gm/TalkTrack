@@ -1,5 +1,6 @@
 # tests/test_config.py
 import copy
+import os
 import json
 import tempfile
 import unittest
@@ -70,6 +71,81 @@ class TestAtomicSave(ConfigTestCase):
         leftovers = [p for p in self.config_file.parent.iterdir()
                      if p.name.startswith("settings") and p.suffix == ".tmp"]
         self.assertEqual(leftovers, [])
+
+    def test_save_rides_through_a_transient_permission_error(self):
+        """settings.json lives in Documents, which is commonly redirected to
+        OneDrive; its sync client holds brief locks that made os.replace fail
+        with WinError 5 and crash the settings dialog."""
+        cfg = Config()
+        real_replace = os.replace
+        calls = []
+
+        def flaky_replace(src, dst):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError(5, "Access is denied")
+            real_replace(src, dst)
+
+        with patch("os.replace", side_effect=flaky_replace), patch("time.sleep"):
+            cfg.set("general", "silence_duration", 99)
+
+        saved = json.loads(self.config_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["general"]["silence_duration"], 99)
+
+    def test_failed_save_leaves_no_temp_file(self):
+        cfg = Config()
+        with patch("os.replace", side_effect=PermissionError(5, "Access is denied")), \
+             patch("time.sleep"):
+            with self.assertRaises(PermissionError):
+                cfg.set("general", "silence_duration", 99)
+
+        leftovers = [p for p in self.config_file.parent.iterdir()
+                     if p.name.startswith("settings") and p.suffix == ".tmp"]
+        self.assertEqual(leftovers, [])
+
+
+class TestBatchedSave(ConfigTestCase):
+    """The settings dialog sets ~40 keys per OK click. One disk write each
+    multiplied the chance of colliding with a OneDrive lock by 40 and made
+    saving visibly slow; batch() collapses them into a single write."""
+
+    def test_batch_writes_the_file_once(self):
+        cfg = Config()
+        cfg.save()  # ensure the file exists before counting writes
+
+        with patch("os.replace", wraps=os.replace) as replace:
+            with cfg.batch():
+                cfg.set("general", "silence_duration", 42)
+                cfg.set("general", "min_recording_length", 7)
+                cfg.set("audio", "sample_rate", 48000)
+            self.assertEqual(replace.call_count, 1)
+
+        saved = json.loads(self.config_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["general"]["silence_duration"], 42)
+        self.assertEqual(saved["general"]["min_recording_length"], 7)
+        self.assertEqual(saved["audio"]["sample_rate"], 48000)
+
+    def test_batch_saves_even_when_the_body_raises(self):
+        """A failure partway through the settings dialog must not silently
+        drop the values already applied to the in-memory config."""
+        cfg = Config()
+        with self.assertRaises(ValueError):
+            with cfg.batch():
+                cfg.set("general", "silence_duration", 55)
+                raise ValueError("boom")
+
+        saved = json.loads(self.config_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["general"]["silence_duration"], 55)
+
+    def test_nested_batches_still_write_once(self):
+        cfg = Config()
+        cfg.save()
+        with patch("os.replace", wraps=os.replace) as replace:
+            with cfg.batch():
+                with cfg.batch():
+                    cfg.set("general", "silence_duration", 11)
+                cfg.set("general", "min_recording_length", 3)
+            self.assertEqual(replace.call_count, 1)
 
 
 class TestDefaultConfigIsolation(ConfigTestCase):

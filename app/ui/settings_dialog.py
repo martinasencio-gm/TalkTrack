@@ -547,6 +547,33 @@ class SettingsDialog(QDialog):
         self.calendar_enabled_cb.setChecked(self.config.get("calendar", "enabled"))
 
     def _save_and_close(self):
+        """Persist every setting in one write, then close.
+
+        The write can fail for reasons outside the app's control — OneDrive
+        holding a lock on settings.json is the one seen in the wild — and
+        that used to escape as an unhandled PermissionError traceback with
+        the dialog's edits lost. Report it and stay open so the user can
+        retry without retyping.
+        """
+        try:
+            with self.config.batch():
+                if not self._apply_settings():
+                    return
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Settings",
+                f"Could not save settings:\n{e}\n\nThe file may be locked by "
+                "another program (OneDrive sync, antivirus). Try again in a moment.",
+            )
+            return
+        self.accept()
+
+    def _apply_settings(self):
+        """Copy each widget's value into the config.
+
+        Returns False when the user cancels the AI provider package install,
+        which aborts the save before the provider fields are touched.
+        """
         self.config.set("general", "min_recording_length", self.min_recording_spin.value())
         self.config.set("meeting_detection", "mode",
                         self.meeting_mode_combo.currentData())
@@ -598,7 +625,7 @@ class SettingsDialog(QDialog):
         provider_type = self.ai_provider_combo.currentData()
         if provider_type != "none":
             if not self._install_provider_package(provider_type):
-                return  # User cancelled install, don't save
+                return False  # User cancelled install, don't save
 
         # Save current provider's fields into the cache before persisting
         self._save_current_provider_settings()
@@ -617,7 +644,7 @@ class SettingsDialog(QDialog):
         self.config.set("calendar", "enabled", self.calendar_enabled_cb.isChecked())
 
         self.config.save()
-        self.accept()
+        return True
 
     def _open_setup_wizard(self):
         from app.ui.diarization_setup import DiarizationSetupWizard

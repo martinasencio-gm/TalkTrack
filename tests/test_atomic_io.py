@@ -76,6 +76,41 @@ class TestAtomicWrite(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 atomic_io.atomic_write_text(path, "new")
 
+    def test_failed_write_leaves_no_tmp_file(self):
+        # A dead .tmp beside the real file is confusing on inspection and
+        # gets picked up by folder-syncing tools. Observed for real next to
+        # settings.json after a failed save.
+        from app.utils import atomic_io
+        path = self.dir / "out.txt"
+
+        with unittest.mock.patch.object(
+            atomic_io.os, "replace",
+            side_effect=PermissionError(5, "Access is denied"),
+        ), unittest.mock.patch.object(atomic_io.time, "sleep"):
+            with self.assertRaises(PermissionError):
+                atomic_io.atomic_write_text(path, "new")
+
+        leftovers = [p.name for p in self.dir.iterdir() if p.suffix == ".tmp"]
+        self.assertEqual(leftovers, [])
+
+    def test_write_text_clears_readonly_destination(self):
+        # OneDrive can leave a synced file with the read-only attribute set,
+        # which makes os.replace fail with the same WinError 5 forever — no
+        # amount of waiting clears it, so retrying alone is not enough.
+        import os as _os
+        import stat as _stat
+        from app.utils import atomic_io
+        path = self.dir / "out.txt"
+        path.write_text("old", encoding="utf-8")
+        _os.chmod(path, _stat.S_IREAD)
+
+        try:
+            atomic_io.atomic_write_text(path, "new")
+        finally:
+            _os.chmod(path, _stat.S_IWRITE)
+
+        self.assertEqual(path.read_text(encoding="utf-8"), "new")
+
 
 if __name__ == "__main__":
     unittest.main()
