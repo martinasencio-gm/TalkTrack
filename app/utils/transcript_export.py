@@ -22,6 +22,41 @@ def _format_time(seconds):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def _as_number(value):
+    """The value if it is a real number, else None.
+
+    bool is excluded explicitly: it is an int subclass in Python, so a stray
+    True would otherwise sail through as 1.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def _format_confidence(value):
+    """Two-decimal confidence string, or None when there is nothing usable
+    to render. Measured confidences here cluster in 0.65-0.79, so two
+    decimals is the resolution that actually distinguishes segments."""
+    number = _as_number(value)
+    return None if number is None else f"{number:.2f}"
+
+
+def _segment_timestamp(seg):
+    """HH:MM:SS, or an HH:MM:SS–HH:MM:SS range when the segment carries a
+    usable end.
+
+    A missing, non-numeric, or non-advancing end falls back to the single
+    timestamp: a backwards or zero-length range in the corpus would be worse
+    than no range at all. Transcripts produced before end was exported hit
+    this path and render exactly as they used to.
+    """
+    start = _as_number(seg.get("start")) or 0
+    end = _as_number(seg.get("end"))
+    if end is None or end <= start:
+        return _format_time(start)
+    return f"{_format_time(start)}–{_format_time(end)}"
+
+
 def sanitize_filename_component(text):
     """Strip characters invalid in Windows filenames, collapse whitespace
     to single underscores, cap length. Empty/whitespace-only input becomes
@@ -135,9 +170,16 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
     for seg in transcript_data.get("segments", []):
         speaker_id = seg.get("speaker", "")
         display = speaker_names.get(speaker_id, speaker_id) if speaker_id else ""
-        timestamp = _format_time(seg.get("start", 0))
-        prefix = f"**[{timestamp}] {display}:**" if display else f"**[{timestamp}]**"
-        lines.append(f"{prefix} {seg.get('text', '').strip()}")
+        parts = [f"[{_segment_timestamp(seg)}]"]
+        if display:
+            parts.append(display)
+        confidence = _format_confidence(seg.get("confidence"))
+        if confidence:
+            parts.append(f"({confidence})")
+        # The colon reads as "<speaker> said:" — it only earns its place
+        # when a speaker is actually named.
+        suffix = ":**" if display else "**"
+        lines.append(f"**{' '.join(parts)}{suffix} {seg.get('text', '').strip()}")
 
     return "\n".join(lines) + "\n"
 

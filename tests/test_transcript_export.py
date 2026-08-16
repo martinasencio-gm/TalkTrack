@@ -180,8 +180,8 @@ class TestBuildExportMarkdown(unittest.TestCase):
             self._metadata(), self._transcript(), {"SPEAKER_00": "Jane Doe"}, None, "", None, None
         )
         self.assertIn("# Transcript", md)
-        self.assertIn("**[00:00:03] Jane Doe:** Let's get started.", md)
-        self.assertIn("**[00:00:12] SPEAKER_01:** Sounds good.", md)
+        self.assertIn("**[00:00:03–00:00:08] Jane Doe:** Let's get started.", md)
+        self.assertIn("**[00:00:12–00:00:15] SPEAKER_01:** Sounds good.", md)
 
     def test_empty_segments_still_produces_transcript_header(self):
         empty_transcript = {"segments": [], "language": "", "duration": 0}
@@ -189,6 +189,132 @@ class TestBuildExportMarkdown(unittest.TestCase):
             self._metadata(), empty_transcript, {}, None, "", None, None
         )
         self.assertIn("# Transcript", md)
+
+
+class TestSegmentRendering(unittest.TestCase):
+    """Segment lines must carry end time and confidence so the export stands
+    on its own once the audio is deleted — while degrading cleanly for
+    transcripts produced before those fields were exported."""
+
+    def _metadata(self):
+        return {
+            "directory": "C:/recordings/rec_20260813_140000",
+            "started_at": "2026-08-13T14:00:00",
+            "duration": 1834,
+        }
+
+    def _render(self, segment):
+        transcript = {"segments": [segment], "duration": 1834}
+        return build_export_markdown(
+            self._metadata(), transcript, {"SPEAKER_00": "Alice"},
+            None, "", None, None,
+        )
+
+    def test_full_form_with_end_speaker_and_confidence(self):
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00", "confidence": 0.7590766239383613,
+        })
+        self.assertIn("**[00:00:01–00:00:09] Alice (0.76):** Hello there.", md)
+
+    def test_confidence_omitted_when_absent(self):
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:01–00:00:09] Alice:** Hello there.", md)
+
+    def test_no_colon_when_there_is_no_speaker(self):
+        """The colon reads as '<speaker> said:' — without a name it is noise."""
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "confidence": 0.76,
+        })
+        self.assertIn("**[00:00:01–00:00:09] (0.76)** Hello there.", md)
+
+    def test_timestamp_only_when_neither_speaker_nor_confidence(self):
+        md = self._render({"start": 1.62, "end": 9.02, "text": "Hello there."})
+        self.assertIn("**[00:00:01–00:00:09]** Hello there.", md)
+
+    def test_missing_end_falls_back_to_single_timestamp(self):
+        md = self._render({
+            "start": 1.62, "text": "Hello there.", "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:01] Alice:** Hello there.", md)
+
+    def test_none_end_falls_back_to_single_timestamp(self):
+        md = self._render({
+            "start": 1.62, "end": None, "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:01] Alice:** Hello there.", md)
+
+    def test_non_numeric_end_falls_back_to_single_timestamp(self):
+        md = self._render({
+            "start": 1.62, "end": "9.02", "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:01] Alice:** Hello there.", md)
+
+    def test_non_advancing_end_falls_back_to_single_timestamp(self):
+        """A backwards or zero-length range would be worse than no range."""
+        md = self._render({
+            "start": 9.02, "end": 1.62, "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:09] Alice:** Hello there.", md)
+        self.assertNotIn("–", md)
+
+    def test_equal_end_falls_back_to_single_timestamp(self):
+        md = self._render({
+            "start": 9.02, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:09] Alice:** Hello there.", md)
+
+    def test_none_confidence_is_omitted(self):
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00", "confidence": None,
+        })
+        self.assertIn("**[00:00:01–00:00:09] Alice:** Hello there.", md)
+
+    def test_non_numeric_confidence_is_omitted(self):
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00", "confidence": "high",
+        })
+        self.assertIn("**[00:00:01–00:00:09] Alice:** Hello there.", md)
+
+    def test_boolean_confidence_is_omitted(self):
+        """bool is an int subclass in Python — a stray True must not render
+        as '(1.00)'."""
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00", "confidence": True,
+        })
+        self.assertIn("**[00:00:01–00:00:09] Alice:** Hello there.", md)
+
+    def test_confidence_rendered_to_two_decimals(self):
+        md = self._render({
+            "start": 1.62, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00", "confidence": 0.7590766239383613,
+        })
+        self.assertIn("(0.76)", md)
+        self.assertNotIn("0.7590766", md)
+
+    def test_missing_start_is_treated_as_zero(self):
+        md = self._render({"end": 9.02, "text": "Hello there.", "speaker": "SPEAKER_00"})
+        self.assertIn("**[00:00:00–00:00:09] Alice:** Hello there.", md)
+
+    def test_none_start_does_not_raise(self):
+        """A None start previously reached int(None) inside _format_time.
+        The new comparison against end must not make that worse."""
+        md = self._render({
+            "start": None, "end": 9.02, "text": "Hello there.",
+            "speaker": "SPEAKER_00",
+        })
+        self.assertIn("**[00:00:00–00:00:09] Alice:** Hello there.", md)
 
 
 class TestExportTranscript(unittest.TestCase):
@@ -246,7 +372,10 @@ class TestExportTranscript(unittest.TestCase):
             self.assertEqual(len(md_files), 1)
 
             # Confirm content is sane
-            content = md_files[0].read_text()
+            # Explicit encoding: atomic_write_text writes UTF-8, but
+            # read_text() defaults to the locale encoding (cp1252 on
+            # Windows), which mangles the en-dash in segment time ranges.
+            content = md_files[0].read_text(encoding="utf-8")
             self.assertIn('title: "Team Sync"', content)
             self.assertIn("recording_date: \"2026-08-13T14:00:00\"", content)
             self.assertIn("duration_seconds: 600", content)
@@ -260,7 +389,7 @@ class TestExportTranscript(unittest.TestCase):
             self.assertIn("# Notes", content)
             self.assertIn("Important discussion about Q3 plans.", content)
             self.assertIn("# Transcript", content)
-            self.assertIn("**[00:00:03] Alice:** Test segment one.", content)
+            self.assertIn("**[00:00:03–00:00:08] Alice:** Test segment one.", content)
 
     def test_reexport_with_changed_title_overwrites_not_orphans(self):
         """A rename / calendar tag / calendar remap changes the title but
