@@ -246,6 +246,31 @@ QRadioButton#captureMode::indicator:checked {
     border-color: #89b4fa;
 }
 
+/* Search mode toggle ("Aa" text / "AI" semantic) — same checked-state
+   language as the capture-mode radios so a mode switch always reads the
+   same way in this app: quiet until active, blue border+text when on. */
+QPushButton#searchModeToggle {
+    background-color: #181825;
+    color: #a6adc8;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    padding: 4px 2px;
+    font-weight: bold;
+    font-size: 10px;
+    min-height: 0;
+}
+
+QPushButton#searchModeToggle:hover {
+    background-color: #1e1e2e;
+    border-color: #585b70;
+}
+
+QPushButton#searchModeToggle:checked {
+    background-color: #1e1e2e;
+    border-color: #89b4fa;
+    color: #89b4fa;
+}
+
 /* Compact app audio list */
 #appAudioList {
     padding: 2px;

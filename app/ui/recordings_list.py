@@ -296,6 +296,7 @@ class RecordingsList(QWidget):
         self._recordings = []
         self._search_worker = None
         self._pending_search = None
+        self._showing_search_results = False
         try:
             salvage_orphaned_recordings(self.recordings_dir)
         except Exception:
@@ -314,6 +315,7 @@ class RecordingsList(QWidget):
         # Search bar
         self.search_bar = SearchBar()
         self.search_bar.search_requested.connect(self._on_search)
+        self.search_bar.filter_changed.connect(self._on_filter_changed)
         self.search_bar.cleared.connect(self.refresh)
         layout.addWidget(self.search_bar)
 
@@ -338,7 +340,21 @@ class RecordingsList(QWidget):
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.list_widget, 1)
 
+        self._empty_label = QLabel("")
+        self._empty_label.setWordWrap(True)
+        self._empty_label.setStyleSheet(
+            "color: #a6adc8; font-size: 10px; padding: 8px 4px;"
+        )
+        self._empty_label.setVisible(False)
+        layout.addWidget(self._empty_label)
+
+    def _set_empty_message(self, text):
+        self._empty_label.setText(text)
+        self._empty_label.setVisible(bool(text))
+
     def refresh(self):
+        self._showing_search_results = False
+        self._set_empty_message("")
         self.list_widget.clear()
         self._recordings = []
 
@@ -655,6 +671,30 @@ class RecordingsList(QWidget):
         if audio_path and os.path.exists(audio_path):
             os.startfile(audio_path)
 
+    def _on_filter_changed(self, text):
+        """Live, local filter of the visible recordings by name/date.
+
+        Runs on every keystroke against rows already on screen — no worker
+        thread, no transcript required — unlike _on_search below, which
+        searches transcript *content* and only fires on Enter. If a
+        transcript-search result set is currently showing, rebuild the
+        normal recordings view first so there's something to filter.
+        """
+        if self._showing_search_results:
+            self.refresh()
+
+        query = text.strip().lower()
+        visible_count = 0
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            metadata = item.data(Qt.ItemDataRole.UserRole) or {}
+            haystack = f"{metadata.get('name', '')} {metadata.get('started_at', '')}".lower()
+            match = query in haystack
+            item.setHidden(not match)
+            visible_count += match
+
+        self._set_empty_message(f'No recordings match "{text.strip()}"' if not visible_count else "")
+
     def _on_search(self, query, is_semantic):
         # Only the latest query matters; typing while a search runs replaces
         # the pending one, and the runner picks it up when the worker frees.
@@ -677,6 +717,7 @@ class RecordingsList(QWidget):
         self._maybe_start_search()
 
     def _show_search_results(self, results):
+        self._showing_search_results = True
         self.list_widget.clear()
         for result in results[:50]:
             rec_id = result["recording_id"]
@@ -691,6 +732,8 @@ class RecordingsList(QWidget):
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, result)
             self.list_widget.addItem(item)
+
+        self._set_empty_message("No transcripts match that search." if not results else "")
 
     def _format_duration(self, seconds):
         h = int(seconds // 3600)
