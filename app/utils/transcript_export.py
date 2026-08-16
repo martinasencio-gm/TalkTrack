@@ -5,13 +5,9 @@ stays unit-testable without a QApplication. app/main_window.py is
 responsible for reading the source JSON/text files from a recording's
 directory and calling export_transcript() with the results.
 """
-import os
 from pathlib import Path
 
 from app.utils.atomic_io import atomic_write_text
-
-_MAX_TITLE_LEN = 60
-_INVALID_CHARS = '\\/:*?"<>|'
 
 
 def _format_time(seconds):
@@ -55,64 +51,6 @@ def _segment_timestamp(seg):
     if end is None or end <= start:
         return _format_time(start)
     return f"{_format_time(start)}–{_format_time(end)}"
-
-
-def sanitize_filename_component(text):
-    """Strip characters invalid in Windows filenames, collapse whitespace
-    to single underscores, cap length. Empty/whitespace-only input becomes
-    'Untitled' rather than an empty filename component."""
-    text = text.strip()
-    if not text:
-        return "Untitled"
-    cleaned = "".join(" " if c in _INVALID_CHARS else c for c in text)
-    collapsed = "_".join(cleaned.split())
-    return collapsed[:_MAX_TITLE_LEN] if collapsed else "Untitled"
-
-
-def export_path_for(directory_name, timestamp_iso, transcripts_dir):
-    """<transcripts_dir>/<sanitized-directory-name>_<YYYYMMDD>_<HHMM>.md
-
-    The filename is derived from the recording's stable session directory
-    name, NOT its (mutable) title — a rename, a calendar tag, or a calendar
-    remap all change the title but must keep re-exporting to the same file.
-    Deriving the filename from the title instead would orphan the previous
-    export under the old filename every time the title changes.
-
-    Timestamp comes from the recording's started_at, not wall-clock export
-    time, so re-exporting the same recording overwrites the same file
-    instead of accumulating duplicates. A missing/unparseable timestamp
-    falls back to an all-zero stamp rather than raising.
-    """
-    stamp = "00000000_0000"
-    if timestamp_iso:
-        try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(timestamp_iso)
-            stamp = dt.strftime("%Y%m%d_%H%M")
-        except ValueError:
-            pass
-    filename = f"{sanitize_filename_component(directory_name)}_{stamp}.md"
-    return Path(transcripts_dir) / filename
-
-
-def has_exported_transcript(metadata, transcripts_dir):
-    """Whether an export exists in the transcripts folder for this recording.
-
-    This is the question the recordings list's "Transcribed" pill answers —
-    deliberately not the same as "transcript.json exists in the recording's
-    own folder". A zero-segment transcript is never exported (see
-    has_exportable_content), and a transcripts-only delete removes the export
-    while leaving the recording's directory in place, so the two can honestly
-    disagree.
-
-    A missing/empty transcripts_dir means we cannot know, which for a badge
-    is the same as "no" — never raise into the row builder.
-    """
-    if not transcripts_dir:
-        return False
-    directory_name = Path(metadata.get("directory", "")).name
-    path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
-    return path.exists()
 
 
 def _yaml_str(value):
@@ -226,10 +164,10 @@ def has_exportable_content(transcript_data):
 
 
 def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
-                       notes, summary_markdown, action_items, transcripts_dir):
-    """Build and write the export file. Best-effort: every failure is
-    swallowed after logging, never raised into the caller — this is a
-    convenience copy, not the app's source of truth for the transcript."""
+                       notes, summary_markdown, action_items):
+    """Build and write transcript.md into the recording's own session
+    directory, alongside transcript.json. Best-effort: every failure is
+    swallowed after logging, never raised into the caller."""
     import logging
     logger = logging.getLogger(__name__)
     try:
@@ -241,9 +179,14 @@ def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
                 metadata.get("directory"),
             )
             return
-        os.makedirs(transcripts_dir, exist_ok=True)
-        directory_name = Path(metadata.get("directory", "")).name
-        path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
+        directory = metadata.get("directory", "")
+        if not directory:
+            # No real session folder to write into — a relative "" would
+            # resolve to transcript.md in the process's cwd, which is never
+            # what's wanted.
+            logger.info("Skipping transcript export — metadata has no directory")
+            return
+        path = Path(directory) / "transcript.md"
         markdown = build_export_markdown(
             metadata, transcript_data, speaker_names, calendar_event,
             notes, summary_markdown, action_items,

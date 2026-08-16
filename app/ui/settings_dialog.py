@@ -241,14 +241,6 @@ class SettingsDialog(QDialog):
         dir_row.addWidget(self.browse_btn)
         output_form.addRow("Output Directory:", dir_row)
 
-        transcripts_dir_row = QHBoxLayout()
-        self.transcripts_dir_edit = QLineEdit()
-        transcripts_dir_row.addWidget(self.transcripts_dir_edit)
-        self.transcripts_browse_btn = QPushButton("Browse...")
-        self.transcripts_browse_btn.clicked.connect(self._browse_transcripts_dir)
-        transcripts_dir_row.addWidget(self.transcripts_browse_btn)
-        output_form.addRow("Transcript Export Folder:", transcripts_dir_row)
-
         self.format_combo = QComboBox()
         self.format_combo.addItem("WAV (lossless)", "wav")
         self.format_combo.addItem("MP3 (compressed, requires FFmpeg)", "mp3")
@@ -495,7 +487,6 @@ class SettingsDialog(QDialog):
 
         # Output
         self.output_dir_edit.setText(_clean_path(self.config.get("output", "directory")))
-        self.transcripts_dir_edit.setText(_clean_path(self.config.get("transcripts", "directory")))
 
         fmt = self.config.get("output", "format")
         idx = self.format_combo.findData(fmt)
@@ -586,7 +577,6 @@ class SettingsDialog(QDialog):
             hidden.append(self.hidden_devices_list.item(i).text())
         self.config.set("audio", "hidden_devices", hidden)
         self.config.set("output", "directory", _clean_path(self.output_dir_edit.text()))
-        self.config.set("transcripts", "directory", _clean_path(self.transcripts_dir_edit.text()))
         self.config.set("output", "format", self.format_combo.currentData())
         self.config.set("transcription", "model_size", self.model_combo.currentData())
         self.config.set("transcription", "device", self.device_combo.currentData())
@@ -874,9 +864,3 @@ class SettingsDialog(QDialog):
         if directory:
             self.output_dir_edit.setText(_clean_path(directory))
 
-    def _browse_transcripts_dir(self):
-        directory = QFileDialog.getExistingDirectory(
-            self, "Select Transcript Export Folder", self.transcripts_dir_edit.text()
-        )
-        if directory:
-            self.transcripts_dir_edit.setText(_clean_path(directory))

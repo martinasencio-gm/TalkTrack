@@ -35,13 +35,13 @@ class TestCleanPath(unittest.TestCase):
 
     def test_strips_surrounding_double_quotes(self):
         self.assertEqual(
-            _clean_path('"C:\\Users\\test\\transcripts"'),
-            os.path.normpath("C:\\Users\\test\\transcripts"))
+            _clean_path('"C:\\Users\\test\\recordings"'),
+            os.path.normpath("C:\\Users\\test\\recordings"))
 
     def test_strips_surrounding_single_quotes(self):
         self.assertEqual(
-            _clean_path("'C:\\Users\\test\\transcripts'"),
-            os.path.normpath("C:\\Users\\test\\transcripts"))
+            _clean_path("'C:\\Users\\test\\recordings'"),
+            os.path.normpath("C:\\Users\\test\\recordings"))
 
     def test_strips_surrounding_whitespace(self):
         self.assertEqual(
@@ -81,10 +81,10 @@ class TestSettingsDialogPathFields(unittest.TestCase):
 
     def test_load_cleans_a_quoted_value_already_in_config(self):
         config = Config()
-        config.set("transcripts", "directory", '"C:\\Users\\test\\transcripts"')
+        config.set("output", "directory", '"C:\\Users\\test\\recordings"')
         dialog = SettingsDialog(config)
-        self.assertEqual(dialog.transcripts_dir_edit.text(),
-                          os.path.normpath("C:\\Users\\test\\transcripts"))
+        self.assertEqual(dialog.output_dir_edit.text(),
+                          os.path.normpath("C:\\Users\\test\\recordings"))
 
     def test_browse_normalizes_forward_slashes_from_qfiledialog(self):
         config = Config()

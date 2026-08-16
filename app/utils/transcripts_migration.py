@@ -1,60 +1,79 @@
-"""One-time relocation of Markdown transcript exports.
+"""One-time import of Markdown transcript exports into their recording's
+own session folder.
 
-Exports written before the app data dir moved to Documents (c49d8c6,
-d8e86fc) were saved under the repo-relative default transcripts folder.
-The app now reads and writes the configured folder, so those files are
-invisible to it — present on disk, absent from the recordings list. This
-moves them across once. Nothing is deleted and nothing is overwritten.
+Before this change, `export_transcript()` wrote a Markdown copy into a
+separate, configurable transcripts/ folder, keyed by
+`<sanitized-directory-name>_<timestamp>.md`. That folder — and everything
+that managed it — has been removed; the export now lives at
+`<session_dir>/transcript.md`. This module runs once at startup to relocate
+any export still sitting in the old folder(s) into the matching session
+folder. Exports with no matching session folder (e.g. the recording was
+already deleted under the old "recordings only" scope, leaving the export
+as the only surviving copy) are left in place untouched — nothing here ever
+deletes data.
 """
 import logging
-import os
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def import_legacy_exports(legacy_dir, transcripts_dir):
-    """Move *.md from legacy_dir into transcripts_dir, returning the names moved.
+def import_exports_into_sessions(source_dirs, recordings_dir):
+    """Move *.md files from source_dirs into their matching session folder
+    under recordings_dir, as transcript.md. Returns the destination paths
+    (as strings) actually moved.
 
-    Skips any filename already present in the target — that copy is the newer
-    one — and leaves the legacy file in place rather than destroying it. A
-    missing legacy dir, a falsy path, or both paths resolving to the same
-    directory are all no-ops.
+    A file matches a session folder when its name starts with
+    "<folder_name>_" — the old filename format's stable prefix. A
+    destination that already has a transcript.md is left alone (and the
+    source file untouched) rather than overwritten. Duplicate/unresolvable
+    source dirs are skipped; a missing recordings_dir is a no-op.
     """
-    if not legacy_dir or not transcripts_dir:
+    recordings_dir = Path(recordings_dir)
+    if not recordings_dir.is_dir():
         return []
 
-    legacy = Path(legacy_dir)
-    target = Path(transcripts_dir)
-    if not legacy.is_dir():
-        return []
-    try:
-        if legacy.resolve() == target.resolve():
-            return []
-    except OSError:
-        return []
-
-    md_files = sorted(legacy.glob("*.md"))
-    if not md_files:
-        return []
-
-    # Hoisted out of the loop: target only needs to exist once, and creating
-    # it per-iteration was needless syscall churn on every move.
-    os.makedirs(target, exist_ok=True)
+    session_names = sorted(
+        (p.name for p in recordings_dir.iterdir() if p.is_dir()),
+        key=len, reverse=True,  # longest name first avoids a short name's
+    )                            # prefix falsely matching a longer sibling's export
 
     moved = []
-    for path in md_files:
-        destination = target / path.name
-        if destination.exists():
-            logger.info("Legacy export %s already present in target — left in place", path.name)
+    seen_sources = set()
+    for source_dir in source_dirs:
+        if not source_dir:
+            continue
+        source = Path(source_dir)
+        if not source.is_dir():
             continue
         try:
-            shutil.move(str(path), str(destination))
-            moved.append(path.name)
+            resolved = source.resolve()
         except OSError:
-            logger.exception("Failed to move legacy export %s", path)
+            continue
+        if resolved in seen_sources:
+            continue
+        seen_sources.add(resolved)
+
+        for md_path in sorted(source.glob("*.md")):
+            match = next(
+                (name for name in session_names if md_path.name.startswith(name + "_")),
+                None,
+            )
+            if match is None:
+                logger.info("No matching session for stranded export %s — left in place", md_path.name)
+                continue
+
+            destination = recordings_dir / match / "transcript.md"
+            if destination.exists():
+                logger.info("%s already has a transcript.md — %s left in place", match, md_path.name)
+                continue
+            try:
+                shutil.move(str(md_path), str(destination))
+                moved.append(str(destination))
+            except OSError:
+                logger.exception("Failed to import stranded export %s", md_path)
 
     if moved:
-        logger.info("Imported %d legacy transcript export(s) from %s", len(moved), legacy)
+        logger.info("Imported %d transcript export(s) into their session folders", len(moved))
     return moved

@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = Config()
-        self._import_legacy_transcript_exports()
+        self._import_stranded_transcript_exports()
         self.recorder = Recorder(self.config)
         self._current_session = None
         self._transcription_worker = None
@@ -149,12 +149,6 @@ class MainWindow(QMainWindow):
         open_recordings_action.triggered.connect(self._open_recordings_folder)
         file_menu.addAction(open_recordings_action)
 
-        open_transcripts_action = QAction("Open &Transcripts Folder", self)
-        open_transcripts_action.triggered.connect(self._open_transcripts_folder)
-        file_menu.addAction(open_transcripts_action)
-
-        file_menu.addSeparator()
-
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -196,26 +190,31 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
-    def _import_legacy_transcript_exports(self):
-        """Move exports stranded by the Documents data-dir move, once.
+    def _import_stranded_transcript_exports(self):
+        """Move exports stranded in the old separate transcripts/ folder
+        into their matching recording's own session folder, once.
 
-        Before c49d8c6/d8e86fc the transcripts folder defaulted to a
-        repo-relative path; exports written then are invisible to the app now
-        that it reads the configured folder. The config flag makes every later
-        launch free, and is set even when nothing moved.
+        The transcripts/ folder (and its `transcripts.directory` setting) is
+        gone as of #74 — exports now live at <session_dir>/transcript.md.
+        Scans both the last-configured folder (if the old setting is still
+        present in settings.json) and the legacy repo-relative default the
+        app used before the Documents data-dir move (c49d8c6/d8e86fc), since
+        either could hold exports never migrated forward. The config flag
+        makes every later launch free, and is set even when nothing moved.
         """
-        if self.config.get("transcripts", "legacy_import_done"):
+        if self.config.get("transcripts", "session_import_done"):
             return
-        from app.utils.config import DEFAULT_CONFIG
-        from app.utils.transcripts_migration import import_legacy_exports
-        moved = import_legacy_exports(
-            DEFAULT_CONFIG["transcripts"]["directory"],
-            self.config.get("transcripts", "directory"),
+        from app.utils.transcripts_migration import import_exports_into_sessions
+        legacy_default = str(Path(__file__).parent.parent / "transcripts")
+        last_configured = (self.config.data.get("transcripts") or {}).get("directory")
+        moved = import_exports_into_sessions(
+            [last_configured, legacy_default],
+            self.config.get("output", "directory"),
         )
         # Config.set() persists on its own — no separate save() call.
-        self.config.set("transcripts", "legacy_import_done", True)
+        self.config.set("transcripts", "session_import_done", True)
         if moved:
-            logger.info("Imported %d legacy transcript export(s)", len(moved))
+            logger.info("Imported %d stranded transcript export(s) into session folders", len(moved))
 
     def _setup_ui(self):
         central = QWidget()
@@ -285,7 +284,7 @@ class MainWindow(QMainWindow):
 
         # Recordings list wrapped in a CollapsibleSection
         recordings_dir = self.config.get("output", "directory")
-        self.recordings_list = RecordingsList(recordings_dir, config=self.config)
+        self.recordings_list = RecordingsList(recordings_dir)
         self._recordings_section = CollapsibleSection("Recordings", accent="#cba6f7")
         self._recordings_section.content_layout().addWidget(self.recordings_list)
         self._recordings_section.set_expanded(True)
@@ -1313,7 +1312,6 @@ class MainWindow(QMainWindow):
         transcript_export.export_transcript(
             session, transcript_data, speaker_names, calendar_event,
             notes, summary_markdown, action_items,
-            self.config.get("transcripts", "directory"),
         )
 
     def _load_calendar_event(self, session):
@@ -1711,12 +1709,6 @@ class MainWindow(QMainWindow):
         recordings_dir = self.config.get("output", "directory")
         os.makedirs(recordings_dir, exist_ok=True)
         os.startfile(recordings_dir)
-
-    def _open_transcripts_folder(self):
-        import os
-        transcripts_dir = self.config.get("transcripts", "directory")
-        os.makedirs(transcripts_dir, exist_ok=True)
-        os.startfile(transcripts_dir)
 
     def _show_system_status(self):
         dialog = SystemStatusDialog(self.config, self)

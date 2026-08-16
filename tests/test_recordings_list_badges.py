@@ -11,7 +11,6 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QLabel
 
 from app.ui.recordings_list import RecordingsList
-from app.utils.transcript_export import export_path_for
 
 _app = None
 
@@ -23,40 +22,22 @@ def _get_app():
     return _app
 
 
-class _FakeConfig:
-    """(section, key) -> value stub; these tests build a bare RecordingsList
-    with no MainWindow, so there is no real Config to reuse."""
-
-    def __init__(self, transcripts_dir):
-        self._transcripts_dir = transcripts_dir
-
-    def get(self, section, key):
-        assert (section, key) == ("transcripts", "directory")
-        return self._transcripts_dir
-
-
 class TestRecordingsListBadges(unittest.TestCase):
     def setUp(self):
         _get_app()
         self.tmp = tempfile.mkdtemp()
         self.recordings_dir = Path(self.tmp) / "recordings"
         self.recordings_dir.mkdir()
-        self.transcripts_dir = Path(self.tmp) / "transcripts"
-        self.transcripts_dir.mkdir()
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _widget(self):
-        return RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
+        return RecordingsList(self.recordings_dir)
 
-    def _make_session(self, name, with_audio, with_transcript, with_export=None):
-        """with_transcript writes transcript.json inside the recording folder;
-        with_export writes the Markdown export in the transcripts folder and
-        defaults to matching with_transcript (the normal, in-sync case)."""
+    def _make_session(self, name, with_audio, with_transcript):
         d = self.recordings_dir / name
         d.mkdir()
-        started_at = "2026-08-14T10:00:00"
         audio_files = {}
         if with_audio:
             audio_path = d / "combined_audio.wav"
@@ -64,16 +45,11 @@ class TestRecordingsListBadges(unittest.TestCase):
             audio_files["combined"] = str(audio_path)
         if with_transcript:
             (d / "transcript.json").write_text("{}", encoding="utf-8")
-        if with_export is None:
-            with_export = with_transcript
-        if with_export:
-            export_path_for(name, started_at, str(self.transcripts_dir)).write_text(
-                "# exported", encoding="utf-8"
-            )
+            (d / "transcript.md").write_text("# t", encoding="utf-8")
         metadata = {
             "directory": str(d),
             "name": name,
-            "started_at": started_at,
+            "started_at": "2026-08-14T10:00:00",
             "duration": 60,
             "audio_files": audio_files,
         }
@@ -129,34 +105,20 @@ class TestRecordingsListBadges(unittest.TestCase):
         texts = self._badge_texts(widget, metadata)
         self.assertNotIn("Audio", texts)
 
-    def test_no_transcribed_badge_when_transcript_json_has_no_export(self):
-        """The pill reports the file the user can open in the transcripts
-        folder. transcript.json alone is not enough."""
+    def test_transcribed_badge_reflects_transcript_json_only_recording(self):
+        """A recording made before transcript.md started shipping alongside
+        transcript.json (or one whose .md was otherwise never written) still
+        shows Transcribed — the pill keys off transcript.json."""
         widget = self._widget()
-        metadata = self._make_session(
-            "no_export", with_audio=True, with_transcript=True, with_export=False
-        )
-        texts = self._badge_texts(widget, metadata)
-        self.assertIn("Audio", texts)
-        self.assertNotIn("Transcribed", texts)
-
-    def test_transcribed_badge_when_export_survives_a_folder_delete(self):
-        """After a "Recordings only" delete the folder is gone but the export
-        remains; a row rebuilt from stale metadata must still say Transcribed."""
-        widget = self._widget()
-        metadata = self._make_session(
-            "kept_export", with_audio=False, with_transcript=False, with_export=True
-        )
+        d = self.recordings_dir / "json_only"
+        d.mkdir()
+        (d / "transcript.json").write_text("{}", encoding="utf-8")
+        metadata = {
+            "directory": str(d), "name": "json_only",
+            "started_at": "2026-08-14T10:00:00", "duration": 60, "audio_files": {},
+        }
         texts = self._badge_texts(widget, metadata)
         self.assertIn("Transcribed", texts)
-
-    def test_no_transcribed_badge_without_config(self):
-        """A RecordingsList with no config cannot resolve the transcripts
-        folder — degrade to no badge rather than raising in the row builder."""
-        widget = RecordingsList(self.recordings_dir)
-        metadata = self._make_session("no_config", with_audio=True, with_transcript=True)
-        texts = self._badge_texts(widget, metadata)
-        self.assertNotIn("Transcribed", texts)
 
 
 if __name__ == "__main__":

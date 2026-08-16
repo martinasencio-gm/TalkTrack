@@ -20,17 +20,21 @@ from app.ui.search_bar import SearchBar
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
-from app.utils.transcript_export import export_path_for, has_exported_transcript
 
 logger = logging.getLogger(__name__)
 
 # Fixed filenames the app itself writes for transcript-derived artifacts.
-# Unlike the whole session directory removed by DELETE_RECORDINGS, these
-# names are never user- or import-controlled, so a static list is safe.
+# Unlike the whole session directory removed by DELETE_BOTH, these names are
+# never user- or import-controlled, so a static list is safe.
 TRANSCRIPTION_FILENAMES = [
-    "transcript.json", "transcript.txt", "summary.md",
+    "transcript.json", "transcript.md", "transcript.txt", "summary.md",
     "action_items.json", "speaker_names.json",
 ]
+
+# Audio filename patterns the app writes into a session directory. Globbed
+# rather than read from metadata["audio_files"] alone so a "recordings only"
+# delete also catches dual-mic raw temps or a track metadata lost track of.
+_AUDIO_GLOB_PATTERNS = ("*_audio.wav", "*_audio.mp3", "*_raw.wav")
 
 
 class _RecordingRow(QWidget):
@@ -229,14 +233,15 @@ def _remove_file_robust(path):
 
 
 def _delete_transcription_files(directory):
-    """Remove this session's transcript-derived artifacts.
+    """Remove this session's transcript-derived artifacts, including
+    transcript.md (see app/utils/transcript_export.py — it now writes
+    alongside transcript.json in the session directory, not to a separate
+    folder).
 
     metadata.json needs no update: transcribed status is derived live from
-    disk. _selected_transcribed (drives the Transcribe/Export context-menu
-    actions) checks transcript.json directly; _build_row_widget's
-    "Transcribed" pill checks the separate Markdown export instead (see
-    has_exported_transcript). Removing transcript.json here is enough to
-    flip the former; _delete_exported_transcript handles the latter.
+    disk, both for the "Transcribed" pill and for _selected_transcribed
+    (drives the Transcribe/Export context-menu actions) — both check
+    transcript.json directly.
     """
     for filename in TRANSCRIPTION_FILENAMES:
         path = Path(directory) / filename
@@ -244,21 +249,26 @@ def _delete_transcription_files(directory):
             _remove_file_robust(path)
 
 
-def _delete_exported_transcript(metadata, transcripts_dir):
-    """Remove the Markdown export copy from the separate transcripts/
-    folder (see app/utils/transcript_export.py), if one was ever written.
+def _delete_audio_files(directory):
+    """Remove only this session's audio files, keeping every
+    transcript-derived artifact (transcript.json/.md, summary, action items,
+    speaker names, notes, chat history, calendar tag, embeddings) intact —
+    the session survives as a transcript-only entry."""
+    directory = Path(directory)
+    for pattern in _AUDIO_GLOB_PATTERNS:
+        for path in directory.glob(pattern):
+            _remove_file_robust(path)
 
-    That export is a "convenience copy" living outside the recording's own
-    directory entirely, keyed off the same directory name + started_at used
-    to write it — deleting transcript.json inside the session folder does
-    not touch it, so a transcript delete is incomplete without this too.
-    """
-    if not transcripts_dir:
-        return
-    directory_name = Path(metadata.get("directory", "")).name
-    path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
-    if path.exists():
-        _remove_file_robust(path)
+
+def _has_any_audio(directory):
+    directory = Path(directory)
+    return any(next(directory.glob(pattern), None) is not None
+               for pattern in _AUDIO_GLOB_PATTERNS)
+
+
+def _has_any_transcript(directory):
+    directory = Path(directory)
+    return (directory / "transcript.json").exists() or (directory / "transcript.md").exists()
 
 
 class RecordingsList(QWidget):
@@ -278,10 +288,9 @@ class RecordingsList(QWidget):
     transcribe_selected_requested = pyqtSignal(list)  # list[dict] metadata, untranscribed only
     export_selected_requested = pyqtSignal(list)      # list[dict] metadata, transcribed only
 
-    def __init__(self, recordings_dir, parent=None, config=None):
+    def __init__(self, recordings_dir, parent=None):
         super().__init__(parent)
         self.recordings_dir = Path(recordings_dir)
-        self.config = config
         self._recordings = []
         self._search_worker = None
         self._pending_search = None
@@ -443,18 +452,9 @@ class RecordingsList(QWidget):
         # Checked live against disk rather than trusting metadata — a delete
         # can remove audio or transcript without the other, and the row needs
         # to reflect that on the very next refresh() with no cached state.
-        #
-        # "Transcribed" deliberately reports the Markdown export in the
-        # transcripts folder, not transcript.json inside the recording: the
-        # export is the artifact the user opens and the one that outlives a
-        # "Recording folder" delete. The context-menu Transcribe/Export
-        # actions still key off transcript.json (see _selected_transcribed) —
-        # they need the file the app can re-export FROM, so a recording with a
-        # transcript but no export shows no pill and offers "Export".
         audio_files = metadata.get("audio_files", {}) or {}
         has_audio = any(p and Path(p).exists() for p in audio_files.values())
-        transcripts_dir = self.config.get("transcripts", "directory") if self.config else None
-        has_transcript = has_exported_transcript(metadata, transcripts_dir)
+        has_transcript = (Path(metadata.get("directory", "")) / "transcript.json").exists()
 
         # Generous padding gives each pill its shape and its slack at once.
         # Neither ever shrinks — all shrink pressure lands on the elidable
@@ -510,11 +510,6 @@ class RecordingsList(QWidget):
             )
             menu.addAction(open_recordings)
 
-            open_transcripts = QAction("Open Transcripts Folder", self)
-            open_transcripts.triggered.connect(self._open_transcripts_folder)
-            open_transcripts.setEnabled(self.config is not None)
-            menu.addAction(open_transcripts)
-
             menu.addSeparator()
 
             untranscribed = self._selected_untranscribed(selected_items)
@@ -549,11 +544,6 @@ class RecordingsList(QWidget):
             )
             menu.addAction(open_recordings)
 
-            open_transcripts = QAction("Open Transcripts Folder", self)
-            open_transcripts.triggered.connect(self._open_transcripts_folder)
-            open_transcripts.setEnabled(self.config is not None)
-            menu.addAction(open_transcripts)
-
             menu.addSeparator()
 
             view_action = QAction("View / Transcribe", self)
@@ -575,13 +565,6 @@ class RecordingsList(QWidget):
     def _open_folder(self, directory):
         os.startfile(directory)
 
-    def _open_transcripts_folder(self):
-        if self.config is None:
-            return
-        transcripts_dir = self.config.get("transcripts", "directory")
-        os.makedirs(transcripts_dir, exist_ok=True)
-        os.startfile(transcripts_dir)
-
     def _selected_untranscribed(self, items):
         result = []
         for item in items:
@@ -593,12 +576,9 @@ class RecordingsList(QWidget):
         return result
 
     def _selected_transcribed(self, items):
-        """Selected recordings that have transcript.json on disk.
-
-        Intentionally NOT has_exported_transcript: this drives Export/
-        Transcribe, which need the source the export is built from. The row
-        badge answers a different question — see _build_row_widget.
-        """
+        """Selected recordings that have transcript.json on disk. Drives
+        Export/Transcribe, which need the source the export is built from —
+        same check the row badge uses (see _build_row_widget)."""
         result = []
         for item in items:
             metadata = item.data(Qt.ItemDataRole.UserRole)
@@ -641,49 +621,39 @@ class RecordingsList(QWidget):
         """Delete a single recording's files per scope.
 
         Notifies listeners BEFORE touching audio so playback stops and any
-        file handle is released before removal — this only matters when the
-        whole session directory is going away (recordings-only or both).
+        file handle is released before removal — DELETE_RECORDINGS and
+        DELETE_BOTH are the only scopes that ever remove audio.
+
+        "Recordings only" and "transcriptions only" are no longer symmetric
+        with a folder rmtree: each removes just its own file set, and the
+        session survives as a partial entry (transcript-only or, in
+        principle, audio-only) unless removal leaves NEITHER a recording NOR
+        a transcript behind — at that point there's nothing left the entry
+        is for, so the folder itself is removed instead.
         """
         directory = metadata.get("directory", "")
 
         if scope in (DELETE_RECORDINGS, DELETE_BOTH):
             self.about_to_delete.emit(directory)
 
-        transcripts_dir = self.config.get("transcripts", "directory") if self.config else None
-
         try:
             if scope == DELETE_BOTH:
                 _rmtree_robust(directory)
-                _delete_exported_transcript(metadata, transcripts_dir)
                 self.recording_deleted.emit(directory)
             elif scope == DELETE_RECORDINGS:
-                # The dialog promises this scope "keeps the exported
-                # transcript in transcripts/" — but that's only true if an
-                # export already exists. A recording transcribed before the
-                # export feature shipped (or never reopened since) has
-                # transcript.json with no corresponding .md, so rmtree'ing
-                # the folder would destroy the only copy while the dialog
-                # claims it survives. Force an export first via the signal
-                # MainWindow already wires to _export_transcript — Qt direct
-                # connections run synchronously on this thread, so the export
-                # completes before rmtree below runs. If the transcript has
-                # no segments, export_transcript() deliberately skips writing
-                # (has_exportable_content) and no export appears; the delete
-                # must still proceed rather than blocking on that.
-                if (Path(directory) / "transcript.json").exists() and not has_exported_transcript(metadata, transcripts_dir):
-                    self.export_selected_requested.emit([metadata])
-                # The whole session directory goes, not just the audio files
-                # metadata happens to list: embeddings.npz, chat_history.json,
-                # calendar_event.json and any stray chunk WAVs live here too,
-                # and leaving them behind left "deleted" recordings on disk.
-                # The exported Markdown in transcripts/ is what survives — it
-                # is the only difference between this scope and DELETE_BOTH.
-                _rmtree_robust(directory)
-                self.recording_deleted.emit(directory)
+                _delete_audio_files(directory)
+                if _has_any_transcript(directory):
+                    self.recording_files_changed.emit(directory)
+                else:
+                    _rmtree_robust(directory)
+                    self.recording_deleted.emit(directory)
             elif scope == DELETE_TRANSCRIPTIONS:
                 _delete_transcription_files(directory)
-                _delete_exported_transcript(metadata, transcripts_dir)
-                self.recording_files_changed.emit(directory)
+                if _has_any_audio(directory):
+                    self.recording_files_changed.emit(directory)
+                else:
+                    _rmtree_robust(directory)
+                    self.recording_deleted.emit(directory)
         except Exception as e:
             logger.exception("Failed to delete recording files (%s): %s", scope, directory)
             QMessageBox.warning(self, "Error", f"Failed to delete: {e}")

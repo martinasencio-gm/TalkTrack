@@ -1,59 +1,15 @@
 """Tests for the pure LLM-transcript-export builder."""
 import logging
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from app.utils.transcript_export import (
-    sanitize_filename_component,
-    export_path_for,
     build_export_markdown,
     export_transcript,
     has_exportable_content,
-    has_exported_transcript,
 )
-
-
-class TestSanitizeFilenameComponent(unittest.TestCase):
-    def test_strips_invalid_windows_characters(self):
-        self.assertEqual(
-            sanitize_filename_component('Q3: Roadmap/Sync? <final>'),
-            "Q3_Roadmap_Sync_final",
-        )
-
-    def test_collapses_whitespace_to_single_underscores(self):
-        self.assertEqual(sanitize_filename_component("a   b\tc\nd"), "a_b_c_d")
-
-    def test_caps_length_at_60_chars(self):
-        long_title = "x" * 200
-        result = sanitize_filename_component(long_title)
-        self.assertEqual(len(result), 60)
-
-    def test_empty_input_returns_untitled(self):
-        self.assertEqual(sanitize_filename_component(""), "Untitled")
-
-    def test_whitespace_only_input_returns_untitled(self):
-        self.assertEqual(sanitize_filename_component("   "), "Untitled")
-
-
-class TestExportPathFor(unittest.TestCase):
-    def test_builds_timestamped_sanitized_path(self):
-        path = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
-        self.assertEqual(path, Path("C:/transcripts/rec_20260813_140000_20260813_1400.md"))
-
-    def test_missing_timestamp_still_produces_a_path(self):
-        path = export_path_for("rec_focus_block", "", Path("C:/transcripts"))
-        self.assertEqual(path, Path("C:/transcripts/rec_focus_block_00000000_0000.md"))
-
-    def test_path_is_stable_across_title_changing_inputs(self):
-        """export_path_for only ever receives the stable directory name, so
-        passing it directly (never the mutable title) keeps the path
-        constant regardless of what the recording is currently named."""
-        path_a = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
-        path_b = export_path_for("rec_20260813_140000", "2026-08-13T14:00:00", Path("C:/transcripts"))
-        self.assertEqual(path_a, path_b)
 
 
 class TestBuildExportMarkdown(unittest.TestCase):
@@ -371,9 +327,9 @@ class TestSegmentRendering(unittest.TestCase):
 class TestExportTranscript(unittest.TestCase):
     """Tests for export_transcript() function."""
 
-    def _metadata(self):
+    def _metadata(self, directory):
         return {
-            "directory": "C:/recordings/rec_20260813_140000",
+            "directory": directory,
             "name": "Test Recording",
             "started_at": "2026-08-13T14:00:00",
             "duration": 600,
@@ -390,9 +346,10 @@ class TestExportTranscript(unittest.TestCase):
         }
 
     def test_export_transcript_happy_path(self):
-        """Happy path: valid data creates exactly one .md file with expected content."""
+        """Happy path: valid data creates transcript.md, next to where
+        transcript.json lives, with expected content."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = self._transcript()
             speaker_names = {"SPEAKER_00": "Alice", "SPEAKER_01": "Bob"}
             calendar_event = {
@@ -415,18 +372,15 @@ class TestExportTranscript(unittest.TestCase):
                 notes,
                 summary_markdown,
                 action_items,
-                tmpdir,
             )
 
-            # Confirm exactly one .md file was written
-            md_files = list(Path(tmpdir).glob("*.md"))
-            self.assertEqual(len(md_files), 1)
+            export_path = Path(tmpdir) / "transcript.md"
+            self.assertTrue(export_path.exists())
 
-            # Confirm content is sane
             # Explicit encoding: atomic_write_text writes UTF-8, but
             # read_text() defaults to the locale encoding (cp1252 on
             # Windows), which mangles the en-dash in segment time ranges.
-            content = md_files[0].read_text(encoding="utf-8")
+            content = export_path.read_text(encoding="utf-8")
             self.assertIn('title: "Team Sync"', content)
             self.assertIn("recording_date: \"2026-08-13T14:00:00\"", content)
             self.assertIn("duration_seconds: 600", content)
@@ -442,22 +396,17 @@ class TestExportTranscript(unittest.TestCase):
             self.assertIn("# Transcript", content)
             self.assertIn("**[00:00:03–00:00:08] Alice:** Test segment one.", content)
 
-    def test_reexport_with_changed_title_overwrites_not_orphans(self):
+    def test_reexport_overwrites_the_same_file(self):
         """A rename / calendar tag / calendar remap changes the title but
-        must keep writing to the SAME file — not leave the old title's
-        export behind as an orphan. Regression test for the filename
-        previously being derived from the (mutable) title instead of the
-        stable session directory name."""
+        the export always lives at <directory>/transcript.md — re-exporting
+        overwrites it in place rather than orphaning anything."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = self._transcript()
 
-            export_transcript(
-                metadata, transcript, {}, None, "", None, None, tmpdir
-            )
-            md_files_before = list(Path(tmpdir).glob("*.md"))
-            self.assertEqual(len(md_files_before), 1)
-            first_path = md_files_before[0]
+            export_transcript(metadata, transcript, {}, None, "", None, None)
+            export_path = Path(tmpdir) / "transcript.md"
+            self.assertTrue(export_path.exists())
 
             # Same recording (same "directory"), but the title-driving
             # inputs changed — e.g. tagged to a calendar event.
@@ -465,17 +414,15 @@ class TestExportTranscript(unittest.TestCase):
             renamed_metadata["name"] = "Totally Different Title"
             calendar_event = {"subject": "Yet Another Title"}
 
-            export_transcript(
-                renamed_metadata, transcript, {}, calendar_event, "", None, None, tmpdir
-            )
-            md_files_after = list(Path(tmpdir).glob("*.md"))
-            self.assertEqual(len(md_files_after), 1)
-            self.assertEqual(md_files_after[0], first_path)
+            export_transcript(renamed_metadata, transcript, {}, calendar_event, "", None, None)
+
+            self.assertEqual(list(Path(tmpdir).glob("*.md")), [export_path])
+            self.assertIn("Yet Another Title", export_path.read_text(encoding="utf-8"))
 
     def test_export_transcript_write_failure_does_not_propagate(self):
         """Write failure (OSError) is caught and logged, does not raise."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = self._transcript()
 
             # Mock atomic_write_text to raise OSError
@@ -484,9 +431,7 @@ class TestExportTranscript(unittest.TestCase):
 
                 # This should not raise; it should catch and log the error
                 try:
-                    export_transcript(
-                        metadata, transcript, {}, None, "", None, None, tmpdir
-                    )
+                    export_transcript(metadata, transcript, {}, None, "", None, None)
                 except OSError:
                     self.fail("export_transcript() raised OSError; should have caught it")
 
@@ -496,7 +441,7 @@ class TestExportTranscript(unittest.TestCase):
         skipping the whole export (which would leave a stale previous
         export in place)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = self._transcript()
             calendar_event = {
                 "subject": None,
@@ -505,9 +450,7 @@ class TestExportTranscript(unittest.TestCase):
             }
 
             try:
-                export_transcript(
-                    metadata, transcript, {}, calendar_event, "", None, None, tmpdir
-                )
+                export_transcript(metadata, transcript, {}, calendar_event, "", None, None)
             except (TypeError, AttributeError):
                 self.fail(
                     "export_transcript() raised exception on malformed calendar_event; "
@@ -515,13 +458,12 @@ class TestExportTranscript(unittest.TestCase):
                 )
 
             # The export must actually be written, not silently dropped.
-            md_files = list(Path(tmpdir).glob("*.md"))
-            self.assertEqual(len(md_files), 1)
+            self.assertTrue((Path(tmpdir) / "transcript.md").exists())
 
     def test_export_transcript_malformed_action_items(self):
         """Malformed action items (assignee/task/due=None) do not propagate."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = self._transcript()
             action_items = [
                 {"assignee": None, "task": None, "due": None},
@@ -530,32 +472,29 @@ class TestExportTranscript(unittest.TestCase):
 
             # This should not raise; malformed items are caught
             try:
-                export_transcript(
-                    metadata, transcript, {}, None, "", None, action_items, tmpdir
-                )
+                export_transcript(metadata, transcript, {}, None, "", None, action_items)
             except (TypeError, AttributeError):
                 self.fail(
                     "export_transcript() raised exception on malformed action_items; "
                     "should have caught it"
                 )
 
-    def test_export_transcript_missing_metadata_directory(self):
-        """Missing metadata['directory'] (KeyError) does not propagate."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = {"started_at": "2026-08-13T14:00:00", "duration": 600}
-            # Deliberately omit "directory" key
-            transcript = self._transcript()
+    def test_export_transcript_missing_metadata_directory_is_a_noop(self):
+        """No metadata['directory'] means there is no session folder to
+        write into — must not raise, and must not write anywhere (e.g. the
+        process cwd)."""
+        metadata = {"started_at": "2026-08-13T14:00:00", "duration": 600}
+        # Deliberately omit "directory" key
+        transcript = self._transcript()
 
-            # This should not raise; the KeyError is caught
-            try:
-                export_transcript(
-                    metadata, transcript, {}, None, "", None, None, tmpdir
-                )
-            except KeyError:
-                self.fail(
-                    "export_transcript() raised KeyError on missing metadata; "
-                    "should have caught it"
-                )
+        try:
+            export_transcript(metadata, transcript, {}, None, "", None, None)
+        except KeyError:
+            self.fail(
+                "export_transcript() raised KeyError on missing metadata; "
+                "should have caught it"
+            )
+        self.assertFalse(Path("transcript.md").exists())
 
 
 class TestHasExportableContent(unittest.TestCase):
@@ -577,9 +516,9 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
     frontmatter plus an empty '# Transcript' heading — files that only
     dilute the corpus."""
 
-    def _metadata(self):
+    def _metadata(self, directory):
         return {
-            "directory": "C:/recordings/rec_20260813_140000",
+            "directory": directory,
             "started_at": "2026-08-13T14:00:00",
             "duration": 600,
         }
@@ -587,34 +526,29 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
     def test_empty_transcript_writes_no_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_transcript(
-                self._metadata(), {"segments": [], "language": "en"},
-                {}, None, "", None, None, tmpdir,
+                self._metadata(tmpdir), {"segments": [], "language": "en"},
+                {}, None, "", None, None,
             )
-            self.assertEqual(list(Path(tmpdir).glob("*.md")), [])
+            self.assertFalse((Path(tmpdir) / "transcript.md").exists())
 
     def test_skip_leaves_an_existing_export_untouched(self):
         """Skipping suppresses a write; it must never delete. Removing stale
         exports is the user's call, and the delete-recording flow already
         offers it."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata()
+            metadata = self._metadata(tmpdir)
             transcript = {
                 "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
                 "language": "en",
             }
-            export_transcript(
-                metadata, transcript, {}, None, "", None, None, tmpdir
-            )
-            written = list(Path(tmpdir).glob("*.md"))
-            self.assertEqual(len(written), 1)
-            before = written[0].read_bytes()
+            export_transcript(metadata, transcript, {}, None, "", None, None)
+            export_path = Path(tmpdir) / "transcript.md"
+            self.assertTrue(export_path.exists())
+            before = export_path.read_bytes()
 
-            export_transcript(
-                metadata, {"segments": []}, {}, None, "", None, None, tmpdir
-            )
+            export_transcript(metadata, {"segments": []}, {}, None, "", None, None)
 
-            self.assertEqual(list(Path(tmpdir).glob("*.md")), written)
-            self.assertEqual(written[0].read_bytes(), before)
+            self.assertEqual(export_path.read_bytes(), before)
 
     def test_non_empty_transcript_still_exports(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -622,10 +556,8 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
                 "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
                 "language": "en",
             }
-            export_transcript(
-                self._metadata(), transcript, {}, None, "", None, None, tmpdir
-            )
-            self.assertEqual(len(list(Path(tmpdir).glob("*.md"))), 1)
+            export_transcript(self._metadata(tmpdir), transcript, {}, None, "", None, None)
+            self.assertTrue((Path(tmpdir) / "transcript.md").exists())
 
     def test_malformed_transcript_data_does_not_raise(self):
         """A list where a dict was expected reaches .get() — the existing
@@ -633,53 +565,9 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
         malformed input."""
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
-                export_transcript(
-                    self._metadata(), [], {}, None, "", None, None, tmpdir
-                )
+                export_transcript(self._metadata(tmpdir), [], {}, None, "", None, None)
             except AttributeError:
                 self.fail("export_transcript() raised on malformed transcript_data")
-
-
-class TestHasExportedTranscript(unittest.TestCase):
-    """The recordings list uses this to decide whether a recording has an
-    export the user could actually open, which is a different question from
-    whether transcript.json exists inside the recording's own folder."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.transcripts_dir = Path(self.tmp) / "transcripts"
-        self.transcripts_dir.mkdir()
-        self.metadata = {
-            "directory": str(Path(self.tmp) / "recordings" / "session1"),
-            "started_at": "2026-08-15T10:29:06",
-        }
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_true_when_the_export_file_exists(self):
-        path = export_path_for("session1", "2026-08-15T10:29:06", str(self.transcripts_dir))
-        path.write_text("# exported", encoding="utf-8")
-        self.assertTrue(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
-
-    def test_false_when_no_export_was_written(self):
-        self.assertFalse(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
-
-    def test_false_when_a_different_recordings_export_exists(self):
-        other = export_path_for("session2", "2026-08-15T10:29:06", str(self.transcripts_dir))
-        other.write_text("# exported", encoding="utf-8")
-        self.assertFalse(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
-
-    def test_false_for_missing_or_empty_transcripts_dir(self):
-        self.assertFalse(has_exported_transcript(self.metadata, None))
-        self.assertFalse(has_exported_transcript(self.metadata, ""))
-        self.assertFalse(has_exported_transcript(self.metadata, str(Path(self.tmp) / "nope")))
-
-    def test_missing_started_at_uses_the_zero_stamp_and_still_matches(self):
-        metadata = {"directory": str(Path(self.tmp) / "recordings" / "session1")}
-        path = export_path_for("session1", "", str(self.transcripts_dir))
-        path.write_text("# exported", encoding="utf-8")
-        self.assertTrue(has_exported_transcript(metadata, str(self.transcripts_dir)))
 
 
 if __name__ == "__main__":

@@ -97,8 +97,8 @@ TalkTrack/
       config.py                       # JSON config management
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
-      transcript_export.py            # Pure Markdown builder for LLM-ready transcript export
-      transcripts_migration.py        # One-time move of stranded legacy-path exports into the configured transcripts folder
+      transcript_export.py            # Pure Markdown builder for LLM-ready transcript.md (written into the recording's own folder)
+      transcripts_migration.py        # One-time import of exports stranded in the old separate transcripts/ folder into their session folder
   tests/
     test_platform_info.py             # Windows version detection tests
     test_audio_session_monitor.py     # Audio session enumeration tests
@@ -132,8 +132,7 @@ TalkTrack/
     TT_icon_*.png                      # Icon source files (32, 64, 128, 256, 512px)
     TT_logo_*.png                      # Logo files (655x200, 1300x400)
   docs/plans/                         # Design docs and implementation plans
-  recordings/                         # Output directory
-  transcripts/                        # LLM-ready Markdown transcript export directory
+  recordings/                         # Output directory (each session folder also holds its transcript.md export)
 ```
 
 ## Current Features
@@ -153,7 +152,7 @@ TalkTrack/
 - **Calendar tagging (opt-in):** after a recording finishes, optionally checks the local Outlook desktop calendar for an overlapping event and offers to tag the recording with its subject, organizer, and attendees (`calendar_event.json`); attendee names populate a mutually-exclusive dropdown in speaker naming
 - **Calendar rename suggestion:** when a recording is tagged to a calendar event and has no custom name yet, offers to rename it to the event's subject
 - **Calendar remap:** "Change" button in the recording header re-runs the calendar lookup on demand and lets the user retag the recording to a different matching event
-- **LLM-ready transcript export:** every transcript/notes/summary save also writes a Markdown export (frontmatter + summary + action items + notes + transcript) to the configured transcripts folder, keyed by the recording's stable directory name so renames/retagging don't orphan old exports
+- **LLM-ready transcript export:** every transcript/notes/summary save also writes `transcript.md` (frontmatter + summary + action items + notes + transcript) into the recording's own session folder, alongside `transcript.json`
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
@@ -177,8 +176,8 @@ TalkTrack/
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
 - **Multi-select bulk delete:** select multiple recordings and delete at once (Ctrl/Shift+click)
-- **Delete scopes:** deleting a recording offers three scopes — the recording folder (removes the whole session directory, keeps the Markdown export), transcriptions only (removes transcript/summary/action items plus the Markdown export, keeps audio), or everything
-- **Transcribed indicator:** the "Transcribed" pill in the recordings list reflects the Markdown export in the transcripts folder, not `transcript.json` inside the recording; the right-click Transcribe/Export actions still key off `transcript.json`
+- **Delete scopes:** deleting a recording offers three scopes — recording audio only (removes just the audio tracks, keeps `transcript.json`/`transcript.md`/summary/action items/notes/etc.; the session survives as a transcript-only entry), transcriptions only (removes `transcript.json`, `transcript.md`, summary, and action items, keeps audio), or everything. Either partial scope collapses to removing the whole session folder if it would otherwise leave neither audio nor a transcript behind.
+- **Transcribed indicator:** the "Transcribed" pill in the recordings list and the right-click Transcribe/Export actions both key off `transcript.json` inside the recording's own folder
 - **Custom app icon:** Start Menu shortcut (offered on first run) targets the venv interpreter and carries the icon + AppUserModelID for a correct taskbar icon
 - **About dialog:** version info and Buy Me a Coffee donation link
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
@@ -267,10 +266,12 @@ TalkTrack/
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, silence_auto_stop, silence_duration
 - Meeting detection settings (`meeting_detection`): mode ("off"/"suggest"/"auto"), threshold_seconds, detect_end, end_grace_seconds, end_action ("stop"/"pause"), use_mic_capture, use_calendar, use_window_title, apps. Replaces the old `general.auto_record` flag, which `app/utils/config_migration.py` migrates into `mode` ("auto" or "off") on first load after upgrade — `silence_auto_stop` is unaffected and still applies as an independent backstop.
-- Output settings: `output.directory` (recordings output folder), `transcripts.directory` (Markdown export folder, default sibling `transcripts/` dir, auto-created)
-- `transcripts.legacy_import_done`: one-time flag; once set, `app/utils/transcripts_migration.py` (called from `MainWindow.__init__`) skips re-scanning the old repo-relative `transcripts/` folder for exports stranded there before `transcripts.directory` was configurable
+- Output settings: `output.directory` (recordings output folder — `transcript.md` lives inside each session folder here, not a separate directory)
+- `transcripts.session_import_done`: one-time flag; once set, `app/utils/transcripts_migration.py` (called from `MainWindow.__init__`) skips re-scanning for exports stranded in the old separate transcripts/ folder (removed) that predate this per-session layout
 
 ### Data Files Per Recording
+- transcript.json: transcription/diarization source of truth
+- transcript.md: LLM-ready Markdown export (frontmatter + summary + action items + notes + transcript), regenerated alongside transcript.json on every save
 - summary.md: AI-generated meeting summary
 - action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history

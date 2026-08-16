@@ -28,10 +28,10 @@ DEFAULT_CONFIG = {
         "filename_template": "recording_{timestamp}",
     },
     "transcripts": {
-        "directory": str(Path(__file__).parent.parent.parent / "transcripts"),
-        # One-shot flag for transcripts_migration.import_legacy_exports; set
-        # once at startup so later launches do no filesystem work.
-        "legacy_import_done": False,
+        # One-shot flag for the session-folder import of exports stranded in
+        # the old separate transcripts/ folder; set once at startup so later
+        # launches do no filesystem work. See app/main_window.py.
+        "session_import_done": False,
     },
     "transcription": {
         "model_size": "base",
@@ -117,11 +117,6 @@ class Config:
         except OSError:
             self._data["output"]["directory"] = DEFAULT_CONFIG["output"]["directory"]
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
-        try:
-            os.makedirs(self._data["transcripts"]["directory"], exist_ok=True)
-        except OSError:
-            self._data["transcripts"]["directory"] = DEFAULT_CONFIG["transcripts"]["directory"]
-            os.makedirs(self._data["transcripts"]["directory"], exist_ok=True)
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)

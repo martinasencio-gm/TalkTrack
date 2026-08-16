@@ -1,83 +1,130 @@
-"""Tests for the one-time move of Markdown exports out of the old
-repo-relative transcripts folder into the configured one.
-
-Exports written before the Documents data-dir move (c49d8c6/d8e86fc) landed
-in <repo>/transcripts while the app now reads and writes
-Documents/talktrack/transcripts, leaving them invisible to the app.
+"""Tests for the one-time import of Markdown transcript exports, stranded
+in the old separate transcripts/ folder, into their matching recording's
+own session folder (see #74 — transcript.md now lives at
+<session_dir>/transcript.md, not in a separately managed folder).
 """
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from app.utils.transcripts_migration import import_legacy_exports
+from app.utils.transcripts_migration import import_exports_into_sessions
 
 
-class TestImportLegacyExports(unittest.TestCase):
+class TestImportExportsIntoSessions(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        self.legacy = Path(self.tmp) / "legacy"
-        self.legacy.mkdir()
-        self.target = Path(self.tmp) / "target"
-        self.target.mkdir()
+        self.old_folder = Path(self.tmp) / "old_transcripts"
+        self.old_folder.mkdir()
+        self.recordings_dir = Path(self.tmp) / "recordings"
+        self.recordings_dir.mkdir()
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_moves_markdown_files_into_the_target(self):
-        (self.legacy / "a_20260815_1002.md").write_text("# a", encoding="utf-8")
-        (self.legacy / "b_20260815_1013.md").write_text("# b", encoding="utf-8")
+    def _make_session(self, name):
+        d = self.recordings_dir / name
+        d.mkdir()
+        return d
 
-        moved = import_legacy_exports(str(self.legacy), str(self.target))
+    def test_moves_export_into_its_matching_session_folder(self):
+        session = self._make_session("rec_20260813_140000")
+        (self.old_folder / "rec_20260813_140000_20260813_1400.md").write_text(
+            "# exported", encoding="utf-8"
+        )
 
-        self.assertEqual(sorted(moved), ["a_20260815_1002.md", "b_20260815_1013.md"])
-        self.assertTrue((self.target / "a_20260815_1002.md").exists())
-        self.assertFalse((self.legacy / "a_20260815_1002.md").exists())
+        moved = import_exports_into_sessions([str(self.old_folder)], str(self.recordings_dir))
 
-    def test_skips_names_already_present_in_the_target(self):
-        """The target copy is the newer one — never overwrite it, and leave
-        the legacy file alone so nothing is silently destroyed."""
-        (self.legacy / "dup.md").write_text("old", encoding="utf-8")
-        (self.target / "dup.md").write_text("new", encoding="utf-8")
+        destination = session / "transcript.md"
+        self.assertEqual(moved, [str(destination)])
+        self.assertTrue(destination.exists())
+        self.assertFalse((self.old_folder / "rec_20260813_140000_20260813_1400.md").exists())
 
-        moved = import_legacy_exports(str(self.legacy), str(self.target))
+    def test_orphaned_export_with_no_matching_session_is_left_untouched(self):
+        """The export is the only surviving copy of a deleted recording —
+        never delete or lose it, just leave it where it is."""
+        orphan = self.old_folder / "rec_deleted_long_ago_20260101_0900.md"
+        orphan.write_text("# exported", encoding="utf-8")
+
+        moved = import_exports_into_sessions([str(self.old_folder)], str(self.recordings_dir))
 
         self.assertEqual(moved, [])
-        self.assertEqual((self.target / "dup.md").read_text(encoding="utf-8"), "new")
-        self.assertTrue((self.legacy / "dup.md").exists())
+        self.assertTrue(orphan.exists())
+
+    def test_does_not_overwrite_an_existing_transcript_md(self):
+        session = self._make_session("rec_20260813_140000")
+        (session / "transcript.md").write_text("# already here", encoding="utf-8")
+        stranded = self.old_folder / "rec_20260813_140000_20260813_1400.md"
+        stranded.write_text("# stale export", encoding="utf-8")
+
+        moved = import_exports_into_sessions([str(self.old_folder)], str(self.recordings_dir))
+
+        self.assertEqual(moved, [])
+        self.assertEqual((session / "transcript.md").read_text(encoding="utf-8"), "# already here")
+        self.assertTrue(stranded.exists())
+
+    def test_scans_multiple_source_dirs(self):
+        session_a = self._make_session("rec_a")
+        session_b = self._make_session("rec_b")
+        other_folder = Path(self.tmp) / "legacy_default"
+        other_folder.mkdir()
+        (self.old_folder / "rec_a_20260101_0000.md").write_text("a", encoding="utf-8")
+        (other_folder / "rec_b_20260101_0000.md").write_text("b", encoding="utf-8")
+
+        moved = import_exports_into_sessions(
+            [str(self.old_folder), str(other_folder)], str(self.recordings_dir)
+        )
+
+        self.assertEqual(sorted(moved),
+                          sorted([str(session_a / "transcript.md"), str(session_b / "transcript.md")]))
+
+    def test_deduplicates_source_dirs_resolving_to_the_same_path(self):
+        session = self._make_session("rec_a")
+        (self.old_folder / "rec_a_20260101_0000.md").write_text("a", encoding="utf-8")
+
+        moved = import_exports_into_sessions(
+            [str(self.old_folder), str(self.old_folder)], str(self.recordings_dir)
+        )
+
+        self.assertEqual(moved, [str(session / "transcript.md")])
+
+    def test_longest_matching_session_name_wins_over_a_prefix_sibling(self):
+        """A session named "rec_a" must not steal an export that belongs to
+        sibling session "rec_ab" just because "rec_a_" is also a prefix
+        match — the longest (most specific) name wins."""
+        self._make_session("rec_a")
+        session_ab = self._make_session("rec_ab")
+        (self.old_folder / "rec_ab_20260101_0000.md").write_text("ab", encoding="utf-8")
+
+        moved = import_exports_into_sessions([str(self.old_folder)], str(self.recordings_dir))
+
+        self.assertEqual(moved, [str(session_ab / "transcript.md")])
 
     def test_ignores_non_markdown_files(self):
-        (self.legacy / "notes.txt").write_text("x", encoding="utf-8")
+        self._make_session("rec_a")
+        (self.old_folder / "rec_a_notes.txt").write_text("x", encoding="utf-8")
 
-        moved = import_legacy_exports(str(self.legacy), str(self.target))
-
-        self.assertEqual(moved, [])
-        self.assertTrue((self.legacy / "notes.txt").exists())
-
-    def test_same_directory_is_a_noop(self):
-        (self.legacy / "a.md").write_text("# a", encoding="utf-8")
-
-        moved = import_legacy_exports(str(self.legacy), str(self.legacy))
+        moved = import_exports_into_sessions([str(self.old_folder)], str(self.recordings_dir))
 
         self.assertEqual(moved, [])
-        self.assertTrue((self.legacy / "a.md").exists())
+        self.assertTrue((self.old_folder / "rec_a_notes.txt").exists())
 
-    def test_missing_legacy_dir_is_a_noop(self):
-        moved = import_legacy_exports(str(Path(self.tmp) / "gone"), str(self.target))
+    def test_missing_source_dir_is_a_noop(self):
+        moved = import_exports_into_sessions(
+            [str(Path(self.tmp) / "gone")], str(self.recordings_dir)
+        )
         self.assertEqual(moved, [])
 
-    def test_missing_target_is_created(self):
-        (self.legacy / "a.md").write_text("# a", encoding="utf-8")
-        target = Path(self.tmp) / "made_here"
+    def test_missing_recordings_dir_is_a_noop(self):
+        (self.old_folder / "rec_a_20260101_0000.md").write_text("a", encoding="utf-8")
+        moved = import_exports_into_sessions(
+            [str(self.old_folder)], str(Path(self.tmp) / "no_such_recordings_dir")
+        )
+        self.assertEqual(moved, [])
 
-        moved = import_legacy_exports(str(self.legacy), str(target))
-
-        self.assertEqual(moved, ["a.md"])
-        self.assertTrue((target / "a.md").exists())
-
-    def test_falsy_arguments_are_a_noop(self):
-        self.assertEqual(import_legacy_exports("", str(self.target)), [])
-        self.assertEqual(import_legacy_exports(str(self.legacy), None), [])
+    def test_falsy_and_empty_source_dirs_are_skipped(self):
+        moved = import_exports_into_sessions([None, "", None], str(self.recordings_dir))
+        self.assertEqual(moved, [])
 
 
 if __name__ == "__main__":
