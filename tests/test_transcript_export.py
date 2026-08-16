@@ -80,6 +80,54 @@ class TestBuildExportMarkdown(unittest.TestCase):
         self.assertIn("duration_seconds: 1834", md)
         self.assertIn('source_directory: "rec_20260813_140000"', md)
 
+    def test_frontmatter_includes_transcription_provenance(self):
+        """model_size is what tells a later reader how much to trust a
+        transcript — it has to survive into the corpus."""
+        transcript = dict(self._transcript())
+        transcript["model_size"] = "small"
+        md = build_export_markdown(
+            self._metadata(), transcript, {}, None, "", None, None
+        )
+        self.assertIn('language: "en"', md)
+        self.assertIn('model_size: "small"', md)
+
+    def test_provenance_lines_sit_between_duration_and_source_directory(self):
+        transcript = dict(self._transcript())
+        transcript["model_size"] = "small"
+        md = build_export_markdown(
+            self._metadata(), transcript, {}, None, "", None, None
+        )
+        self.assertLess(md.index("duration_seconds:"), md.index("language:"))
+        self.assertLess(md.index("language:"), md.index("model_size:"))
+        self.assertLess(md.index("model_size:"), md.index("source_directory:"))
+
+    def test_provenance_lines_omitted_when_absent(self):
+        transcript = {"segments": [], "duration": 1834}
+        md = build_export_markdown(
+            self._metadata(), transcript, {}, None, "", None, None
+        )
+        self.assertNotIn("language:", md)
+        self.assertNotIn("model_size:", md)
+
+    def test_empty_provenance_values_are_omitted(self):
+        transcript = {"segments": [], "duration": 1834, "language": "", "model_size": None}
+        md = build_export_markdown(
+            self._metadata(), transcript, {}, None, "", None, None
+        )
+        self.assertNotIn("language:", md)
+        self.assertNotIn("model_size:", md)
+
+    def test_transcribe_seconds_is_not_exported(self):
+        """Perf telemetry about the machine that ran the transcription. It
+        says nothing about the content, so it stays out of the corpus."""
+        transcript = dict(self._transcript())
+        transcript["transcribe_seconds"] = 130.43
+        md = build_export_markdown(
+            self._metadata(), transcript, {}, None, "", None, None
+        )
+        self.assertNotIn("transcribe_seconds", md)
+        self.assertNotIn("130.43", md)
+
     def test_calendar_block_omitted_when_no_event(self):
         md = build_export_markdown(
             self._metadata(), self._transcript(), {}, None, "", None, None

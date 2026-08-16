@@ -116,6 +116,16 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
         lines.append(f"recording_date: {_yaml_str(started_at)}")
     duration = metadata.get("duration") or transcript_data.get("duration") or 0
     lines.append(f"duration_seconds: {int(duration)}")
+    # Provenance, not content: model_size is what tells a later reader how
+    # much to trust this transcript once the audio it came from is gone.
+    # transcribe_seconds is deliberately not exported — it describes the
+    # machine that ran the transcription, not the transcript.
+    language = transcript_data.get("language")
+    if language:
+        lines.append(f"language: {_yaml_str(str(language))}")
+    model_size = transcript_data.get("model_size")
+    if model_size:
+        lines.append(f"model_size: {_yaml_str(str(model_size))}")
     lines.append(f"source_directory: {_yaml_str(directory_name)}")
 
     if calendar_event:
