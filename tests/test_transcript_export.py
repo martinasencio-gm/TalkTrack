@@ -10,6 +10,7 @@ from app.utils.transcript_export import (
     export_path_for,
     build_export_markdown,
     export_transcript,
+    has_exportable_content,
 )
 
 
@@ -553,6 +554,88 @@ class TestExportTranscript(unittest.TestCase):
                     "export_transcript() raised KeyError on missing metadata; "
                     "should have caught it"
                 )
+
+
+class TestHasExportableContent(unittest.TestCase):
+    def test_false_for_no_segments(self):
+        self.assertFalse(has_exportable_content({"segments": []}))
+
+    def test_false_for_missing_segments_key(self):
+        self.assertFalse(has_exportable_content({"language": "en"}))
+
+    def test_false_for_none(self):
+        self.assertFalse(has_exportable_content(None))
+
+    def test_true_for_one_segment(self):
+        self.assertTrue(has_exportable_content({"segments": [{"text": "hi"}]}))
+
+
+class TestExportSkipsEmptyTranscripts(unittest.TestCase):
+    """A recording that transcribed to nothing produced an export of
+    frontmatter plus an empty '# Transcript' heading — files that only
+    dilute the corpus."""
+
+    def _metadata(self):
+        return {
+            "directory": "C:/recordings/rec_20260813_140000",
+            "started_at": "2026-08-13T14:00:00",
+            "duration": 600,
+        }
+
+    def test_empty_transcript_writes_no_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_transcript(
+                self._metadata(), {"segments": [], "language": "en"},
+                {}, None, "", None, None, tmpdir,
+            )
+            self.assertEqual(list(Path(tmpdir).glob("*.md")), [])
+
+    def test_skip_leaves_an_existing_export_untouched(self):
+        """Skipping suppresses a write; it must never delete. Removing stale
+        exports is the user's call, and the delete-recording flow already
+        offers it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata = self._metadata()
+            transcript = {
+                "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
+                "language": "en",
+            }
+            export_transcript(
+                metadata, transcript, {}, None, "", None, None, tmpdir
+            )
+            written = list(Path(tmpdir).glob("*.md"))
+            self.assertEqual(len(written), 1)
+            before = written[0].read_bytes()
+
+            export_transcript(
+                metadata, {"segments": []}, {}, None, "", None, None, tmpdir
+            )
+
+            self.assertEqual(list(Path(tmpdir).glob("*.md")), written)
+            self.assertEqual(written[0].read_bytes(), before)
+
+    def test_non_empty_transcript_still_exports(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = {
+                "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
+                "language": "en",
+            }
+            export_transcript(
+                self._metadata(), transcript, {}, None, "", None, None, tmpdir
+            )
+            self.assertEqual(len(list(Path(tmpdir).glob("*.md"))), 1)
+
+    def test_malformed_transcript_data_does_not_raise(self):
+        """A list where a dict was expected reaches .get() — the existing
+        best-effort handler must absorb it, as it does every other
+        malformed input."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                export_transcript(
+                    self._metadata(), [], {}, None, "", None, None, tmpdir
+                )
+            except AttributeError:
+                self.fail("export_transcript() raised on malformed transcript_data")
 
 
 if __name__ == "__main__":

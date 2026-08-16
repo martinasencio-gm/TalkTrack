@@ -194,6 +194,17 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
     return "\n".join(lines) + "\n"
 
 
+def has_exportable_content(transcript_data):
+    """Whether this transcript is worth writing to the corpus at all.
+
+    No segments means nothing was heard — the export would be frontmatter
+    and an empty '# Transcript' heading. build_export_markdown deliberately
+    does NOT consult this: it is a pure builder, and whether a document is
+    worth writing is policy that belongs at the write site.
+    """
+    return bool((transcript_data or {}).get("segments"))
+
+
 def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
                        notes, summary_markdown, action_items, transcripts_dir):
     """Build and write the export file. Best-effort: every failure is
@@ -202,6 +213,14 @@ def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
     import logging
     logger = logging.getLogger(__name__)
     try:
+        # Inside the try on purpose: a malformed transcript_data reaches
+        # .get() here, and the existing handler is what absorbs it.
+        if not has_exportable_content(transcript_data):
+            logger.info(
+                "Skipping transcript export for %s — no segments",
+                metadata.get("directory"),
+            )
+            return
         os.makedirs(transcripts_dir, exist_ok=True)
         directory_name = Path(metadata.get("directory", "")).name
         path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
