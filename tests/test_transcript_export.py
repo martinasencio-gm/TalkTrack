@@ -1,5 +1,6 @@
 """Tests for the pure LLM-transcript-export builder."""
 import logging
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from app.utils.transcript_export import (
     build_export_markdown,
     export_transcript,
     has_exportable_content,
+    has_exported_transcript,
 )
 
 
@@ -636,6 +638,48 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
                 )
             except AttributeError:
                 self.fail("export_transcript() raised on malformed transcript_data")
+
+
+class TestHasExportedTranscript(unittest.TestCase):
+    """The recordings list uses this to decide whether a recording has an
+    export the user could actually open, which is a different question from
+    whether transcript.json exists inside the recording's own folder."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.transcripts_dir = Path(self.tmp) / "transcripts"
+        self.transcripts_dir.mkdir()
+        self.metadata = {
+            "directory": str(Path(self.tmp) / "recordings" / "session1"),
+            "started_at": "2026-08-15T10:29:06",
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_true_when_the_export_file_exists(self):
+        path = export_path_for("session1", "2026-08-15T10:29:06", str(self.transcripts_dir))
+        path.write_text("# exported", encoding="utf-8")
+        self.assertTrue(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
+
+    def test_false_when_no_export_was_written(self):
+        self.assertFalse(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
+
+    def test_false_when_a_different_recordings_export_exists(self):
+        other = export_path_for("session2", "2026-08-15T10:29:06", str(self.transcripts_dir))
+        other.write_text("# exported", encoding="utf-8")
+        self.assertFalse(has_exported_transcript(self.metadata, str(self.transcripts_dir)))
+
+    def test_false_for_missing_or_empty_transcripts_dir(self):
+        self.assertFalse(has_exported_transcript(self.metadata, None))
+        self.assertFalse(has_exported_transcript(self.metadata, ""))
+        self.assertFalse(has_exported_transcript(self.metadata, str(Path(self.tmp) / "nope")))
+
+    def test_missing_started_at_uses_the_zero_stamp_and_still_matches(self):
+        metadata = {"directory": str(Path(self.tmp) / "recordings" / "session1")}
+        path = export_path_for("session1", "", str(self.transcripts_dir))
+        path.write_text("# exported", encoding="utf-8")
+        self.assertTrue(has_exported_transcript(metadata, str(self.transcripts_dir)))
 
 
 if __name__ == "__main__":

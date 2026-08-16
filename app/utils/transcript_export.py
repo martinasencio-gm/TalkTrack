@@ -95,6 +95,26 @@ def export_path_for(directory_name, timestamp_iso, transcripts_dir):
     return Path(transcripts_dir) / filename
 
 
+def has_exported_transcript(metadata, transcripts_dir):
+    """Whether an export exists in the transcripts folder for this recording.
+
+    This is the question the recordings list's "Transcribed" pill answers —
+    deliberately not the same as "transcript.json exists in the recording's
+    own folder". A zero-segment transcript is never exported (see
+    has_exportable_content), and a transcripts-only delete removes the export
+    while leaving the recording's directory in place, so the two can honestly
+    disagree.
+
+    A missing/empty transcripts_dir means we cannot know, which for a badge
+    is the same as "no" — never raise into the row builder.
+    """
+    if not transcripts_dir:
+        return False
+    directory_name = Path(metadata.get("directory", "")).name
+    path = export_path_for(directory_name, metadata.get("started_at", ""), transcripts_dir)
+    return path.exists()
+
+
 def _yaml_str(value):
     """Quote a string for a YAML scalar. Values here are display text, not
     attacker-controlled YAML syntax, so simple double-quoting (escaping only
