@@ -17,6 +17,7 @@ transcripts/
 *.avi
 .claude/*
 !.claude/rules/
+.vscode/
 .worktrees/
 CLAUDE.local.md
 docs/plans/
