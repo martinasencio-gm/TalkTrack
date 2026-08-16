@@ -29,6 +29,9 @@ DEFAULT_CONFIG = {
     },
     "transcripts": {
         "directory": str(Path(__file__).parent.parent.parent / "transcripts"),
+        # One-shot flag for transcripts_migration.import_legacy_exports; set
+        # once at startup so later launches do no filesystem work.
+        "legacy_import_done": False,
     },
     "transcription": {
         "model_size": "base",

@@ -60,6 +60,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = Config()
+        self._import_legacy_transcript_exports()
         self.recorder = Recorder(self.config)
         self._current_session = None
         self._transcription_worker = None
@@ -194,6 +195,27 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _import_legacy_transcript_exports(self):
+        """Move exports stranded by the Documents data-dir move, once.
+
+        Before c49d8c6/d8e86fc the transcripts folder defaulted to a
+        repo-relative path; exports written then are invisible to the app now
+        that it reads the configured folder. The config flag makes every later
+        launch free, and is set even when nothing moved.
+        """
+        if self.config.get("transcripts", "legacy_import_done"):
+            return
+        from app.utils.config import DEFAULT_CONFIG
+        from app.utils.transcripts_migration import import_legacy_exports
+        moved = import_legacy_exports(
+            DEFAULT_CONFIG["transcripts"]["directory"],
+            self.config.get("transcripts", "directory"),
+        )
+        # Config.set() persists on its own — no separate save() call.
+        self.config.set("transcripts", "legacy_import_done", True)
+        if moved:
+            logger.info("Imported %d legacy transcript export(s)", len(moved))
 
     def _setup_ui(self):
         central = QWidget()
