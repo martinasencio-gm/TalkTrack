@@ -1,9 +1,23 @@
+import os
+
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QComboBox, QSpinBox, QCheckBox, QLineEdit, QListWidget,
     QPushButton, QFileDialog, QGroupBox, QFormLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
+
+
+def _clean_path(text):
+    """Normalize a user-provided directory path for storage/display.
+
+    QFileDialog.getExistingDirectory() returns Qt-style forward-slash paths
+    even on Windows, and a manually typed/pasted path (e.g. Explorer's
+    "Copy as path") can arrive wrapped in quotes. Both look broken if saved
+    verbatim, so this runs on load, on Browse, and on save.
+    """
+    text = text.strip().strip('"').strip("'")
+    return os.path.normpath(text) if text else text
 
 
 class SettingsDialog(QDialog):
@@ -480,8 +494,8 @@ class SettingsDialog(QDialog):
             self.hidden_devices_list.addItem(pattern)
 
         # Output
-        self.output_dir_edit.setText(self.config.get("output", "directory"))
-        self.transcripts_dir_edit.setText(self.config.get("transcripts", "directory"))
+        self.output_dir_edit.setText(_clean_path(self.config.get("output", "directory")))
+        self.transcripts_dir_edit.setText(_clean_path(self.config.get("transcripts", "directory")))
 
         fmt = self.config.get("output", "format")
         idx = self.format_combo.findData(fmt)
@@ -571,8 +585,8 @@ class SettingsDialog(QDialog):
         for i in range(self.hidden_devices_list.count()):
             hidden.append(self.hidden_devices_list.item(i).text())
         self.config.set("audio", "hidden_devices", hidden)
-        self.config.set("output", "directory", self.output_dir_edit.text())
-        self.config.set("transcripts", "directory", self.transcripts_dir_edit.text())
+        self.config.set("output", "directory", _clean_path(self.output_dir_edit.text()))
+        self.config.set("transcripts", "directory", _clean_path(self.transcripts_dir_edit.text()))
         self.config.set("output", "format", self.format_combo.currentData())
         self.config.set("transcription", "model_size", self.model_combo.currentData())
         self.config.set("transcription", "device", self.device_combo.currentData())
@@ -858,11 +872,11 @@ class SettingsDialog(QDialog):
             self, "Select Output Directory", self.output_dir_edit.text()
         )
         if directory:
-            self.output_dir_edit.setText(directory)
+            self.output_dir_edit.setText(_clean_path(directory))
 
     def _browse_transcripts_dir(self):
         directory = QFileDialog.getExistingDirectory(
             self, "Select Transcript Export Folder", self.transcripts_dir_edit.text()
         )
         if directory:
-            self.transcripts_dir_edit.setText(directory)
+            self.transcripts_dir_edit.setText(_clean_path(directory))
