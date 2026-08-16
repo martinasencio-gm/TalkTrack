@@ -25,8 +25,8 @@ from app.utils.transcript_export import export_path_for
 logger = logging.getLogger(__name__)
 
 # Fixed filenames the app itself writes for transcript-derived artifacts.
-# Unlike audio (see _delete_audio_files), these names are never user- or
-# import-controlled, so a static list is safe.
+# Unlike the whole session directory removed by DELETE_RECORDINGS, these
+# names are never user- or import-controlled, so a static list is safe.
 TRANSCRIPTION_FILENAMES = [
     "transcript.json", "transcript.txt", "summary.md",
     "action_items.json", "speaker_names.json",
@@ -218,28 +218,6 @@ def _remove_file_robust(path):
     except PermissionError:
         os.chmod(path, stat.S_IWRITE)
         os.remove(path)
-
-
-def _delete_audio_files(directory, metadata):
-    """Remove this session's audio files and clear them from metadata.json.
-
-    Paths come from metadata["audio_files"] rather than a fixed filename
-    list — imported recordings can carry a non-standard filename — so this
-    stays correct without needing to enumerate every naming scheme. Clearing
-    audio_files afterward avoids leaving stale paths that would otherwise
-    make Play Audio silently no-op (both callers already guard with
-    os.path.exists, but an empty dict is honest about what's left).
-    """
-    audio_files = metadata.get("audio_files", {}) or {}
-    for path in audio_files.values():
-        if path and os.path.exists(path):
-            _remove_file_robust(path)
-
-    updated = dict(metadata)
-    updated["audio_files"] = {}
-    meta_path = Path(directory) / "metadata.json"
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(updated, f, indent=2)
 
 
 def _delete_transcription_files(directory):
@@ -639,8 +617,8 @@ class RecordingsList(QWidget):
         """Delete a single recording's files per scope.
 
         Notifies listeners BEFORE touching audio so playback stops and any
-        file handle is released before removal — this only matters when
-        audio is actually part of the scope (recordings-only or both).
+        file handle is released before removal — this only matters when the
+        whole session directory is going away (recordings-only or both).
         """
         directory = metadata.get("directory", "")
 
@@ -655,8 +633,14 @@ class RecordingsList(QWidget):
                 _delete_exported_transcript(metadata, transcripts_dir)
                 self.recording_deleted.emit(directory)
             elif scope == DELETE_RECORDINGS:
-                _delete_audio_files(directory, metadata)
-                self.recording_files_changed.emit(directory)
+                # The whole session directory goes, not just the audio files
+                # metadata happens to list: embeddings.npz, chat_history.json,
+                # calendar_event.json and any stray chunk WAVs live here too,
+                # and leaving them behind left "deleted" recordings on disk.
+                # The exported Markdown in transcripts/ is what survives — it
+                # is the only difference between this scope and DELETE_BOTH.
+                _rmtree_robust(directory)
+                self.recording_deleted.emit(directory)
             elif scope == DELETE_TRANSCRIPTIONS:
                 _delete_transcription_files(directory)
                 _delete_exported_transcript(metadata, transcripts_dir)

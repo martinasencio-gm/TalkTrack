@@ -11,7 +11,7 @@ from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication, QDialog
 
 from app.ui.recordings_list import (
-    RecordingsList, _delete_audio_files, _delete_transcription_files,
+    RecordingsList, _delete_transcription_files,
     _delete_exported_transcript
 )
 from app.ui.delete_scope_dialog import DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
@@ -37,63 +37,6 @@ def _get_app():
     if _app is None:
         _app = QApplication.instance() or QApplication([])
     return _app
-
-
-class TestDeleteAudioFiles(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.directory = Path(self.tmp) / "session"
-        self.directory.mkdir()
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def _write(self, name, content=""):
-        path = self.directory / name
-        path.write_text(content, encoding="utf-8")
-        return str(path)
-
-    def test_removes_audio_files_and_clears_metadata(self):
-        combined = self._write("combined_audio.wav", "fake wav")
-        metadata = {
-            "directory": str(self.directory),
-            "name": "Test",
-            "audio_files": {"combined": combined},
-        }
-        meta_path = self.directory / "metadata.json"
-        meta_path.write_text(json.dumps(metadata), encoding="utf-8")
-
-        _delete_audio_files(str(self.directory), metadata)
-
-        self.assertFalse(Path(combined).exists())
-        updated = json.loads(meta_path.read_text(encoding="utf-8"))
-        self.assertEqual(updated["audio_files"], {})
-        self.assertEqual(updated["name"], "Test")
-
-    def test_leaves_transcript_files_untouched(self):
-        combined = self._write("combined_audio.wav", "fake wav")
-        self._write("transcript.json", "{}")
-        metadata = {
-            "directory": str(self.directory),
-            "audio_files": {"combined": combined},
-        }
-        (self.directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-
-        _delete_audio_files(str(self.directory), metadata)
-
-        self.assertTrue((self.directory / "transcript.json").exists())
-
-    def test_missing_audio_path_is_a_noop(self):
-        metadata = {
-            "directory": str(self.directory),
-            "audio_files": {"combined": str(self.directory / "gone.wav")},
-        }
-        (self.directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-
-        _delete_audio_files(str(self.directory), metadata)  # must not raise
-
-        updated = json.loads((self.directory / "metadata.json").read_text(encoding="utf-8"))
-        self.assertEqual(updated["audio_files"], {})
 
 
 class TestDeleteTranscriptionFiles(unittest.TestCase):
@@ -180,8 +123,14 @@ class TestPerformDeleteScopes(unittest.TestCase):
         (self.session_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
         return metadata
 
-    def test_scope_recordings_emits_files_changed_not_deleted(self):
+    def test_scope_recordings_removes_the_whole_folder(self):
+        """"Recordings only" deletes the recording's directory outright.
+        Anything the app dropped in there — embeddings.npz, chat_history.json,
+        stray chunk WAVs — goes with it; only the exported Markdown in the
+        separate transcripts/ folder survives (covered below)."""
         metadata = self._make_session()
+        (self.session_dir / "embeddings.npz").write_text("npz", encoding="utf-8")
+        (self.session_dir / "chat_history.json").write_text("[]", encoding="utf-8")
         widget = RecordingsList(self.recordings_dir)
         about_to_delete = []
         files_changed = []
@@ -192,12 +141,10 @@ class TestPerformDeleteScopes(unittest.TestCase):
 
         widget._perform_delete(metadata, DELETE_RECORDINGS)
 
-        self.assertFalse((self.session_dir / "combined_audio.wav").exists())
-        self.assertTrue((self.session_dir / "transcript.json").exists())
-        self.assertTrue(self.session_dir.exists())
+        self.assertFalse(self.session_dir.exists())
         self.assertEqual(about_to_delete, [str(self.session_dir)])
-        self.assertEqual(files_changed, [str(self.session_dir)])
-        self.assertEqual(deleted, [])
+        self.assertEqual(deleted, [str(self.session_dir)])
+        self.assertEqual(files_changed, [])
 
     def test_scope_transcriptions_does_not_emit_about_to_delete(self):
         metadata = self._make_session()
@@ -289,11 +236,14 @@ class TestPerformDeleteRemovesExportedTranscript(unittest.TestCase):
         self.assertFalse(self.export_path.exists())
 
     def test_scope_recordings_leaves_the_export_copy_alone(self):
+        """The export is the durable artifact: deleting the recording folder
+        is exactly how a user keeps the transcript and reclaims the audio."""
         metadata = self._make_session()
         widget = RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
 
         widget._perform_delete(metadata, DELETE_RECORDINGS)
 
+        self.assertFalse(self.session_dir.exists())
         self.assertTrue(self.export_path.exists())
 
     def test_scope_transcriptions_without_config_does_not_raise(self):

@@ -27,12 +27,13 @@ class DeleteScopeDialog(QDialog):
         layout.addWidget(prompt)
 
         self._recordings_radio = QRadioButton(
-            "Recordings only — audio files; keeps transcript/summary"
+            "Recording folder — audio and transcript files; "
+            "keeps the exported transcript in transcripts/"
         )
         self._transcriptions_radio = QRadioButton(
             "Transcriptions only — transcript/summary/action items; keeps audio"
         )
-        self._both_radio = QRadioButton("Both — delete everything")
+        self._both_radio = QRadioButton("Everything — including the exported transcript")
         self._both_radio.setChecked(True)
 
         self._group = QButtonGroup(self)
