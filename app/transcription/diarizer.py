@@ -36,13 +36,14 @@ class DiarizationWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, audio_path, transcript_result, hf_token="",
-                 min_speakers=None, max_speakers=None):
+                 min_speakers=None, max_speakers=None, full_cpu=False):
         super().__init__()
         self.audio_path = audio_path
         self.transcript_result = transcript_result
         self.hf_token = hf_token
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
+        self.full_cpu = full_cpu
 
     def run(self):
         try:
@@ -67,10 +68,12 @@ class DiarizationWorker(QThread):
             import soundfile as sf
             import torch
 
-            # Capped at half the CPU count (min 1) so torch's internal thread
-            # pool leaves headroom for the real-time audio capture callback
-            # when diarization runs during a live recording.
-            torch.set_num_threads(max(1, (os.cpu_count() or 4) // 2))
+            # Full CPU count when nothing else needs headroom; capped to half
+            # (min 1) only while a recording is actively in progress, so
+            # torch's thread pool doesn't starve the real-time audio capture
+            # callback.
+            cpu_count = os.cpu_count() or 4
+            torch.set_num_threads(cpu_count if self.full_cpu else max(1, cpu_count // 2))
 
             audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
             if audio_data.ndim == 1:

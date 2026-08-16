@@ -1165,6 +1165,7 @@ class MainWindow(QMainWindow):
             hf_token=hf_token,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
+            full_cpu=self.recorder.state == RecordingState.IDLE,
         )
         self._diarization_worker.session = session
         self._diarization_worker.progress.connect(self._on_transcription_progress)

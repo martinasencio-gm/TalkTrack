@@ -44,6 +44,30 @@ class TestDiarizationThreadCap(unittest.TestCase):
         (call_arg,), _ = mock_set_threads.call_args
         self.assertGreaterEqual(call_arg, 1)
 
+    def test_full_cpu_uses_uncapped_thread_count(self):
+        from app.transcription.diarizer import DiarizationWorker
+
+        worker = DiarizationWorker(
+            audio_path="/fake/audio.wav",
+            transcript_result=MagicMock(),
+            hf_token="fake-token",
+            full_cpu=True,
+        )
+
+        with patch("app.transcription.diarizer._get_pipeline") as mock_get_pipeline, \
+             patch("soundfile.read", return_value=(MagicMock(ndim=1), 16000)), \
+             patch("torch.from_numpy") as mock_from_numpy, \
+             patch("torch.set_num_threads") as mock_set_threads, \
+             patch("os.cpu_count", return_value=16):
+            mock_pipeline = MagicMock()
+            mock_pipeline.return_value = MagicMock(itertracks=lambda yield_label: [])
+            mock_get_pipeline.return_value = mock_pipeline
+            mock_from_numpy.return_value.unsqueeze.return_value = MagicMock()
+
+            worker.run()
+
+        mock_set_threads.assert_called_once_with(16)
+
 
 if __name__ == "__main__":
     unittest.main()
