@@ -35,14 +35,21 @@ def import_legacy_exports(legacy_dir, transcripts_dir):
     except OSError:
         return []
 
+    md_files = sorted(legacy.glob("*.md"))
+    if not md_files:
+        return []
+
+    # Hoisted out of the loop: target only needs to exist once, and creating
+    # it per-iteration was needless syscall churn on every move.
+    os.makedirs(target, exist_ok=True)
+
     moved = []
-    for path in sorted(legacy.glob("*.md")):
+    for path in md_files:
         destination = target / path.name
         if destination.exists():
             logger.info("Legacy export %s already present in target — left in place", path.name)
             continue
         try:
-            os.makedirs(target, exist_ok=True)
             shutil.move(str(path), str(destination))
             moved.append(path.name)
         except OSError:

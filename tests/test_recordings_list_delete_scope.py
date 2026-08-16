@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import json
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,7 +13,7 @@ from PyQt6.QtWidgets import QApplication, QDialog
 
 from app.ui.recordings_list import (
     RecordingsList, _delete_transcription_files,
-    _delete_exported_transcript
+    _delete_exported_transcript, _rmtree_robust
 )
 from app.ui.delete_scope_dialog import DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 from app.utils.transcript_export import export_path_for
@@ -257,6 +258,130 @@ class TestPerformDeleteRemovesExportedTranscript(unittest.TestCase):
 
         self.assertFalse((self.session_dir / "transcript.json").exists())
         self.assertTrue(self.export_path.exists())
+
+
+class TestPerformDeleteExportsBeforeRemovingFolder(unittest.TestCase):
+    """Regression coverage for #73: the dialog's "Recording folder" option
+    claims it "keeps the exported transcript in transcripts/", but a
+    recording that has transcript.json and no export yet would have that
+    promise broken by a plain rmtree. _perform_delete must force the export
+    first for DELETE_RECORDINGS."""
+
+    def setUp(self):
+        _get_app()
+        self.tmp = tempfile.mkdtemp()
+        self.recordings_dir = Path(self.tmp) / "recordings"
+        self.recordings_dir.mkdir()
+        self.session_dir = self.recordings_dir / "session1"
+        self.session_dir.mkdir()
+        self.transcripts_dir = Path(self.tmp) / "transcripts"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make_session_without_export(self):
+        audio_path = str(self.session_dir / "combined_audio.wav")
+        (self.session_dir / "combined_audio.wav").write_text("wav", encoding="utf-8")
+        (self.session_dir / "transcript.json").write_text("{}", encoding="utf-8")
+        metadata = {
+            "directory": str(self.session_dir),
+            "started_at": "",
+            "name": "Test",
+            "audio_files": {"combined": audio_path},
+        }
+        (self.session_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+        return metadata
+
+    def test_emits_export_request_before_removing_the_directory(self):
+        metadata = self._make_session_without_export()
+        widget = RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
+
+        seen = []
+
+        def on_export_requested(recordings):
+            # A bare RecordingsList has no MainWindow to actually perform the
+            # export, so this listener just records that the request fired —
+            # and, crucially, that it fired while the directory still exists.
+            seen.append((list(recordings), self.session_dir.exists()))
+
+        widget.export_selected_requested.connect(on_export_requested)
+
+        widget._perform_delete(metadata, DELETE_RECORDINGS)
+
+        self.assertEqual(len(seen), 1)
+        emitted_recordings, dir_existed_at_emit_time = seen[0]
+        self.assertEqual(emitted_recordings, [metadata])
+        self.assertTrue(dir_existed_at_emit_time)
+        self.assertFalse(self.session_dir.exists())
+
+    def test_does_not_hang_or_raise_when_no_export_ever_appears(self):
+        """A zero-segment transcript is deliberately never exported (see
+        has_exportable_content) — nothing is listening on the signal here,
+        so the export never materializes, and the delete must still
+        proceed rather than block or raise."""
+        metadata = self._make_session_without_export()
+        widget = RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
+
+        widget._perform_delete(metadata, DELETE_RECORDINGS)
+
+        self.assertFalse(self.session_dir.exists())
+
+    def test_skips_export_request_when_export_already_exists(self):
+        self.transcripts_dir.mkdir()
+        export_path = export_path_for("session1", "", str(self.transcripts_dir))
+        export_path.write_text("# exported", encoding="utf-8")
+        metadata = self._make_session_without_export()
+        widget = RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
+
+        seen = []
+        widget.export_selected_requested.connect(seen.append)
+
+        widget._perform_delete(metadata, DELETE_RECORDINGS)
+
+        self.assertEqual(seen, [])
+        self.assertFalse(self.session_dir.exists())
+        self.assertTrue(export_path.exists())
+
+    def test_skips_export_request_when_no_transcript_json(self):
+        """No transcript.json means nothing was ever transcribed — the
+        "keeps the exported transcript" promise is vacuously true, and
+        there's nothing to export."""
+        audio_path = str(self.session_dir / "combined_audio.wav")
+        (self.session_dir / "combined_audio.wav").write_text("wav", encoding="utf-8")
+        metadata = {
+            "directory": str(self.session_dir),
+            "started_at": "",
+            "name": "Test",
+            "audio_files": {"combined": audio_path},
+        }
+        widget = RecordingsList(self.recordings_dir, config=_FakeConfig(str(self.transcripts_dir)))
+
+        seen = []
+        widget.export_selected_requested.connect(seen.append)
+
+        widget._perform_delete(metadata, DELETE_RECORDINGS)
+
+        self.assertEqual(seen, [])
+        self.assertFalse(self.session_dir.exists())
+
+
+class TestRmtreeRobustMissingDirectory(unittest.TestCase):
+    """Regression coverage for #73: a nonexistent path made shutil.rmtree
+    raise FileNotFoundError, which the retry loop misread as a lock —
+    burning up to 1.5s of UI-thread sleeps and popping a modal for a
+    directory that was already gone (e.g. removed externally between a
+    bulk-delete selection and this call)."""
+
+    def test_returns_promptly_without_raising(self):
+        tmp = tempfile.mkdtemp()
+        shutil.rmtree(tmp, ignore_errors=True)
+        missing = Path(tmp) / "definitely_not_here"
+
+        start = time.time()
+        _rmtree_robust(str(missing))  # must not raise
+        elapsed = time.time() - start
+
+        self.assertLess(elapsed, 0.5)
 
 
 if __name__ == "__main__":

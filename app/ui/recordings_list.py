@@ -193,6 +193,14 @@ def _rmtree_robust(directory, retries=4, initial_delay=0.1):
         except Exception:
             pass
 
+    # A nonexistent path raises FileNotFoundError, which looks identical to a
+    # transient lock to the except-and-retry loop below — without this check
+    # a batch delete where one folder was already removed externally burns
+    # four retries (up to 1.5s of UI-thread sleeping) and then pops a modal,
+    # for a directory that was already gone.
+    if not Path(directory).exists():
+        return
+
     last_exc = None
     delay = initial_delay
     for attempt in range(retries):
@@ -224,8 +232,11 @@ def _delete_transcription_files(directory):
     """Remove this session's transcript-derived artifacts.
 
     metadata.json needs no update: transcribed status is derived live from
-    transcript.json's existence (see _selected_transcribed/_build_row_widget),
-    so removing the file alone is enough to flip that state.
+    disk. _selected_transcribed (drives the Transcribe/Export context-menu
+    actions) checks transcript.json directly; _build_row_widget's
+    "Transcribed" pill checks the separate Markdown export instead (see
+    has_exported_transcript). Removing transcript.json here is enough to
+    flip the former; _delete_exported_transcript handles the latter.
     """
     for filename in TRANSCRIPTION_FILENAMES:
         path = Path(directory) / filename
@@ -646,6 +657,21 @@ class RecordingsList(QWidget):
                 _delete_exported_transcript(metadata, transcripts_dir)
                 self.recording_deleted.emit(directory)
             elif scope == DELETE_RECORDINGS:
+                # The dialog promises this scope "keeps the exported
+                # transcript in transcripts/" — but that's only true if an
+                # export already exists. A recording transcribed before the
+                # export feature shipped (or never reopened since) has
+                # transcript.json with no corresponding .md, so rmtree'ing
+                # the folder would destroy the only copy while the dialog
+                # claims it survives. Force an export first via the signal
+                # MainWindow already wires to _export_transcript — Qt direct
+                # connections run synchronously on this thread, so the export
+                # completes before rmtree below runs. If the transcript has
+                # no segments, export_transcript() deliberately skips writing
+                # (has_exportable_content) and no export appears; the delete
+                # must still proceed rather than blocking on that.
+                if (Path(directory) / "transcript.json").exists() and not has_exported_transcript(metadata, transcripts_dir):
+                    self.export_selected_requested.emit([metadata])
                 # The whole session directory goes, not just the audio files
                 # metadata happens to list: embeddings.npz, chat_history.json,
                 # calendar_event.json and any stray chunk WAVs live here too,
