@@ -20,7 +20,7 @@ from app.ui.search_bar import SearchBar
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
-from app.utils.transcript_export import export_path_for
+from app.utils.transcript_export import export_path_for, has_exported_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -429,14 +429,21 @@ class RecordingsList(QWidget):
         dur_label.setStyleSheet("color: #a6adc8; font-size: 10px; padding: 0px 4px;")
         meta_row.addWidget(dur_label, 0)
 
-        # Checked live against disk, like has_transcript below, rather than
-        # trusting metadata's presence alone — a "recordings only" or
-        # "transcriptions only" delete (see DeleteScopeDialog) can remove
-        # one without the other, and the row needs to reflect that on the
-        # very next refresh() with no other state to go stale.
+        # Checked live against disk rather than trusting metadata — a delete
+        # can remove audio or transcript without the other, and the row needs
+        # to reflect that on the very next refresh() with no cached state.
+        #
+        # "Transcribed" deliberately reports the Markdown export in the
+        # transcripts folder, not transcript.json inside the recording: the
+        # export is the artifact the user opens and the one that outlives a
+        # "Recording folder" delete. The context-menu Transcribe/Export
+        # actions still key off transcript.json (see _selected_transcribed) —
+        # they need the file the app can re-export FROM, so a recording with a
+        # transcript but no export shows no pill and offers "Export".
         audio_files = metadata.get("audio_files", {}) or {}
         has_audio = any(p and Path(p).exists() for p in audio_files.values())
-        has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
+        transcripts_dir = self.config.get("transcripts", "directory") if self.config else None
+        has_transcript = has_exported_transcript(metadata, transcripts_dir)
 
         # Generous padding gives each pill its shape and its slack at once.
         # Neither ever shrinks — all shrink pressure lands on the elidable
@@ -575,6 +582,12 @@ class RecordingsList(QWidget):
         return result
 
     def _selected_transcribed(self, items):
+        """Selected recordings that have transcript.json on disk.
+
+        Intentionally NOT has_exported_transcript: this drives Export/
+        Transcribe, which need the source the export is built from. The row
+        badge answers a different question — see _build_row_widget.
+        """
         result = []
         for item in items:
             metadata = item.data(Qt.ItemDataRole.UserRole)
