@@ -33,6 +33,21 @@ CONFERENCING_APPS = {
 }
 
 
+# Every row label in this section shares one width so the dropdowns beside
+# them line up into a single column.
+_LABEL_WIDTH = 70
+
+
+def _group_heading(text):
+    """Small caps-style divider naming what the rows below it capture."""
+    label = QLabel(text)
+    label.setStyleSheet(
+        "color: #7f849c; font-size: 8pt; font-weight: bold;"
+        "letter-spacing: 1px; padding: 6px 0 2px 0;"
+    )
+    return label
+
+
 def _fullest_device_name(name, all_devices):
     """Find the longest device name sharing this one's prefix.
 
@@ -118,10 +133,12 @@ class SourceSelector(QWidget):
         self._section = CollapsibleSection(self._BASE_TITLE, accent="#89b4fa")
         content = self._section.content_layout()
 
+        content.addWidget(_group_heading("YOUR VOICE"))
+
         # Microphone selector
         mic_row = QHBoxLayout()
         mic_label = QLabel("Microphone:")
-        mic_label.setFixedWidth(95)
+        mic_label.setFixedWidth(_LABEL_WIDTH)
         mic_row.addWidget(mic_label)
 
         self.mic_combo = QComboBox()
@@ -137,8 +154,8 @@ class SourceSelector(QWidget):
         self._mic2_row_widget = QWidget()
         mic2_row = QHBoxLayout(self._mic2_row_widget)
         mic2_row.setContentsMargins(0, 0, 0, 0)
-        mic2_label = QLabel("Microphone 2:")
-        mic2_label.setFixedWidth(95)
+        mic2_label = QLabel("Second mic:")
+        mic2_label.setFixedWidth(_LABEL_WIDTH)
         mic2_row.addWidget(mic2_label)
 
         self.mic2_combo = QComboBox()
@@ -152,6 +169,8 @@ class SourceSelector(QWidget):
 
         mic_count = self._config.get("audio", "mic_count") if self._config else 1
         self._mic2_row_widget.setVisible(mic_count >= 2)
+
+        content.addWidget(_group_heading("THE CALL"))
 
         # System audio section
         if self._win11:
@@ -186,8 +205,8 @@ class SourceSelector(QWidget):
     def _setup_legacy_ui(self, parent_layout):
         """Original system audio dropdown (Win10 or fallback)."""
         sys_row = QHBoxLayout()
-        sys_label = QLabel("System Audio:")
-        sys_label.setFixedWidth(95)
+        sys_label = QLabel("Output:")
+        sys_label.setFixedWidth(_LABEL_WIDTH)
         sys_row.addWidget(sys_label)
 
         self.loopback_combo = QComboBox()
@@ -211,9 +230,14 @@ class SourceSelector(QWidget):
         self.radio_per_app.setChecked(True)
         self.mode_group.idToggled.connect(self._on_mode_changed)
 
-        # Radios on a single row so they don't push the app list down
+        # Radios on a single row so they don't push the app list down.
+        # Labelled because "Selected apps / All system audio" alone reads as
+        # a global mode switch rather than a choice about what to capture.
         mode_row = QHBoxLayout()
         mode_row.setSpacing(6)
+        mode_label = QLabel("Capture:")
+        mode_label.setFixedWidth(_LABEL_WIDTH)
+        mode_row.addWidget(mode_label)
         mode_row.addWidget(self.radio_per_app, 1)
         mode_row.addWidget(self.radio_legacy, 1)
         parent_layout.addLayout(mode_row)
@@ -250,10 +274,19 @@ class SourceSelector(QWidget):
         self.conferencing_warning.setVisible(False)
         parent_layout.addWidget(self.conferencing_warning)
 
-        # Hidden legacy combo for fallback
+        # Output picker, shown instead of the app list in "All system audio"
+        # mode. Carries its own label row so it doesn't appear as a bare
+        # dropdown with nothing saying what it selects.
+        self._loopback_row_widget = QWidget()
+        loopback_row = QHBoxLayout(self._loopback_row_widget)
+        loopback_row.setContentsMargins(0, 0, 0, 0)
+        loopback_label = QLabel("Output:")
+        loopback_label.setFixedWidth(_LABEL_WIDTH)
+        loopback_row.addWidget(loopback_label)
         self.loopback_combo = QComboBox()
-        self.loopback_combo.setVisible(False)
-        parent_layout.addWidget(self.loopback_combo)
+        loopback_row.addWidget(self.loopback_combo, 1)
+        self._loopback_row_widget.setVisible(False)
+        parent_layout.addWidget(self._loopback_row_widget)
 
     def _on_mode_changed(self, button_id, checked):
         if not checked:
@@ -261,7 +294,7 @@ class SourceSelector(QWidget):
         if self.app_list is not None:
             is_per_app = button_id == 0
             self.app_list.setVisible(is_per_app)
-            self.loopback_combo.setVisible(not is_per_app)
+            self._loopback_row_widget.setVisible(not is_per_app)
         self._update_section_title()
 
     def _on_section_toggled(self, expanded):
@@ -610,7 +643,7 @@ class SourceSelector(QWidget):
                 # Explicitly set visibility in case signal didn't fire
                 if self.app_list is not None:
                     self.app_list.setVisible(False)
-                    self.loopback_combo.setVisible(True)
+                    self._loopback_row_widget.setVisible(True)
             else:
                 self.radio_per_app.setChecked(True)
 
