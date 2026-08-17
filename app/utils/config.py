@@ -17,6 +17,9 @@ DEFAULT_CONFIG = {
         "loopback_device": None,
         "last_mic": "",
         "last_mic2": "",
+        # Saved by name, like the mics: device indices shift between
+        # sessions as hardware comes and goes.
+        "last_loopback": "",
         "capture_mode": "legacy",
         "selected_apps": [],
         "hidden_devices": [],

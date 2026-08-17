@@ -148,6 +148,21 @@ class TestBatchedSave(ConfigTestCase):
             self.assertEqual(replace.call_count, 1)
 
 
+class TestLoopbackPersistence(ConfigTestCase):
+    """The system-audio device used to be re-derived on every launch, so a
+    correct choice silently reverted to whatever the (often wrong) default
+    lookup returned. It is now saved by name like the mics."""
+
+    def test_last_loopback_defaults_empty(self):
+        self.assertEqual(Config().get("audio", "last_loopback"), "")
+
+    def test_last_loopback_round_trips(self):
+        cfg = Config()
+        cfg.set("audio", "last_loopback", "Speakers (Realtek(R) Audio) (WASAPI Loopback)")
+        self.assertEqual(Config().get("audio", "last_loopback"),
+                         "Speakers (Realtek(R) Audio) (WASAPI Loopback)")
+
+
 class TestDefaultConfigIsolation(ConfigTestCase):
     def test_set_does_not_mutate_default_config(self):
         # Saved file is missing the "ui" section entirely.

@@ -172,6 +172,7 @@ class SourceSelector(QWidget):
 
         # Keep the collapsed title suffix in sync with selection state.
         self.loopback_combo.currentIndexChanged.connect(self._update_section_title)
+        self.loopback_combo.currentIndexChanged.connect(self._save_loopback_selection)
         if self.app_list is not None:
             self.app_list.itemChanged.connect(self._update_section_title)
 
@@ -490,7 +491,10 @@ class SourceSelector(QWidget):
         self._sync_combo_tooltip(self.mic_combo)
         self._sync_combo_tooltip(self.mic2_combo)
 
-        # System audio dropdown - always populated
+        # System audio dropdown - always populated. Signals are blocked while
+        # rebuilding so the intermediate selections clear()/addItem() produce
+        # can't overwrite the saved choice through _save_loopback_selection.
+        self.loopback_combo.blockSignals(True)
         self.loopback_combo.clear()
         self._loopback_devices = get_system_audio_devices(hidden_devices=hidden)
         self.loopback_combo.addItem("(None - don't record system audio)", None)
@@ -503,11 +507,27 @@ class SourceSelector(QWidget):
             if dev["index"] == default_output:
                 default_lb_idx = i + 1
 
-        if default_lb_idx > 0:
+        # Saved choice wins over the system default: the Windows default
+        # output is often not the endpoint the meeting app renders to, and
+        # capturing the wrong one yields a silent (then deleted) track.
+        last_loopback = ""
+        if self._config:
+            try:
+                last_loopback = self._config.get("audio", "last_loopback") or ""
+            except (KeyError, TypeError):
+                pass
+
+        saved_idx = self.loopback_combo.findText(last_loopback) if last_loopback else -1
+        if saved_idx >= 0:
+            self.loopback_combo.setCurrentIndex(saved_idx)
+        elif default_lb_idx > 0:
             self.loopback_combo.setCurrentIndex(default_lb_idx)
         elif self._loopback_devices:
             # Default device didn't match — pick the first one
             self.loopback_combo.setCurrentIndex(1)
+
+        self.loopback_combo.blockSignals(False)
+        self._update_section_title()
 
         # Refresh app list too
         if self._win11 and self.app_list is not None:
@@ -598,6 +618,18 @@ class SourceSelector(QWidget):
             self._config.set("audio", "last_mic2", mic2_text)
         self.mic_changed.emit(self.mic_combo.currentData())
 
+    def _save_loopback_selection(self):
+        """Persist the system-audio choice immediately when it changes."""
+        if not self._config:
+            return
+        self._config.set("audio", "last_loopback", self._loopback_text())
+
+    def _loopback_text(self):
+        """The combo label to save, or "" for the (None) entry."""
+        if self.loopback_combo.currentData() is None:
+            return ""
+        return self.loopback_combo.currentText()
+
     def save_capture_settings(self):
         """Save current capture mode, selected app names, and mic choices to config."""
         if not self._config:
@@ -618,6 +650,7 @@ class SourceSelector(QWidget):
         self._config.set("audio", "last_mic", mic1_text)
         mic2_text = self.mic2_combo.currentText() if self.mic2_combo.currentData() is not None else ""
         self._config.set("audio", "last_mic2", mic2_text)
+        self._config.set("audio", "last_loopback", self._loopback_text())
 
     def set_enabled(self, enabled):
         self.mic_combo.setEnabled(enabled)

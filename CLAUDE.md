@@ -261,7 +261,7 @@ TalkTrack/
 ### Configuration
 - Stored at ~/.talktrack/settings.json
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
-- Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
+- Device selections persist by **name** (indices shift as hardware comes and goes): `last_mic`, `last_mic2`, `last_loopback`. A saved system-audio device wins over `get_default_output()` — the Windows default output is frequently not the endpoint the meeting app renders to, and capturing the wrong one yields a silent track that `ChunkWriter` then deletes. Capture mode and selected apps are persisted too
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, silence_auto_stop, silence_duration
