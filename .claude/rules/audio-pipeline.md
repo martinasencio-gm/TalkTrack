@@ -48,6 +48,11 @@ The level meter and waveform see the processed signal (what's actually being rec
 
 - WASAPI loopback delivers **no packets when nothing renders** — an empty/missing
   `system_audio.wav` with silence on the endpoint is correct behavior, not a capture bug.
+  Mid-recording this used to make the track *time-compressed* (silence simply absent, so
+  everything after a gap shifted earlier). `LoopbackStream` now runs every sink write
+  through `_SilenceGapFiller`, which materialises wall-clock gaps as silence, ignores
+  sub-100ms jitter, skips gaps beyond a 30s sanity cap, and **excludes paused time**
+  (the mic stream drops frames while paused too, so padding it would misalign them).
   Real-hardware smoke tests must render a tone (`sd.play(sine, 48000)`) to exercise the
   loopback→writer path.
 - `soundfile.SoundFile.flush()` does update the WAV header frame count (libsndfile

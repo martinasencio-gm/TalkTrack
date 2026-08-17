@@ -92,6 +92,71 @@ class AudioStream:
         return self._recording and self._stream is not None
 
 
+class _SilenceGapFiller:
+    """Turn wall-clock gaps in a callback stream into explicit silence.
+
+    WASAPI loopback delivers no packets at all while nothing renders, so a
+    silent stretch used to be simply missing from system_audio.wav rather
+    than written as silence. The track came out time-compressed: everything
+    after a gap shifted earlier, the mic/system offset drifted (0.5s to
+    1.7s across one 24-minute meeting, 51s of frames absent), and both
+    SimpleDiarizer — which compares the two tracks in the same time window
+    — and the combined mix silently degraded.
+
+    Paused time is excluded: the mic stream drops frames while paused too,
+    so both tracks lose it identically and padding it here would create
+    the very misalignment this removes.
+    """
+
+    def __init__(self, sample_rate, min_gap_seconds=0.1, max_gap_seconds=30.0):
+        self._rate = sample_rate
+        self._min_gap = min_gap_seconds
+        self._max_gap = max_gap_seconds
+        self._started_at = None
+        self._frames = 0
+        self._paused_total = 0.0
+        self._paused_at = None
+
+    def start(self, now):
+        self._started_at = now
+        self._frames = 0
+        self._paused_total = 0.0
+        self._paused_at = None
+
+    def pause(self, now):
+        if self._paused_at is None:
+            self._paused_at = now
+
+    def resume(self, now):
+        if self._paused_at is not None:
+            self._paused_total += now - self._paused_at
+            self._paused_at = None
+
+    def gap_frames(self, now, chunk_frames):
+        """Silence frames owed before writing a chunk of chunk_frames.
+
+        Counts the chunk as written, so a gap is padded once and never
+        again on the following callback.
+        """
+        if self._started_at is None:
+            return 0
+        elapsed = now - self._started_at - self._paused_total
+        # The chunk about to be written covers audio captured before now.
+        deficit = int(elapsed * self._rate) - chunk_frames - self._frames
+        pad = 0
+        if deficit >= self._min_gap * self._rate:
+            if deficit > self._max_gap * self._rate:
+                logger.warning(
+                    "Loopback gap of %.1fs exceeds the %.0fs sanity cap - "
+                    "treating as a clock anomaly, not padding",
+                    deficit / self._rate, self._max_gap,
+                )
+            else:
+                pad = deficit
+        self._frames += pad + chunk_frames
+        return pad
+
+
 class LoopbackStream:
     """Captures system audio via WASAPI loopback using PyAudioWPatch."""
 
@@ -113,6 +178,7 @@ class LoopbackStream:
         # producing discontinuities at chunk boundaries that sounded like
         # faint crackle during remote speech.
         self._resampler = None
+        self._gap_filler = _SilenceGapFiller(sample_rate)
 
     def _find_loopback_device(self):
         """Find the WASAPI loopback device matching the selected output."""
@@ -169,6 +235,9 @@ class LoopbackStream:
             )
 
             self._resampler = _Resampler(self._native_rate, self._target_rate)
+            # Stamped after device activation (which can cost ~1s) so the
+            # first packet isn't charged for the setup time.
+            self._gap_filler.start(time.monotonic())
 
             self._stream = self._pa.open(
                 format=pyaudio.paFloat32,
@@ -211,6 +280,12 @@ class LoopbackStream:
                 return (None, pyaudio.paContinue)
 
             if self._sink is not None:
+                # Materialise any wall-clock gap as silence first: WASAPI
+                # sends nothing at all while the endpoint renders nothing,
+                # so without this the track loses that time entirely.
+                pad = self._gap_filler.gap_frames(time.monotonic(), mono.size)
+                if pad:
+                    self._sink.put(np.zeros(pad, dtype=np.float32))
                 self._sink.put(mono)
             if self._level_callback is not None:
                 self._level_callback(mono)
@@ -219,9 +294,11 @@ class LoopbackStream:
 
     def pause(self):
         self._paused = True
+        self._gap_filler.pause(time.monotonic())
 
     def resume(self):
         self._paused = False
+        self._gap_filler.resume(time.monotonic())
 
     def stop(self):
         self._recording = False
