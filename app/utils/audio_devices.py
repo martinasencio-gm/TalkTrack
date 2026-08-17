@@ -84,6 +84,32 @@ def get_default_mic():
         return inputs[0]["index"] if inputs else None
 
 
+MME_NAME_LIMIT = 31
+
+
+def _match_by_name(default_name, outputs):
+    """Find the WASAPI output whose name is default_name, tolerating the
+    MME 31-character cap.
+
+    sd.default.device[1] is an MME/DirectSound index, and MME clips device
+    names to 31 characters. Comparing those clipped names for equality
+    never matched anything on a machine with long device names ("DELL
+    S2725QS (2- HD Audio Driver for Display Audio)"), so the caller fell
+    through to "first device in the list" and captured an endpoint that
+    rendered nothing — an empty system_audio.wav with no error anywhere.
+
+    A clipped name shared by two endpoints carries nothing to tell them
+    apart, so ambiguity returns None rather than guessing.
+    """
+    for dev in outputs:
+        if dev["name"] == default_name:
+            return dev["index"]
+    if len(default_name) < MME_NAME_LIMIT:
+        return None
+    prefixed = [d for d in outputs if d["name"].startswith(default_name)]
+    return prefixed[0]["index"] if len(prefixed) == 1 else None
+
+
 def get_default_output():
     """Return the default output device index (for loopback).
 
@@ -91,16 +117,14 @@ def get_default_output():
     WASAPI device indices. We match by name instead to find the corresponding
     WASAPI output device.
     """
+    outputs = get_system_audio_devices()
     try:
         default_idx = sd.default.device[1]
         if default_idx is not None and default_idx >= 0:
             default_info = sd.query_devices(default_idx)
-            default_name = default_info["name"]
-            # Find the matching WASAPI output device by name
-            for dev in get_system_audio_devices():
-                if dev["name"] == default_name:
-                    return dev["index"]
+            matched = _match_by_name(default_info["name"], outputs)
+            if matched is not None:
+                return matched
     except Exception:
         pass
-    outputs = get_system_audio_devices()
     return outputs[0]["index"] if outputs else None
