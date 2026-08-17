@@ -16,15 +16,28 @@ _MODEL_CACHE = {}
 _MODEL_CACHE_LOCK = threading.Lock()
 
 
-def _get_model(model_size, device, compute_type):
-    key = (model_size, device, compute_type)
+def _whisper_cpu_threads(full_cpu):
+    """CTranslate2 thread-pool size for a transcription job.
+
+    Half the cores (min 1) while a recording is in progress, so the pool
+    leaves headroom for the real-time audio capture callback. With nothing
+    recording there is no callback to protect and that cap merely doubled
+    the run time, so idle jobs get every core but one — the same core the
+    diarizer holds back to keep the UI responsive.
+    """
+    cpu_count = os.cpu_count() or 4
+    return max(1, cpu_count - 1) if full_cpu else max(1, cpu_count // 2)
+
+
+def _get_model(model_size, device, compute_type, full_cpu=False):
+    # cpu_threads is fixed at construction, so it belongs in the cache key:
+    # without it, the first model built during a recording would serve
+    # every later idle job at half speed.
+    cpu_threads = _whisper_cpu_threads(full_cpu)
+    key = (model_size, device, compute_type, cpu_threads)
     with _MODEL_CACHE_LOCK:
         if key not in _MODEL_CACHE:
             from faster_whisper import WhisperModel
-            # Capped at half the CPU count (min 1) so CTranslate2's internal
-            # thread pool leaves headroom for the real-time audio capture
-            # callback when a transcription runs during a live recording.
-            cpu_threads = max(1, (os.cpu_count() or 4) // 2)
             _MODEL_CACHE[key] = WhisperModel(
                 model_size, device=device, compute_type=compute_type,
                 cpu_threads=cpu_threads,
@@ -181,7 +194,7 @@ class TranscriptionWorker(QThread):
     cancelled = pyqtSignal()
 
     def __init__(self, audio_path, model_size="base", language=None, device="cpu",
-                 tracks=None):
+                 tracks=None, full_cpu=False):
         """tracks is an optional [(speaker, path), ...].
 
         When given, each track is transcribed separately and the results
@@ -197,6 +210,7 @@ class TranscriptionWorker(QThread):
         self.language = language
         self.device = device
         self.tracks = tracks
+        self.full_cpu = full_cpu
         # Segments removed as bleed copies — the only visible evidence that
         # the mic is hearing the speakers.
         self.bleed_dropped = 0
@@ -293,7 +307,7 @@ class TranscriptionWorker(QThread):
                     device = "cpu"
 
             compute_type = "float16" if device == "cuda" else "int8"
-            model = _get_model(self.model_size, device, compute_type)
+            model = _get_model(self.model_size, device, compute_type, self.full_cpu)
 
             if self._cancel_requested:
                 self.cancelled.emit()

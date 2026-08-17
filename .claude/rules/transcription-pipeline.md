@@ -21,13 +21,25 @@ Every pipeline worker (`TranscriptionWorker`, `DiarizationWorker`, `SimpleDiariz
 
 Diarization (full or simple) failing must still render/persist the successful transcript (`worker.transcript_result`). A silent drop here was the original #14 bug.
 
-## Diarization CPU thread cap
+## CPU thread caps (both stages)
 
-`DiarizationWorker` sets `torch.set_num_threads` before calling the pyannote pipeline: `cpu_count - 1` (min 1) when idle, `cpu_count // 2` (min 1) while a recording is actively in progress. Never uncap to the literal full core count while idle — pyannote is the heaviest torch workload in the app, and saturating every core stalls the UI thread's own synchronous work (switching recordings parses JSON and rebuilds the transcript widget) for as long as diarization runs. One core held back fixes that at negligible cost to diarization speed.
+Both heavy stages take a `full_cpu` flag, set by MainWindow to `recorder.state == RecordingState.IDLE`:
+
+- `DiarizationWorker` sets `torch.set_num_threads` before calling the pyannote pipeline.
+- `TranscriptionWorker` passes `cpu_threads` to `WhisperModel` (CTranslate2's own pool — `torch.set_num_threads` does nothing for it).
+
+Same two values in both: `cpu_count - 1` (min 1) when idle, `cpu_count // 2` (min 1) while a recording is in progress. Half the cores exists to protect the real-time capture callback; with nothing recording there is no callback to protect and the cap roughly doubled run time for free. Never uncap to the literal full core count even when idle — the recorder being idle doesn't mean the UI is: switching recordings parses JSON and rebuilds the transcript widget synchronously, and that stalls visibly if a thread pool has saturated every core.
+
+## Diarization is per-run, not just a setting
+
+- The transcript header's "Identify speakers" checkbox (`TranscriptViewer.diarize_cb`) is the live source of truth for a new job: `_start_transcription` reads `transcript_viewer.diarization_enabled()`, not `config["diarization"]["enabled"]`. Toggling it writes the config key too, so Settings and the checkbox stay one setting with two surfaces (`_sync_diarization_controls` pushes config → checkbox on startup and after Settings closes).
+- The choice is bound onto the worker (`worker.diarize`) for the same reason `.session` is — the user can toggle it again while the job runs. `_on_transcription_finished` reads the worker's copy.
+- No HF token → the checkbox is disabled and `diarization_enabled()` returns False regardless of its checked state. A saved `enabled=True` from a machine that had a token must not queue a job pyannote cannot run.
+- On-demand: `diarize_btn` ("Identify Speakers") appears only with a token + a loaded transcript + audio, and re-runs diarization over the transcript already on screen (`_on_diarize_requested` → `_start_diarization`), so a fast unlabelled pass can be upgraded without transcribing again. It defers rather than stacking when `_transcription_busy()`.
 
 ## Model caches — resident by design
 
-- `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.
+- `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type, cpu_threads)`. `cpu_threads` is fixed at construction, so it belongs in the key: without it the first model built during a recording would serve every later idle job at half speed.
 - `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed by HF token.
 - `provider.get_sentence_transformer()` — shared embed model cache.
 Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.

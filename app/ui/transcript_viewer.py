@@ -60,6 +60,8 @@ class TranscriptViewer(QWidget):
     cancel_requested = pyqtSignal()         # emitted when cancel button clicked
     transcript_changed = pyqtSignal()       # emitted when text or names change
     speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
+    diarize_requested = pyqtSignal()        # run diarization on the loaded transcript
+    diarize_toggled = pyqtSignal(bool)      # "Identify speakers" checkbox changed
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -70,6 +72,7 @@ class TranscriptViewer(QWidget):
         self._calendar_attendees = []
         self._segment_widgets = []
         self._audio_path = None
+        self._diarization_available = False
         self._player = None
         self._playing_index = -1
         self._continuous_play = False
@@ -98,6 +101,30 @@ class TranscriptViewer(QWidget):
         title.setObjectName("sectionHeader")
         header.addWidget(title)
         header.addStretch()
+
+        # Diarization is by far the slowest stage (often longer than the
+        # recording itself on CPU), so it gets a per-run opt-out right next
+        # to the button that starts the work, not only a buried setting.
+        self.diarize_cb = QCheckBox("Identify speakers")
+        self.diarize_cb.setToolTip(
+            "Run full speaker diarization (pyannote) after transcription.\n"
+            "Much slower — on CPU it often takes longer than the recording.\n"
+            "Unchecked, separate mic and system tracks still label You/Remote."
+        )
+        self.diarize_cb.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        self.diarize_cb.toggled.connect(self.diarize_toggled)
+        header.addWidget(self.diarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # On-demand diarization for a transcript that already exists, so a
+        # fast unlabelled pass can be upgraded without transcribing again.
+        self.diarize_btn = QPushButton("Identify Speakers")
+        self.diarize_btn.setToolTip(
+            "Run speaker diarization on the existing transcript."
+        )
+        self.diarize_btn.setEnabled(False)
+        self.diarize_btn.hide()
+        self.diarize_btn.clicked.connect(self.diarize_requested)
+        header.addWidget(self.diarize_btn)
 
         self.transcribe_btn = QPushButton("Transcribe")
         self.transcribe_btn.setEnabled(False)
@@ -238,9 +265,45 @@ class TranscriptViewer(QWidget):
     def set_audio_path(self, path):
         self._audio_path = path
         self.transcribe_btn.setEnabled(path is not None)
+        self._update_diarize_button()
         if self._player:
             self._player.stop()
             self._player.clear_cache()
+
+    def set_diarization_available(self, available):
+        """Whether pyannote can run at all (a HuggingFace token is set).
+
+        Without one the checkbox would silently do nothing, so it is
+        disabled rather than left looking operative.
+        """
+        self._diarization_available = bool(available)
+        self.diarize_cb.setEnabled(self._diarization_available)
+        if not self._diarization_available:
+            self.diarize_cb.setToolTip(
+                "Add a HuggingFace token in Settings > Transcription to "
+                "enable speaker diarization."
+            )
+        self._update_diarize_button()
+
+    def set_diarization_enabled(self, enabled):
+        """Set the checkbox without reporting it back as a user change."""
+        self.diarize_cb.blockSignals(True)
+        self.diarize_cb.setChecked(bool(enabled))
+        self.diarize_cb.blockSignals(False)
+
+    def diarization_enabled(self):
+        return self.diarize_cb.isChecked() and self.diarize_cb.isEnabled()
+
+    def _update_diarize_button(self):
+        """On-demand diarization needs a transcript to label and audio to
+        read; without a token it cannot run at all."""
+        can_run = bool(
+            self._diarization_available
+            and self._transcript is not None
+            and self._audio_path is not None
+        )
+        self.diarize_btn.setVisible(can_run)
+        self.diarize_btn.setEnabled(can_run)
 
     def set_speaker_names(self, names):
         """Set speaker names from loaded speaker_names.json."""
@@ -366,6 +429,7 @@ class TranscriptViewer(QWidget):
         self.export_txt_btn.setEnabled(True)
         self.export_srt_btn.setEnabled(True)
         self.play_all_btn.setEnabled(self._audio_path is not None)
+        self._update_diarize_button()
 
     def clear(self):
         """Clear all transcript data and reset to empty state."""
@@ -400,6 +464,7 @@ class TranscriptViewer(QWidget):
         self.export_srt_btn.setEnabled(False)
         self.play_all_btn.setEnabled(False)
         self.transcribe_btn.setEnabled(False)
+        self._update_diarize_button()
         self._stop_continuous_play()
 
         # Clear speaker panel

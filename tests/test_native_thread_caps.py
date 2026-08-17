@@ -18,6 +18,48 @@ class TestWhisperModelThreadCap(unittest.TestCase):
             expected = max(1, 16 // 2)
         self.assertLessEqual(kwargs["cpu_threads"], expected + 8)  # sane upper bound, not a huge pool
 
+    def test_idle_transcription_gets_nearly_every_core(self):
+        # Half the cores is headroom for the real-time capture callback.
+        # With no recording running there is nothing to protect, and the
+        # cap was costing roughly a 2x slowdown for no benefit.
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel") as MockModel, \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+        _, kwargs = MockModel.call_args
+        self.assertEqual(kwargs["cpu_threads"], 7)
+
+    def test_recording_in_progress_still_gets_half(self):
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel") as MockModel, \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=False)
+        _, kwargs = MockModel.call_args
+        self.assertEqual(kwargs["cpu_threads"], 4)
+
+    def test_thread_count_is_part_of_the_cache_key(self):
+        # cpu_threads is baked into the model at construction, so a cache
+        # keyed without it would hand a recording-era 4-thread model to
+        # every later idle job.
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel") as MockModel, \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=False)
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+        self.assertEqual(MockModel.call_count, 2)
+
+    def test_same_thread_count_reuses_the_cached_model(self):
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel") as MockModel, \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+        self.assertEqual(MockModel.call_count, 1)
+
 
 class TestDiarizationThreadCap(unittest.TestCase):
     def test_run_caps_torch_threads_before_pipeline_call(self):

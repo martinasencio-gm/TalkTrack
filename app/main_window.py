@@ -435,6 +435,9 @@ class MainWindow(QMainWindow):
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._start_transcription)
         self.transcript_viewer.cancel_requested.connect(self._cancel_transcription)
+        self.transcript_viewer.diarize_toggled.connect(self._on_diarize_toggled)
+        self.transcript_viewer.diarize_requested.connect(self._on_diarize_requested)
+        self._sync_diarization_controls()
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
@@ -1104,14 +1107,18 @@ class MainWindow(QMainWindow):
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
 
+        # Read the viewer's checkbox, not the config, so the choice in force
+        # is the one visible next to the button that started this job. Bound
+        # onto the worker for the same reason the session is: the user may
+        # toggle it again while this job runs.
+        diarize = self.transcript_viewer.diarization_enabled()
+
         # With separate mic and system tracks on disk, transcribe each one
         # instead of the mix: Whisper never sees the doubled copy of remote
         # speech that bleed puts into combined_audio.wav, and the You/Remote
         # labels come from which file a segment was read out of.
         tracks = dual_track_plan(
-            session,
-            self.config.get("diarization", "enabled"),
-            self.config.get("diarization", "hf_token"),
+            session, diarize, self.config.get("diarization", "hf_token"),
         )
 
         self._current_transcription_percent = None
@@ -1121,8 +1128,12 @@ class MainWindow(QMainWindow):
             language=language,
             device=device,
             tracks=tracks,
+            # Half the cores exist to protect the live capture callback;
+            # with nothing recording that cap only slows the job down.
+            full_cpu=self.recorder.state == RecordingState.IDLE,
         )
         self._transcription_worker.session = session
+        self._transcription_worker.diarize = diarize
         self._transcription_worker.progress.connect(self._on_transcription_progress)
         self._transcription_worker.progress_percent.connect(self.transcript_viewer.set_progress_percent)
         self._transcription_worker.progress_percent.connect(self._on_transcription_percent)
@@ -1164,7 +1175,9 @@ class MainWindow(QMainWindow):
 
     def _on_transcription_finished(self, result):
         session = getattr(self._transcription_worker, "session", None)
-        diarization_enabled = self.config.get("diarization", "enabled")
+        # The worker carries the choice made when the job started; the
+        # checkbox may have been toggled since.
+        diarization_enabled = getattr(self._transcription_worker, "diarize", False)
         hf_token = self.config.get("diarization", "hf_token")
 
         if getattr(self._transcription_worker, "tracks", None):
@@ -1218,6 +1231,34 @@ class MainWindow(QMainWindow):
             self._display_final_transcript(
                 worker.transcript_result, getattr(worker, "session", None)
             )
+
+    def _sync_diarization_controls(self):
+        """Push the saved diarization preference into the transcript viewer.
+
+        The checkbox is the live source of truth for new jobs; this keeps it
+        agreeing with Settings, in both directions (see _on_diarize_toggled).
+        """
+        self.transcript_viewer.set_diarization_available(
+            bool(self.config.get("diarization", "hf_token"))
+        )
+        self.transcript_viewer.set_diarization_enabled(
+            self.config.get("diarization", "enabled")
+        )
+
+    def _on_diarize_toggled(self, enabled):
+        self.config.set("diarization", "enabled", enabled)
+
+    def _on_diarize_requested(self):
+        """Run diarization on the transcript already on screen."""
+        if self._transcript is None or self._current_session is None:
+            return
+        if self._transcription_busy():
+            self.status_label.setText(
+                "Busy — speaker identification will have to wait for the "
+                "current job to finish."
+            )
+            return
+        self._start_diarization(self._transcript, self._current_session)
 
     def _start_diarization(self, transcript_result, session):
         if self._diarization_worker and self._diarization_worker.isRunning():
@@ -1763,6 +1804,9 @@ class MainWindow(QMainWindow):
             self.source_selector.refresh_devices()
             # Update mic2 visibility in case mic_count changed
             self.source_selector.update_mic_count(self.config.get("audio", "mic_count"))
+            # The dialog owns the same diarization flag and token the
+            # transcript viewer's checkbox mirrors.
+            self._sync_diarization_controls()
 
     def _open_recordings_folder(self):
         import os

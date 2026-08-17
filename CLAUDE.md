@@ -153,6 +153,8 @@ TalkTrack/
 - Speaker diarization with two modes:
   - Simple mode (no setup): transcribes `mic_audio.wav` and `system_audio.wav` separately and labels each segment "You" or "Remote" by the track it came from, merging the two into one timeline (bleed duplicates dropped). Falls back to the RMS-comparison `SimpleDiarizer` when only the mixed audio exists.
   - Full diarization (pyannote.audio): identifies individual speakers
+- **Per-run diarization choice:** an "Identify speakers" checkbox in the transcript header decides whether the *next* transcription runs pyannote (it's the slowest stage — often longer than the recording itself on CPU). It mirrors and writes `diarization.enabled`, and is disabled without a HuggingFace token.
+- **On-demand diarization:** an "Identify Speakers" button re-runs pyannote over the transcript already on screen, so a fast unlabelled pass can be upgraded without transcribing again
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
 - **Speaker naming:** assign friendly names to diarized speakers, saved per recording
