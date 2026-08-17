@@ -180,8 +180,8 @@ class SourceSelector(QWidget):
         if self.app_list is not None:
             self.app_list.itemChanged.connect(self._update_section_title)
 
-        # Start expanded by default
-        self._section.set_expanded(True)
+        collapsed = self._config.get("ui", "audio_sources_collapsed") if self._config else False
+        self._section.set_expanded(not collapsed)
 
     def _setup_legacy_ui(self, parent_layout):
         """Original system audio dropdown (Win10 or fallback)."""
@@ -268,6 +268,8 @@ class SourceSelector(QWidget):
         if expanded:
             self.refresh_devices()
         self._update_section_title()
+        if self._config:
+            self._config.set("ui", "audio_sources_collapsed", not expanded)
 
     def _selected_sources_text(self):
         """Build the ' (...)' suffix shown when the section is collapsed."""

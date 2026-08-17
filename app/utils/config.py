@@ -85,6 +85,8 @@ DEFAULT_CONFIG = {
         "theme": "dark",
         "speakers_collapsed": False,
         "right_panel_collapsed": False,
+        "audio_sources_collapsed": False,
+        "recordings_collapsed": False,
         "activity_widget_position": None,
     },
     "calendar": {

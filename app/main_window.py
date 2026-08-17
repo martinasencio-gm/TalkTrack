@@ -27,6 +27,7 @@ from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
 from app.transcription.track_merge import dual_track_plan
+from app.transcription.job_status import transcribing_directories
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
 from app.ui.collapsible_splitter import CollapsibleSplitter
 from app.ui.recording_controls import RecordingControls
@@ -293,7 +294,9 @@ class MainWindow(QMainWindow):
         self.recordings_list = RecordingsList(recordings_dir)
         self._recordings_section = CollapsibleSection("Recordings", accent="#cba6f7")
         self._recordings_section.content_layout().addWidget(self.recordings_list)
-        self._recordings_section.set_expanded(True)
+        self._recordings_section.set_expanded(
+            not self.config.get("ui", "recordings_collapsed")
+        )
         left_layout.addWidget(self._recordings_section, 1)
 
         # Trailing spacer absorbs space only when both sections are collapsed —
@@ -304,6 +307,9 @@ class MainWindow(QMainWindow):
 
         self.source_selector._section.toggled.connect(self._update_left_panel_stretch)
         self._recordings_section.toggled.connect(self._update_left_panel_stretch)
+        self._recordings_section.toggled.connect(
+            lambda expanded: self.config.set("ui", "recordings_collapsed", not expanded)
+        )
         self._update_left_panel_stretch()
 
         splitter.addWidget(left_panel)
@@ -2233,6 +2239,11 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def _update_activity_visibility(self):
+        self.recordings_list.set_transcribing(transcribing_directories(
+            [self._transcription_worker, self._diarization_worker,
+             self._simple_diarize_worker],
+            self._pending_transcriptions,
+        ))
         busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
         should_show = busy_state is not None and (self.isMinimized() or self.isHidden())
         if should_show:

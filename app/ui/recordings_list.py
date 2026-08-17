@@ -295,6 +295,7 @@ class RecordingsList(QWidget):
         self._search_worker = None
         self._pending_search = None
         self._showing_search_results = False
+        self._transcribing = set()
         try:
             salvage_orphaned_recordings(self.recordings_dir)
         except Exception:
@@ -349,6 +350,24 @@ class RecordingsList(QWidget):
     def _set_empty_message(self, text):
         self._empty_label.setText(text)
         self._empty_label.setVisible(bool(text))
+
+    def set_transcribing(self, directories):
+        """Mark these session directories as having work in flight.
+
+        Rebuilds only when the set actually changes: the caller polls this
+        from the same place it updates the activity widget, which fires far
+        more often than the status changes, and refresh() drops the user's
+        selection.
+        """
+        directories = set(directories)
+        if directories == self._transcribing:
+            return
+        self._transcribing = directories
+        if not self._showing_search_results:
+            selected = self.list_widget.currentRow()
+            self.refresh()
+            if 0 <= selected < self.list_widget.count():
+                self.list_widget.setCurrentRow(selected)
 
     def refresh(self):
         self._showing_search_results = False
@@ -468,7 +487,18 @@ class RecordingsList(QWidget):
             )
             meta_row.addWidget(audio_badge, 0)
 
-        if has_transcript:
+        # In-progress wins over Transcribed: a re-transcribe of an already
+        # transcribed recording would otherwise look like nothing was
+        # happening, which is exactly the ambiguity this pill removes.
+        if metadata.get("directory") in self._transcribing:
+            working_badge = QLabel("Transcribing…")
+            working_badge.setStyleSheet(
+                "color: #f9e2af; font-size: 9px; font-weight: bold;"
+                "background-color: rgba(249, 226, 175, 0.15);"
+                "border-radius: 7px; padding: 2px 8px;"
+            )
+            meta_row.addWidget(working_badge, 0)
+        elif has_transcript:
             badge = QLabel("Transcribed")
             badge.setStyleSheet(
                 "color: #a6e3a1; font-size: 9px; font-weight: bold;"
