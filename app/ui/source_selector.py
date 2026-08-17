@@ -1,4 +1,6 @@
 """Audio source selection widget with per-app capture support."""
+import logging
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel,
     QPushButton, QListWidget, QListWidgetItem,
@@ -12,6 +14,8 @@ from app.utils.audio_devices import (
 )
 from app.utils.platform_info import is_windows_11
 from app.ui.collapsible_section import CollapsibleSection
+
+logger = logging.getLogger(__name__)
 
 
 # Apps that set AUDCLNT_STREAMFLAGS_EXCLUDE_FROM_PROCESS_LOOPBACK_CAPTURE
@@ -518,8 +522,14 @@ class SourceSelector(QWidget):
                 pass
 
         saved_idx = self.loopback_combo.findText(last_loopback) if last_loopback else -1
+        active_lb_idx = self._active_output_row()
         if saved_idx >= 0:
             self.loopback_combo.setCurrentIndex(saved_idx)
+        elif active_lb_idx > 0:
+            # Nothing saved: an endpoint that is demonstrably producing
+            # sound beats the nominal Windows default, which is regularly
+            # not where the meeting app is playing.
+            self.loopback_combo.setCurrentIndex(active_lb_idx)
         elif default_lb_idx > 0:
             self.loopback_combo.setCurrentIndex(default_lb_idx)
         elif self._loopback_devices:
@@ -617,6 +627,26 @@ class SourceSelector(QWidget):
             mic2_text = self.mic2_combo.currentText() if self.mic2_combo.currentData() is not None else ""
             self._config.set("audio", "last_mic2", mic2_text)
         self.mic_changed.emit(self.mic_combo.currentData())
+
+    def _active_output_row(self):
+        """Combo row for the endpoint currently rendering audio, or 0.
+
+        Returns a row index (not a device index) so the caller can treat 0
+        as "no opinion" the same way it treats the default lookup.
+        """
+        if self._com_poller is None:
+            return 0
+        try:
+            index = self._com_poller.active_output_index(self._loopback_devices)
+        except Exception:
+            logger.exception("Failed to read active output endpoint")
+            return 0
+        if index is None:
+            return 0
+        for row in range(1, self.loopback_combo.count()):
+            if self.loopback_combo.itemData(row) == index:
+                return row
+        return 0
 
     def _save_loopback_selection(self):
         """Persist the system-audio choice immediately when it changes."""

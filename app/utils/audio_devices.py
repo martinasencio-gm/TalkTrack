@@ -87,7 +87,7 @@ def get_default_mic():
 MME_NAME_LIMIT = 31
 
 
-def _match_by_name(default_name, outputs):
+def match_device_name(default_name, outputs):
     """Find the WASAPI output whose name is default_name, tolerating the
     MME 31-character cap.
 
@@ -122,7 +122,7 @@ def get_default_output():
         default_idx = sd.default.device[1]
         if default_idx is not None and default_idx >= 0:
             default_info = sd.query_devices(default_idx)
-            matched = _match_by_name(default_info["name"], outputs)
+            matched = match_device_name(default_info["name"], outputs)
             if matched is not None:
                 return matched
     except Exception:

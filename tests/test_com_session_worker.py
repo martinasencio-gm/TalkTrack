@@ -56,7 +56,8 @@ class TestComSessionPoller(unittest.TestCase):
         poller = self._make(_fake_worker_blocks_forever)
         poller.start()
         snapshot = poller.get_snapshot()
-        self.assertEqual(snapshot, {"audio_apps": [], "mic_pids": set()})
+        self.assertEqual(snapshot, {"audio_apps": [], "mic_pids": set(),
+                                    "render_peaks": {}})
 
     def test_returns_queued_snapshot_once_worker_reports(self):
         poller = self._make(_fake_worker_puts_once)
@@ -186,7 +187,8 @@ class TestComSessionPoller(unittest.TestCase):
         snapshot = poller.get_snapshot()
 
         self.assertIsNone(poller._process)
-        self.assertEqual(snapshot, {"audio_apps": [], "mic_pids": set()})
+        self.assertEqual(snapshot, {"audio_apps": [], "mic_pids": set(),
+                                    "render_peaks": {}})
 
     def test_failed_respawn_respects_backoff_on_next_call(self):
         """Failed respawn respects backoff window on next get_snapshot() call."""

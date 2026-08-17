@@ -11,6 +11,8 @@ import multiprocessing
 import queue
 import time
 
+from app.utils.render_activity import pick_output_index, update_activity
+
 logger = logging.getLogger(__name__)
 
 _RESTART_BACKOFF_SECONDS = 5.0
@@ -21,6 +23,7 @@ def _worker_loop(result_queue, interval, stop_event, main_pid):
     """Entry point for the child process. Loops until stop_event is set."""
     from app.utils.audio_session_monitor import get_active_audio_apps
     from app.utils.meeting_signals import get_mic_capture_pids
+    from app.utils.render_activity import sample_render_peaks
 
     while not stop_event.is_set():
         try:
@@ -31,8 +34,13 @@ def _worker_loop(result_queue, interval, stop_event, main_pid):
             mic_pids = get_mic_capture_pids(exclude_pid=main_pid)
         except Exception:
             mic_pids = set()
+        try:
+            render_peaks = sample_render_peaks()
+        except Exception:
+            render_peaks = {}
 
-        snapshot = {"audio_apps": audio_apps, "mic_pids": mic_pids}
+        snapshot = {"audio_apps": audio_apps, "mic_pids": mic_pids,
+                    "render_peaks": render_peaks}
         try:
             result_queue.get_nowait()
         except queue.Empty:
@@ -60,8 +68,10 @@ class ComSessionPoller:
         self._interval = multiprocessing.Value("d", 2.0)
         self._stop_event = multiprocessing.Event()
         self._process = None
-        self._cached_snapshot = {"audio_apps": [], "mic_pids": set()}
+        self._cached_snapshot = {"audio_apps": [], "mic_pids": set(),
+                                 "render_peaks": {}}
         self._last_restart_ts = float("-inf")
+        self._render_history = {}
 
     def start(self):
         # Fresh queue per worker generation: multiprocessing.Queue's
@@ -84,6 +94,15 @@ class ComSessionPoller:
         if self._queue is not None:
             try:
                 self._cached_snapshot = self._queue.get_nowait()
+                # Fold render peaks only on a genuinely new snapshot. Doing
+                # it per call would keep refreshing "recently active" from a
+                # cached sample after the worker died, so a stale endpoint
+                # would look live forever.
+                self._render_history = update_activity(
+                    self._render_history,
+                    self._cached_snapshot.get("render_peaks", {}),
+                    time.monotonic(),
+                )
             except queue.Empty:
                 pass
             except Exception:
@@ -100,6 +119,15 @@ class ComSessionPoller:
                     self._last_restart_ts = time.monotonic()
 
         return self._cached_snapshot
+
+    def active_output_index(self, outputs):
+        """Device index of the output endpoint currently rendering audio.
+
+        None means no opinion — nothing is playing, or it's playing to an
+        endpoint that isn't in `outputs` (hidden by the user, no loopback).
+        Callers must fall back rather than treat None as a selection.
+        """
+        return pick_output_index(self._render_history, outputs, time.monotonic())
 
     def set_interval(self, seconds):
         self._interval.value = seconds

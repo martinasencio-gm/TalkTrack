@@ -94,6 +94,7 @@ TalkTrack/
       audio_devices.py                # Device enumeration (sounddevice)
       audio_session_monitor.py        # Per-app audio session enumeration (pycaw)
       com_session_worker.py           # Isolated worker process for pycaw/comtypes COM polling
+      render_activity.py              # Which output endpoint is actually rendering (auto-picks the loopback source)
       config.py                       # JSON config management
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
@@ -106,6 +107,9 @@ TalkTrack/
     test_chunk_writer.py              # Streaming disk writer tests
     test_dual_audio_capture.py        # Per-app mode integration tests
     test_dependency_checker.py        # Dependency checker tests
+    test_audio_devices.py             # Device enumeration + default-output name matching tests
+    test_render_activity.py           # Render-endpoint activity tracking tests
+    test_com_poller_render_activity.py # Poller render-peak history tests
     test_config.py                    # Config load/save tests (incl. calendar defaults)
     test_transcriber.py               # TranscriptSegment/TranscriptResult tests
     test_segment_player.py            # Audio clip playback tests
@@ -219,6 +223,11 @@ TalkTrack/
   silently respawns it.
 - Auto-refreshes every 5 seconds in the UI (2 seconds while recording), read from the
   poller's cached snapshot rather than calling pycaw directly
+- The same worker samples per-endpoint render peaks (`render_activity.sample_render_peaks`,
+  **render endpoints only** — capture endpoints expose meters too and the user's own mic
+  would outrank the speakers). `ComSessionPoller` folds each new snapshot into a 45s
+  activity history and exposes `active_output_index(outputs)`, which `SourceSelector`
+  consults only when no `last_loopback` is saved.
 
 ### Recording Pipeline
 - State machine: IDLE -> RECORDING -> PAUSED <-> RECORDING -> STOPPING -> IDLE
@@ -261,7 +270,7 @@ TalkTrack/
 ### Configuration
 - Stored at ~/.talktrack/settings.json
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
-- Device selections persist by **name** (indices shift as hardware comes and goes): `last_mic`, `last_mic2`, `last_loopback`. A saved system-audio device wins over `get_default_output()` — the Windows default output is frequently not the endpoint the meeting app renders to, and capturing the wrong one yields a silent track that `ChunkWriter` then deletes. Capture mode and selected apps are persisted too
+- Device selections persist by **name** (indices shift as hardware comes and goes): `last_mic`, `last_mic2`, `last_loopback`. System-audio selection priority is **saved choice → endpoint actually rendering audio → `get_default_output()` → first device**. The Windows default output is frequently not the endpoint the meeting app renders to, and capturing the wrong one yields a silent track that `ChunkWriter` then deletes. Capture mode and selected apps are persisted too
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, silence_auto_stop, silence_duration
