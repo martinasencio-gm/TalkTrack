@@ -21,6 +21,10 @@ Every pipeline worker (`TranscriptionWorker`, `DiarizationWorker`, `SimpleDiariz
 
 Diarization (full or simple) failing must still render/persist the successful transcript (`worker.transcript_result`). A silent drop here was the original #14 bug.
 
+## Diarization CPU thread cap
+
+`DiarizationWorker` sets `torch.set_num_threads` before calling the pyannote pipeline: `cpu_count - 1` (min 1) when idle, `cpu_count // 2` (min 1) while a recording is actively in progress. Never uncap to the literal full core count while idle — pyannote is the heaviest torch workload in the app, and saturating every core stalls the UI thread's own synchronous work (switching recordings parses JSON and rebuilds the transcript widget) for as long as diarization runs. One core held back fixes that at negligible cost to diarization speed.
+
 ## Model caches — resident by design
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.

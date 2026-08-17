@@ -44,7 +44,7 @@ class TestDiarizationThreadCap(unittest.TestCase):
         (call_arg,), _ = mock_set_threads.call_args
         self.assertGreaterEqual(call_arg, 1)
 
-    def test_full_cpu_uses_uncapped_thread_count(self):
+    def test_full_cpu_still_reserves_one_core_for_the_ui(self):
         from app.transcription.diarizer import DiarizationWorker
 
         worker = DiarizationWorker(
@@ -66,7 +66,12 @@ class TestDiarizationThreadCap(unittest.TestCase):
 
             worker.run()
 
-        mock_set_threads.assert_called_once_with(16)
+        # Diarization is the heaviest torch workload and normally gets every
+        # core, but the recorder being idle doesn't mean the UI is idle —
+        # switching recordings does synchronous work (JSON parse, transcript
+        # widget rebuild) that stalls visibly if torch's thread pool has
+        # saturated every core. One core held back is enough to fix that.
+        mock_set_threads.assert_called_once_with(15)
 
 
 if __name__ == "__main__":

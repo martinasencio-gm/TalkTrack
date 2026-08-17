@@ -68,12 +68,17 @@ class DiarizationWorker(QThread):
             import soundfile as sf
             import torch
 
-            # Full CPU count when nothing else needs headroom; capped to half
-            # (min 1) only while a recording is actively in progress, so
-            # torch's thread pool doesn't starve the real-time audio capture
-            # callback.
+            # Nearly the full core count when nothing else needs headroom
+            # (one held back so browsing recordings during diarization stays
+            # responsive — this is the heaviest torch workload in the app and
+            # saturating every core visibly stalls the UI thread's own work);
+            # capped to half (min 1) while a recording is actively in
+            # progress, so torch's thread pool doesn't starve the real-time
+            # audio capture callback.
             cpu_count = os.cpu_count() or 4
-            torch.set_num_threads(cpu_count if self.full_cpu else max(1, cpu_count // 2))
+            torch.set_num_threads(
+                max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
+            )
 
             audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
             if audio_data.ndim == 1:
