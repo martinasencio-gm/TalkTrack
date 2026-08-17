@@ -35,6 +35,7 @@ Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VR
 - `_on_transcription_finished` checks `worker.tracks` FIRST and goes straight to `_display_final_transcript`: the segments are already labelled, so `SimpleDiarizeWorker` must not run on top of them.
 - `merge_tracks` only ever drops segments from the **first** track. Mic goes first because it's the only track that can hold a bleed copy — a loopback of the render stream cannot pick up the user's voice. Reversing the order would delete real remote speech.
 - A track that fails to transcribe is logged and skipped, not fatal — a recording with only one usable track still produces a transcript.
+- `worker.bleed_dropped` counts the removed duplicates; `MainWindow._warn_speaker_bleed` surfaces it once per app session above `BLEED_WARNING_SEGMENTS` and suggests headphones. Tray-hidden suppresses the modal (status label only), same as the silent-capture warning.
 
 ## SimpleDiarizer
 

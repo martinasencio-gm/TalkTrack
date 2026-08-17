@@ -23,3 +23,6 @@ CLAUDE.local.md
 docs/plans/
 nul
 temp.txt
+
+# graphify knowledge graph output (regenerate with: graphify update .)
+graphify-out/

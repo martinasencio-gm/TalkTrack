@@ -56,6 +56,10 @@ from app.ui.calendar_lookup_worker import CalendarLookupWorker
 from app.ui.import_timestamp_dialog import ImportTimestampDialog
 from app.recording.import_session import build_import_metadata, needs_conversion
 
+# Bleed duplicates below this count are the odd loud moment, not a setup
+# worth interrupting the user about.
+BLEED_WARNING_SEGMENTS = 5
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -73,6 +77,7 @@ class MainWindow(QMainWindow):
         self._pending_transcriptions = []
         self._closing = False
         self._silent_capture_warned = False
+        self._bleed_warned = False
         self._mic_muted = False
         self._pending_gain = None  # holds latest slider value awaiting debounced save
         self._gain_save_timer = QTimer(self)
@@ -861,6 +866,33 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Capturing Silence", msg)
 
+    def _warn_speaker_bleed(self, dropped):
+        """Tell the user once that their mic is picking up the other side.
+
+        The duplicates are removed from the transcript, but bleed also
+        degrades the mic track itself and makes the remote voice audible
+        under the user's own. Headphones are the only real fix — the app
+        has no echo cancellation.
+        """
+        if self._bleed_warned or dropped < BLEED_WARNING_SEGMENTS:
+            return
+        self._bleed_warned = True
+        self.status_label.setText(
+            f"Your microphone picked up the other side ({dropped} duplicate "
+            "segments removed) — headphones will improve quality."
+        )
+        if self._is_hidden_to_tray():
+            return
+        QMessageBox.information(
+            self, "Microphone Picking Up Speakers",
+            f"{dropped} segments of the other side's speech were also "
+            "recorded through your microphone and have been removed from "
+            "the transcript.\n\n"
+            "This happens when call audio plays through speakers instead of "
+            "headphones. Using headphones gives a cleaner recording of your "
+            "own voice.",
+        )
+
     def _is_hidden_to_tray(self):
         return hasattr(self, "tray") and self.tray.is_supported() and self.isHidden()
 
@@ -1129,7 +1161,9 @@ class MainWindow(QMainWindow):
 
         if getattr(self._transcription_worker, "tracks", None):
             # Per-track transcription already labelled every segment.
+            dropped = getattr(self._transcription_worker, "bleed_dropped", 0)
             self._display_final_transcript(result, session)
+            self._warn_speaker_bleed(dropped)
         elif diarization_enabled and hf_token:
             # Run full diarization with pyannote
             self._start_diarization(result, session)

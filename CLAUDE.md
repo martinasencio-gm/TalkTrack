@@ -190,6 +190,7 @@ TalkTrack/
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
 - **Continue from here:** checkbox next to Play All — click any segment to start continuous playback from that point
 - **Smart scroll during playback:** auto-scroll to playing segment is suppressed if user has manually scrolled away
+- **Speaker-bleed warning:** when per-track transcription drops enough duplicate segments to show the mic is hearing the call audio, warns once per app session and suggests headphones
 - **Silent-capture warning:** per-app recordings that receive zero audio for 15s trigger a one-shot warning (Teams/Zoom opt out of process-loopback; suggests legacy mode)
 - **Recovered recordings:** crash-orphaned recording dirs (audio but no metadata) are salvaged on startup as "Recovered" entries — never auto-deleted
 - **Transcription queue:** back-to-back recordings queue for transcription instead of being dropped; jobs run serially with the session bound at start

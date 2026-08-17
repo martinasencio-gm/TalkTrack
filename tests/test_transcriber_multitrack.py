@@ -109,6 +109,31 @@ class TestMultiTrackTranscription(MultiTrackTestCase):
         # Unlabelled: diarization assigns speakers on this path.
         self.assertEqual(results[0].segments[0].speaker, "")
 
+    def test_counts_the_segments_dropped_as_bleed(self):
+        # The count is what tells the user their mic is hearing the
+        # speakers — it's the only visible evidence that dedup did work.
+        model = _FakeModel({
+            "mic.wav": [_FakeSegment(1.0, 3.0, "the migration runs on Thursday night"),
+                        _FakeSegment(5.0, 6.0, "sounds fine to me then")],
+            "sys.wav": [_FakeSegment(1.0, 3.0, "The migration runs on Thursday night.")],
+        })
+        with mock.patch.object(transcriber, "_get_model", return_value=model):
+            worker = TranscriptionWorker(
+                "unused.wav", tracks=[("You", "mic.wav"), ("Remote", "sys.wav")])
+            worker.run()
+        self.assertEqual(worker.bleed_dropped, 1)
+
+    def test_bleed_count_is_zero_without_bleed(self):
+        model = _FakeModel({
+            "mic.wav": [_FakeSegment(0.0, 1.0, "morning everyone")],
+            "sys.wav": [_FakeSegment(2.0, 3.0, "morning, shall we start")],
+        })
+        with mock.patch.object(transcriber, "_get_model", return_value=model):
+            worker = TranscriptionWorker(
+                "unused.wav", tracks=[("You", "mic.wav"), ("Remote", "sys.wav")])
+            worker.run()
+        self.assertEqual(worker.bleed_dropped, 0)
+
     def test_cancelling_between_tracks_emits_cancelled_not_finished(self):
         model = _FakeModel({"mic.wav": [_FakeSegment(0.0, 1.0, "hi")],
                             "sys.wav": [_FakeSegment(2.0, 3.0, "hello")]})

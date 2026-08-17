@@ -197,6 +197,9 @@ class TranscriptionWorker(QThread):
         self.language = language
         self.device = device
         self.tracks = tracks
+        # Segments removed as bleed copies — the only visible evidence that
+        # the mic is hearing the speakers.
+        self.bleed_dropped = 0
         self._cancel_requested = False
 
     def cancel(self):
@@ -264,6 +267,9 @@ class TranscriptionWorker(QThread):
 
         result = TranscriptResult(language=language, duration=duration)
         result.segments = merge_tracks(transcribed)
+        self.bleed_dropped = (
+            sum(len(segments) for _, segments in transcribed) - len(result.segments)
+        )
         return result
 
     def run(self):
