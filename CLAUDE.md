@@ -159,6 +159,7 @@ TalkTrack/
 - **Calendar tagging (opt-in):** after a recording finishes, optionally checks the local Outlook desktop calendar for an overlapping event and offers to tag the recording with its subject, organizer, and attendees (`calendar_event.json`); attendee names populate a mutually-exclusive dropdown in speaker naming
 - **Calendar rename suggestion:** when a recording is tagged to a calendar event and has no custom name yet, offers to rename it to the event's subject
 - **Calendar remap:** "Change" button in the recording header re-runs the calendar lookup on demand and lets the user retag the recording to a different matching event
+- **Rename suggests meetings:** starting a rename looks up the calendar events overlapping the recording and offers their subjects as completions; picking one renames *and* tags/retags the recording to that meeting (a freely-typed name only renames)
 - **LLM-ready transcript export:** every transcript/notes/summary save also writes `transcript.md` (frontmatter + summary + action items + notes + transcript) into the recording's own session folder, alongside `transcript.json`
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps

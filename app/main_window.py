@@ -41,7 +41,7 @@ from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.tray_icon import TrayIcon
 from app.ui.activity_indicator import ActivityIndicator, resolve_activity_state
-from app.ui.recording_header import RecordingHeader
+from app.ui.recording_header import RecordingHeader, match_event_by_subject
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
 from app.ui.summary_panel import SummaryPanel
@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self._transcription_worker = None
         self._calendar_lookup_workers = []
         self._calendar_banner_session = None
+        self._rename_candidate_events = []
         self._diarization_worker = None
         self._simple_diarize_worker = None
         self._summarize_worker = None
@@ -456,7 +457,8 @@ class MainWindow(QMainWindow):
         self.recorder.capture_lost.connect(self._on_capture_lost)
 
         # Recording header
-        self.recording_header.name_changed.connect(self._on_recording_renamed)
+        self.recording_header.name_changed.connect(self._on_recording_renamed_with_tag)
+        self.recording_header.rename_started.connect(self._on_rename_started)
         self.recording_header.change_calendar_requested.connect(self._on_change_calendar_requested)
 
         # Transcript editing
@@ -1510,6 +1512,9 @@ class MainWindow(QMainWindow):
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
+        # Suggestions belong to the recording they were looked up for; a
+        # leftover one must not tag the recording being opened now.
+        self._rename_candidate_events = []
 
         previous_session = self._current_session
         self._current_session = metadata
@@ -1931,10 +1936,40 @@ class MainWindow(QMainWindow):
 
         self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
 
-    def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt, manual=False):
+    def _on_rename_started(self):
+        """Fetch calendar matches to offer as rename suggestions.
+
+        Runs even when the recording is already tagged: renaming is also
+        how the user retags a recording that matched the wrong meeting.
+        """
+        session = self._current_session
+        if session is None or not self.config.get("calendar", "enabled"):
+            return
+        started, stopped = session.get("started_at"), session.get("stopped_at")
+        if not started or not stopped:
+            return
+        try:
+            started_dt = datetime.fromisoformat(started)
+            stopped_dt = datetime.fromisoformat(stopped)
+        except ValueError:
+            return
+        self._dispatch_calendar_lookup(session, started_dt, stopped_dt, for_rename=True)
+
+    def _on_recording_renamed_with_tag(self, new_name):
+        """Rename, and tag too when the name came from a suggested meeting."""
+        event = match_event_by_subject(new_name, self._rename_candidate_events)
+        self._on_recording_renamed(new_name)
+        if event is not None and self._current_session is not None:
+            self._apply_calendar_event(event)
+            self._export_transcript()
+        self._rename_candidate_events = []
+
+    def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt, manual=False,
+                                  for_rename=False):
         worker = CalendarLookupWorker(started_dt, stopped_dt)
         worker.session = session
         worker.manual = manual
+        worker.for_rename = for_rename
         worker.finished.connect(self._on_calendar_lookup_finished)
         self._calendar_lookup_workers.append(worker)
         worker.start()
@@ -1948,9 +1983,20 @@ class MainWindow(QMainWindow):
         worker = self.sender()
         session = getattr(worker, "session", None) if worker else None
         manual = getattr(worker, "manual", False) if worker else False
+        for_rename = getattr(worker, "for_rename", False) if worker else False
         if worker in self._calendar_lookup_workers:
             self._calendar_lookup_workers.remove(worker)
         if session is None:
+            return
+        if for_rename:
+            # Feeds the rename field's completer rather than the banner —
+            # the user is already renaming, and a banner offering the same
+            # meetings a second way would just compete with the editor.
+            if self._is_current_session(session):
+                self._rename_candidate_events = events
+                self.recording_header.set_name_suggestions(
+                    [e.get("subject", "") for e in events if e.get("subject")]
+                )
             return
         if not events:
             # Only the manual "Change" lookup should report a no-match
@@ -1981,6 +2027,17 @@ class MainWindow(QMainWindow):
             self._calendar_banner_session
         ):
             return
+        event_to_save = self._apply_calendar_event(event)
+        self._maybe_suggest_rename(self._current_session, event_to_save)
+        self._export_transcript()
+
+    def _apply_calendar_event(self, event):
+        """Tag the displayed recording with this event and refresh the UI.
+
+        Returns the serialized form written to disk. Datetimes are the only
+        thing needing conversion — the banner and the rename suggestions
+        both hand over events straight from the Outlook lookup.
+        """
         session_dir = Path(self._current_session["directory"])
         event_to_save = dict(event)
         event_to_save["start"] = event["start"].isoformat()
@@ -1993,8 +2050,7 @@ class MainWindow(QMainWindow):
         )
         self._calendar_attendees = event_to_save.get("attendees", [])
         self.transcript_viewer.set_calendar_attendees(self._calendar_attendees)
-        self._maybe_suggest_rename(self._current_session, event_to_save)
-        self._export_transcript()
+        return event_to_save
 
     def _maybe_suggest_rename(self, session, event):
         """Offer to rename the recording to the calendar event's subject.

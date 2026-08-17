@@ -69,3 +69,42 @@ class TestRecordingHeaderHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMatchEventBySubject(unittest.TestCase):
+    """Renaming a recording to a suggested meeting's subject should also tag
+    it with that meeting — the user picked the meeting, not just its text."""
+
+    def _events(self):
+        return [
+            {"subject": "Sprint Planning", "organizer": "ana@example.com"},
+            {"subject": "TimJ <> Martin A - Monthly Catch Up", "organizer": "tim@example.com"},
+        ]
+
+    def test_matches_a_suggested_subject(self):
+        from app.ui.recording_header import match_event_by_subject
+        event = match_event_by_subject("Sprint Planning", self._events())
+        self.assertEqual(event["organizer"], "ana@example.com")
+
+    def test_ignores_surrounding_whitespace(self):
+        from app.ui.recording_header import match_event_by_subject
+        event = match_event_by_subject("  Sprint Planning  ", self._events())
+        self.assertIsNotNone(event)
+
+    def test_a_freely_typed_name_matches_nothing(self):
+        # Typing your own name must rename without silently tagging the
+        # recording to a meeting the user never chose.
+        from app.ui.recording_header import match_event_by_subject
+        self.assertIsNone(match_event_by_subject("Notes to self", self._events()))
+
+    def test_partial_subject_does_not_match(self):
+        from app.ui.recording_header import match_event_by_subject
+        self.assertIsNone(match_event_by_subject("Sprint", self._events()))
+
+    def test_no_candidates(self):
+        from app.ui.recording_header import match_event_by_subject
+        self.assertIsNone(match_event_by_subject("Sprint Planning", []))
+
+    def test_empty_name_matches_nothing(self):
+        from app.ui.recording_header import match_event_by_subject
+        self.assertIsNone(match_event_by_subject("", [{"subject": ""}]))

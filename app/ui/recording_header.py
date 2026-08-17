@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QCompleter
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -51,16 +51,36 @@ def _format_calendar_line(calendar_event):
     return line
 
 
+def match_event_by_subject(name, events):
+    """The suggested event whose subject is exactly this name, or None.
+
+    Renaming to a suggestion means the user picked that meeting, so the
+    recording gets tagged with it too. The match is exact because a
+    freely-typed name must never silently tag the recording to a meeting
+    the user didn't choose.
+    """
+    name = name.strip()
+    if not name:
+        return None
+    for event in events:
+        if event.get("subject", "").strip() == name:
+            return event
+    return None
+
+
 class RecordingHeader(QWidget):
     """Displays recording info (name, date, duration) with rename capability."""
 
     name_changed = pyqtSignal(str)  # emitted when user renames the recording
+    rename_started = pyqtSignal()   # user opened the inline editor — cue to
+                                    # fetch calendar suggestions for it
     change_calendar_requested = pyqtSignal()  # emitted when user clicks "Change" on the calendar line
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._metadata = None
         self._editing = False
+        self._suggested_subjects = []
         self._setup_ui()
         self.hide()  # hidden until a recording is loaded
 
@@ -164,6 +184,23 @@ class RecordingHeader(QWidget):
         """Clear the header, hiding it."""
         self.set_recording(None)
 
+    def set_name_suggestions(self, subjects):
+        """Offer these meeting subjects as completions while renaming.
+
+        Arrives after the editor is already open — the Outlook lookup runs
+        off-thread and takes long enough that blocking the rename on it
+        would be worse than the suggestions appearing a moment late.
+        """
+        self._suggested_subjects = list(subjects)
+        if not self._editing:
+            return
+        completer = QCompleter(self._suggested_subjects, self.name_edit)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self.name_edit.setCompleter(completer)
+        completer.complete()
+
     def _start_rename(self):
         if self._editing:
             self._finish_rename()
@@ -176,6 +213,7 @@ class RecordingHeader(QWidget):
         self.name_edit.setFocus()
         self.name_edit.selectAll()
         self.rename_btn.setText("Save")
+        self.rename_started.emit()
 
     def _finish_rename(self):
         self._editing = False
@@ -183,6 +221,8 @@ class RecordingHeader(QWidget):
         if new_name:
             self.name_label.setText(new_name)
             self.name_changed.emit(new_name)
+        self.name_edit.setCompleter(None)
+        self._suggested_subjects = []
         self.name_edit.hide()
         self.name_label.show()
         self.rename_btn.setText("Rename")
