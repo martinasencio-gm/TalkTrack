@@ -32,24 +32,32 @@ class TestMergeTracks(unittest.TestCase):
         self.assertEqual([s.speaker for s in merged], ["You", "Remote"])
 
     def test_drops_bleed_duplicated_onto_the_mic_track(self):
-        # The remote sentence came out of the speakers and into the mic, so
-        # both tracks transcribed it. The system copy is the true source.
-        merged = merge_tracks([
-            ("You", [seg(10.0, 12.0, "we should ship it on Friday")]),
-            ("Remote", [seg(10.0, 12.0, "We should ship it on Friday.")]),
-        ])
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].speaker, "Remote")
+        # The remote side came out of the speakers and into the mic, so both
+        # tracks transcribed it. The system copy is the true source. Bleed is
+        # scored over the whole recording, so the echo has to be the pattern
+        # it is in reality — the mic copying the other side throughout.
+        remote = [seg(10.0, 12.0, "we should ship it on Friday"),
+                  seg(14.0, 16.0, "the staging box is already updated"),
+                  seg(18.0, 20.0, "I will send the release notes over")]
+        mic = [seg(10.0, 12.0, "We should ship it on Friday."),
+               seg(14.0, 16.0, "the staging box is already updated"),
+               seg(18.0, 20.0, "I'll send the release notes over")]
+        merged = merge_tracks([("You", mic), ("Remote", remote)])
+        self.assertEqual(len(merged), 3)
+        self.assertTrue(all(s.speaker == "Remote" for s in merged))
 
     def test_tolerates_small_transcription_differences(self):
         # The bleed copy is a degraded recording, so its transcript rarely
         # matches word for word.
-        merged = merge_tracks([
-            ("You", [seg(10.0, 12.0, "we should ship it on friday")]),
-            ("Remote", [seg(10.2, 12.1, "So we should ship it on Friday")]),
-        ])
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].speaker, "Remote")
+        remote = [seg(10.2, 12.1, "So we should ship it on Friday"),
+                  seg(14.0, 16.0, "the staging box is already updated"),
+                  seg(18.0, 20.0, "I will send the release notes over")]
+        mic = [seg(10.0, 12.0, "we should ship it on friday"),
+               seg(14.1, 16.2, "the staging box is already up to date"),
+               seg(18.1, 20.1, "I will send the release notes over")]
+        merged = merge_tracks([("You", mic), ("Remote", remote)])
+        self.assertEqual(len(merged), 3)
+        self.assertTrue(all(s.speaker == "Remote" for s in merged))
 
     def test_keeps_genuinely_different_simultaneous_speech(self):
         # Both sides talking at once is normal and must survive.
@@ -80,12 +88,72 @@ class TestMergeTracks(unittest.TestCase):
     def test_never_drops_from_the_authoritative_track(self):
         # Dedup only removes the echo copy; the system track is the source
         # of truth for remote speech and must come through untouched.
+        remote = [seg(0.0, 2.0, "the numbers look wrong to me"),
+                  seg(3.0, 5.0, "let me pull up the dashboard"),
+                  seg(6.0, 8.0, "this is the figure I meant")]
+        mic = [seg(0.0, 2.0, "the numbers look wrong to me"),
+               seg(3.0, 5.0, "let me pull up the dashboard"),
+               seg(6.0, 8.0, "this is the figure I meant")]
+        merged = merge_tracks([("You", mic), ("Remote", remote)])
+        self.assertEqual([s.speaker for s in merged],
+                         ["Remote", "Remote", "Remote"])
+
+
+class TestBleedNeedsCorroboration(unittest.TestCase):
+    """A mic that never heard the speakers must keep everything it recorded.
+
+    Simultaneous agreement is indistinguishable from an echo one segment at
+    a time, so the old per-segment rule deleted the user's own words from
+    recordings made on headphones. Bleed is now scored across the call.
+    """
+
+    def test_keeps_a_lone_collision_with_the_other_side(self):
+        # Recorded on headphones. Both sides land on the same stock phrase
+        # at the same moment — the user's copy is real speech, not an echo.
         merged = merge_tracks([
-            ("You", [seg(0.0, 2.0, "the numbers look wrong to me")]),
-            ("Remote", [seg(0.0, 2.0, "the numbers look wrong to me"),
-                        seg(3.0, 5.0, "let me pull up the dashboard")]),
+            ("You", [seg(0.0, 3.0, "let me share my screen now"),
+                     seg(30.0, 32.0, "sounds good to me")]),
+            ("Remote", [seg(10.0, 14.0, "here are the numbers for Q3"),
+                        seg(30.1, 32.2, "Sounds good to me!")]),
         ])
-        self.assertEqual([s.speaker for s in merged], ["Remote", "Remote"])
+        self.assertEqual(len(merged), 4)
+        self.assertEqual(sum(1 for s in merged if s.speaker == "You"), 2)
+
+    def test_keeps_a_couple_of_collisions_in_a_long_call(self):
+        # Two matches out of thirty remote utterances is coincidence, and
+        # nowhere near the share of the call real bleed would cover.
+        remote = [seg(i * 10.0, i * 10.0 + 2.0, f"remote point number {i}")
+                  for i in range(30)]
+        remote[3] = seg(30.0, 32.0, "that works for me")
+        remote[17] = seg(170.0, 172.0, "have a good weekend everyone")
+        mic = [seg(30.0, 32.0, "that works for me"),
+               seg(170.0, 172.0, "have a good weekend everyone"),
+               seg(200.0, 203.0, "I will follow up on Monday")]
+        merged = merge_tracks([("You", mic), ("Remote", remote)])
+        self.assertEqual(sum(1 for s in merged if s.speaker == "You"), 3)
+
+    def test_still_drops_bleed_that_covers_the_call(self):
+        # The mic hearing most of the other side is the real signature.
+        remote = [seg(i * 10.0, i * 10.0 + 2.0, f"remote point number {i}")
+                  for i in range(10)]
+        mic = [seg(i * 10.0, i * 10.0 + 2.0, f"remote point number {i}")
+               for i in range(10)]
+        mic.append(seg(200.0, 203.0, "I will follow up on Monday"))
+        merged = merge_tracks([("You", mic), ("Remote", remote)])
+        self.assertEqual(sum(1 for s in merged if s.speaker == "You"), 1)
+        self.assertEqual(sum(1 for s in merged if s.speaker == "Remote"), 10)
+
+    def test_detector_needs_both_a_count_and_a_share(self):
+        from app.transcription.track_merge import bleed_detected
+        self.assertFalse(bleed_detected(0, 10))
+        self.assertFalse(bleed_detected(2, 4))    # too few to corroborate
+        self.assertFalse(bleed_detected(3, 100))  # too sparse to be bleed
+        self.assertTrue(bleed_detected(3, 10))
+        self.assertTrue(bleed_detected(40, 50))
+
+    def test_no_remote_speech_means_no_bleed(self):
+        from app.transcription.track_merge import bleed_detected
+        self.assertFalse(bleed_detected(0, 0))
 
     def test_handles_an_empty_track(self):
         merged = merge_tracks([

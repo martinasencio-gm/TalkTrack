@@ -73,13 +73,20 @@ class TestMultiTrackTranscription(MultiTrackTestCase):
                          [("You", "hello from me"), ("Remote", "hello from them")])
 
     def test_drops_bleed_picked_up_by_the_mic(self):
+        # Bleed is judged across the recording, so the fixture has to look
+        # like real bleed: the mic copying the other side throughout, not a
+        # single collision (which is two people talking over each other).
         result, _ = self._run(
-            {"mic.wav": [_FakeSegment(2.0, 3.0, "the release is delayed until Tuesday")],
-             "sys.wav": [_FakeSegment(2.0, 3.0, "The release is delayed until Tuesday.")]},
+            {"mic.wav": [_FakeSegment(2.0, 3.0, "the release is delayed until Tuesday"),
+                         _FakeSegment(5.0, 6.0, "QA signed off on the build"),
+                         _FakeSegment(8.0, 9.0, "we will announce it on Monday")],
+             "sys.wav": [_FakeSegment(2.0, 3.0, "The release is delayed until Tuesday."),
+                         _FakeSegment(5.0, 6.0, "QA signed off on the build."),
+                         _FakeSegment(8.0, 9.0, "We will announce it on Monday.")]},
             tracks=[("You", "mic.wav"), ("Remote", "sys.wav")],
         )
-        self.assertEqual(len(result.segments), 1)
-        self.assertEqual(result.segments[0].speaker, "Remote")
+        self.assertEqual(len(result.segments), 3)
+        self.assertTrue(all(s.speaker == "Remote" for s in result.segments))
 
     def test_orders_the_merged_transcript_by_time(self):
         result, _ = self._run(
@@ -114,14 +121,18 @@ class TestMultiTrackTranscription(MultiTrackTestCase):
         # speakers — it's the only visible evidence that dedup did work.
         model = _FakeModel({
             "mic.wav": [_FakeSegment(1.0, 3.0, "the migration runs on Thursday night"),
-                        _FakeSegment(5.0, 6.0, "sounds fine to me then")],
-            "sys.wav": [_FakeSegment(1.0, 3.0, "The migration runs on Thursday night.")],
+                        _FakeSegment(4.0, 5.0, "the rollback plan is written up"),
+                        _FakeSegment(6.0, 7.0, "I will be online for the window"),
+                        _FakeSegment(9.0, 10.0, "sounds fine to me then")],
+            "sys.wav": [_FakeSegment(1.0, 3.0, "The migration runs on Thursday night."),
+                        _FakeSegment(4.0, 5.0, "The rollback plan is written up."),
+                        _FakeSegment(6.0, 7.0, "I will be online for the window.")],
         })
         with mock.patch.object(transcriber, "_get_model", return_value=model):
             worker = TranscriptionWorker(
                 "unused.wav", tracks=[("You", "mic.wav"), ("Remote", "sys.wav")])
             worker.run()
-        self.assertEqual(worker.bleed_dropped, 1)
+        self.assertEqual(worker.bleed_dropped, 3)
 
     def test_bleed_count_is_zero_without_bleed(self):
         model = _FakeModel({

@@ -27,6 +27,22 @@ MIN_WORDS_FOR_DEDUP = 3
 # word; 0.75 tolerates that without merging genuinely different speech.
 SIMILARITY_THRESHOLD = 0.75
 
+# Corroboration required before any mic segment is treated as bleed.
+#
+# A single matching utterance is not evidence of bleed. Two people saying
+# "sounds good to me" over each other is indistinguishable from an echo at
+# the segment level — same words, same moment — and on the old per-segment
+# rule the user's own agreement was silently deleted from the transcript
+# of a recording made on headphones, where no bleed existed at all.
+#
+# What separates the two is scale. An open mic next to the speakers copies
+# most of what the other side says, so real bleed shows up across the whole
+# call; coincidental agreement happens once or twice. Requiring both a
+# minimum count and a meaningful share of the remote track keeps the
+# coincidences and still catches genuine bleed.
+BLEED_MIN_MATCHES = 3
+BLEED_MIN_REMOTE_FRACTION = 0.2
+
 _PUNCTUATION = re.compile(r"[^\w\s]")
 
 
@@ -50,6 +66,25 @@ def _is_echo_of(candidate, other):
     return ratio >= SIMILARITY_THRESHOLD
 
 
+def _echo_indices(candidates, authoritative):
+    """Positions in candidates that look like copies of authoritative speech."""
+    return {i for i, s in enumerate(candidates)
+            if any(_is_echo_of(s, other) for other in authoritative)}
+
+
+def bleed_detected(echo_count, remote_count):
+    """True when the matches are too widespread to be coincidence.
+
+    Deliberately a whole-recording judgement rather than a per-segment one:
+    an individual match cannot distinguish an echo from both people saying
+    the same thing at the same moment, but the two look nothing alike
+    across a full call.
+    """
+    if remote_count <= 0 or echo_count < BLEED_MIN_MATCHES:
+        return False
+    return echo_count / remote_count >= BLEED_MIN_REMOTE_FRACTION
+
+
 def merge_tracks(tracks):
     """Combine [(speaker, segments), ...] into one time-ordered list.
 
@@ -57,6 +92,11 @@ def merge_tracks(tracks):
     dropped from; later tracks are authoritative. In practice that means
     [("You", mic), ("Remote", system)] — the mic hears the speakers, but
     a loopback of the render stream never picks up the user's voice.
+
+    Segments are only dropped when the recording as a whole shows bleed
+    (see bleed_detected). Without that check a mic track that never heard
+    the speakers still lost any utterance that happened to collide with
+    the same words from the other side.
 
     Input segments are not mutated; labelled copies are returned.
     """
@@ -70,8 +110,10 @@ def merge_tracks(tracks):
 
     kept = list(labelled[0])
     for authoritative in labelled[1:]:
-        kept = [s for s in kept
-                if not any(_is_echo_of(s, other) for other in authoritative)]
+        echoes = _echo_indices(kept, authoritative)
+        if not bleed_detected(len(echoes), len(authoritative)):
+            continue
+        kept = [s for i, s in enumerate(kept) if i not in echoes]
 
     merged = kept
     for authoritative in labelled[1:]:
