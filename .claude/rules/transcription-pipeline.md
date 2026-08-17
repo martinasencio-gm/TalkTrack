@@ -28,7 +28,17 @@ Diarization (full or simple) failing must still render/persist the successful tr
 - `provider.get_sentence_transformer()` — shared embed model cache.
 Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.
 
+## Per-track transcription (the default "simple" path)
+
+- `track_merge.dual_track_plan(session, diarization_enabled, hf_token)` decides: both `mic`/`system` files present on disk AND pyannote not going to run → `[("You", mic), ("Remote", system)]`, passed to `TranscriptionWorker(tracks=...)`. Otherwise None and the mix is transcribed as before.
+- Pyannote must keep getting the **mixed** audio — it clusters voices across the whole file. Never split the tracks for it.
+- `_on_transcription_finished` checks `worker.tracks` FIRST and goes straight to `_display_final_transcript`: the segments are already labelled, so `SimpleDiarizeWorker` must not run on top of them.
+- `merge_tracks` only ever drops segments from the **first** track. Mic goes first because it's the only track that can hold a bleed copy — a loopback of the render stream cannot pick up the user's voice. Reversing the order would delete real remote speech.
+- A track that fails to transcribe is logged and skipped, not fatal — a recording with only one usable track still produces a transcript.
+
 ## SimpleDiarizer
+
+Now reached only when `dual_track_plan` declines but metadata still names both tracks — in practice a track file that's named but missing from disk. Its error path already renders the transcript, so that lands as an unlabelled transcript rather than a failure.
 
 - Runs off-thread via `SimpleDiarizeWorker` (reads both full WAVs — froze the UI inline).
 - Indexes each track with its OWN sample rate (`mic_sr` / `sys_sr`) — mic and system tracks can legitimately differ; a single shared rate made You/Remote labels random (#28).

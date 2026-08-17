@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import threading
@@ -5,6 +6,8 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, field, fields
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
+
+logger = logging.getLogger(__name__)
 
 # Loaded Whisper models keyed by (model_size, device, compute_type).
 # Loading costs seconds-to-tens-of-seconds per recording; models stay
@@ -177,17 +180,91 @@ class TranscriptionWorker(QThread):
 
     cancelled = pyqtSignal()
 
-    def __init__(self, audio_path, model_size="base", language=None, device="cpu"):
+    def __init__(self, audio_path, model_size="base", language=None, device="cpu",
+                 tracks=None):
+        """tracks is an optional [(speaker, path), ...].
+
+        When given, each track is transcribed separately and the results
+        merged into one timeline. That keeps the mixed audio away from
+        Whisper — where speaker bleed shows up as a doubled copy of every
+        remote sentence — and makes speaker labels structural rather than
+        a guess from comparing the two tracks' loudness. The FIRST track is
+        the echo-prone one; see track_merge.merge_tracks.
+        """
         super().__init__()
         self.audio_path = audio_path
         self.model_size = model_size
         self.language = language
         self.device = device
+        self.tracks = tracks
         self._cancel_requested = False
 
     def cancel(self):
         """Request cancellation of the transcription."""
         self._cancel_requested = True
+
+    def _transcribe_one(self, model, path, progress_base=0.0, progress_span=1.0):
+        """Transcribe one file. Returns (segments, info), or None if cancelled."""
+        segments_gen, info = model.transcribe(
+            path, language=self.language, vad_filter=True,
+        )
+        segments = []
+        for segment in segments_gen:
+            if self._cancel_requested:
+                return None
+            segments.append(TranscriptSegment(
+                start=segment.start,
+                end=segment.end,
+                text=segment.text.strip(),
+                confidence=math.exp(segment.avg_logprob),
+            ))
+            if info.duration:
+                fraction = min(1.0, segment.end / info.duration)
+                self.progress_percent.emit(
+                    int(min(100, (progress_base + fraction * progress_span) * 100)))
+        return segments, info
+
+    def _run_single(self, model):
+        self.progress.emit("Transcribing audio...")
+        outcome = self._transcribe_one(model, self.audio_path)
+        if outcome is None:
+            return None
+        segments, info = outcome
+        result = TranscriptResult(language=info.language, duration=info.duration)
+        result.segments = segments
+        return result
+
+    def _run_tracks(self, model):
+        """Transcribe each track separately, then merge into one timeline.
+
+        A track whose file is missing or unreadable contributes nothing and
+        does not fail the job — a recording with no mic (or no system
+        audio) must still produce the transcript of the track it does have.
+        """
+        from app.transcription.track_merge import merge_tracks
+
+        span = 1.0 / len(self.tracks)
+        transcribed = []
+        language, duration = None, 0.0
+        for i, (speaker, path) in enumerate(self.tracks):
+            if self._cancel_requested:
+                return None
+            self.progress.emit(f"Transcribing {speaker} audio...")
+            try:
+                outcome = self._transcribe_one(model, path, i * span, span)
+            except Exception:
+                logger.exception("Track %s (%s) failed to transcribe", speaker, path)
+                continue
+            if outcome is None:
+                return None
+            segments, info = outcome
+            transcribed.append((speaker, segments))
+            language = language or info.language
+            duration = max(duration, info.duration or 0.0)
+
+        result = TranscriptResult(language=language, duration=duration)
+        result.segments = merge_tracks(transcribed)
+        return result
 
     def run(self):
         start_time = time.monotonic()
@@ -216,32 +293,13 @@ class TranscriptionWorker(QThread):
                 self.cancelled.emit()
                 return
 
-            self.progress.emit("Transcribing audio...")
-            segments_gen, info = model.transcribe(
-                self.audio_path,
-                language=self.language,
-                vad_filter=True,
-            )
-
-            result = TranscriptResult(
-                language=info.language,
-                duration=info.duration,
-            )
-
-            for segment in segments_gen:
-                if self._cancel_requested:
-                    self.cancelled.emit()
-                    return
-                ts = TranscriptSegment(
-                    start=segment.start,
-                    end=segment.end,
-                    text=segment.text.strip(),
-                    confidence=math.exp(segment.avg_logprob),
-                )
-                result.segments.append(ts)
-                if info.duration:
-                    pct = int(min(100, (segment.end / info.duration) * 100))
-                    self.progress_percent.emit(pct)
+            if self.tracks:
+                result = self._run_tracks(model)
+            else:
+                result = self._run_single(model)
+            if result is None:
+                self.cancelled.emit()
+                return
 
             result.model_size = self.model_size
             result.transcribe_seconds = time.monotonic() - start_time

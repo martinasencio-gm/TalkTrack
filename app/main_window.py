@@ -26,6 +26,7 @@ from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
+from app.transcription.track_merge import dual_track_plan
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
 from app.ui.collapsible_splitter import CollapsibleSplitter
 from app.ui.recording_controls import RecordingControls
@@ -1063,12 +1064,23 @@ class MainWindow(QMainWindow):
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
 
+        # With separate mic and system tracks on disk, transcribe each one
+        # instead of the mix: Whisper never sees the doubled copy of remote
+        # speech that bleed puts into combined_audio.wav, and the You/Remote
+        # labels come from which file a segment was read out of.
+        tracks = dual_track_plan(
+            session,
+            self.config.get("diarization", "enabled"),
+            self.config.get("diarization", "hf_token"),
+        )
+
         self._current_transcription_percent = None
         self._transcription_worker = TranscriptionWorker(
             audio_path=audio_path,
             model_size=model_size,
             language=language,
             device=device,
+            tracks=tracks,
         )
         self._transcription_worker.session = session
         self._transcription_worker.progress.connect(self._on_transcription_progress)
@@ -1115,7 +1127,10 @@ class MainWindow(QMainWindow):
         diarization_enabled = self.config.get("diarization", "enabled")
         hf_token = self.config.get("diarization", "hf_token")
 
-        if diarization_enabled and hf_token:
+        if getattr(self._transcription_worker, "tracks", None):
+            # Per-track transcription already labelled every segment.
+            self._display_final_transcript(result, session)
+        elif diarization_enabled and hf_token:
             # Run full diarization with pyannote
             self._start_diarization(result, session)
         elif session:

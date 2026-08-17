@@ -53,7 +53,8 @@ TalkTrack/
       recorder.py                      # State machine, session management
       import_session.py                # Pure metadata builder for imported recordings
     transcription/
-      transcriber.py                   # Whisper worker + dataclasses
+      transcriber.py                   # Whisper worker + dataclasses (single file or per-track)
+      track_merge.py                   # Merge per-track transcripts into one timeline, drop mic bleed
       diarizer.py                      # Speaker diarization (pyannote)
     ai/
       __init__.py                      # Package init
@@ -112,6 +113,8 @@ TalkTrack/
     test_com_poller_render_activity.py # Poller render-peak history tests
     test_config.py                    # Config load/save tests (incl. calendar defaults)
     test_transcriber.py               # TranscriptSegment/TranscriptResult tests
+    test_transcriber_multitrack.py    # Per-track transcription worker tests
+    test_track_merge.py               # Track merge / bleed dedup / dual-track plan tests
     test_segment_player.py            # Audio clip playback tests
     test_recording_header.py          # RecordingHeader helper tests (incl. calendar line formatting)
     test_speaker_name_panel.py        # SpeakerNamePanel helper tests (incl. attendee dropdown mutual exclusion)
@@ -148,7 +151,7 @@ TalkTrack/
 - **Dual microphone support:** optionally use 2 mics simultaneously (e.g., desk mic + headset), mixed into one track
 - Auto-transcribes after recording stops using Faster-Whisper
 - Speaker diarization with two modes:
-  - Simple mode (no setup): labels "You" vs "Remote" based on mic vs system channels
+  - Simple mode (no setup): transcribes `mic_audio.wav` and `system_audio.wav` separately and labels each segment "You" or "Remote" by the track it came from, merging the two into one timeline (bleed duplicates dropped). Falls back to the RMS-comparison `SimpleDiarizer` when only the mixed audio exists.
   - Full diarization (pyannote.audio): identifies individual speakers
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
