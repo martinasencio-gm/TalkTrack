@@ -123,7 +123,10 @@ class RecordingControls(QWidget):
             self.test_mic_btn.setEnabled(False)
             self.recording_indicator.setText("\u23f8")
             self._blink_timer.stop()
-        elif state == RecordingState.STOPPING:
+        elif state in (RecordingState.STOPPING, RecordingState.PROCESSING):
+            # PROCESSING is the finalize worker mixing the tracks. The
+            # controls stay locked: the session isn't saved yet, and
+            # starting a new recording on top of it would overwrite it.
             self.record_btn.setEnabled(False)
             self.pause_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)

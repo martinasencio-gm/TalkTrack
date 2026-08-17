@@ -426,6 +426,7 @@ class MainWindow(QMainWindow):
         self.recorder.time_updated.connect(self._on_recording_tick)
         self.recorder.recording_finished.connect(self._on_recording_finished)
         self.recorder.recording_discarded.connect(self._on_recording_discarded)
+        self.recorder.finalize_progress.connect(self.status_label.setText)
         self.recorder.error_occurred.connect(self._on_error)
         self.recorder.mic_level.connect(self.meters_panel.update_mic_level)
         self.recorder.mic_level.connect(self.waveform.append_audio)
@@ -665,8 +666,12 @@ class MainWindow(QMainWindow):
         self._pending_gain = None
 
     def _stop_recording(self):
+        # Set the label BEFORE the call. It used to be set after, so it
+        # only ever appeared once the work was finished — and it then
+        # overwrote the status _on_recording_finished had just set, leaving
+        # the bar reading "Stopping..." while transcription was underway.
+        self.status_label.setText("Finishing recording...")
         self.recorder.stop_recording()
-        self.status_label.setText("Stopping...")
 
     def _on_apps_went_inactive(self):
         """Auto-stop recording when all selected apps leave their call."""
@@ -2383,6 +2388,19 @@ class MainWindow(QMainWindow):
         network code, so after a bounded wait terminate() is the last resort —
         risky in general, but the process is exiting anyway.
         """
+        # Finalizing is writing the user's audio to disk. Interrupting it
+        # loses the recording outright, so it gets a generous wait of its
+        # own instead of joining the terminate-after-5s list below. The
+        # real cost is seconds (~6s for a 20-minute call).
+        finalize_worker = self.recorder.finalize_worker()
+        if finalize_worker is not None and finalize_worker.isRunning():
+            self.status_label.setText("Saving the recording before closing...")
+            if not finalize_worker.wait(60000):
+                logger.warning("Finalize worker still running at exit — abandoning it")
+        # Writes metadata.json for a finalize that completed but whose
+        # signal the dying event loop will never deliver.
+        self.recorder.finish_pending_finalize()
+
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             self._transcription_worker.cancel()
         workers = [

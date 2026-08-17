@@ -652,22 +652,31 @@ class DualAudioCapture:
         self._silence_fired = False  # allow re-detection after resume
 
     def stop(self):
-        """Stop recording and return paths to saved audio files.
+        """Stop the devices and assemble the files — both halves.
 
-        Tracks were streamed to disk during capture; this closes the writers
-        and assembles mic_audio/combined block-wise. Every step is
-        individually guarded: a failing device (e.g. mic unplugged mid-call)
-        or file write must not prevent stopping the other streams or saving
-        the other tracks.
+        Kept as the whole operation for callers that don't care about
+        blocking. The recorder splits it so the slow half can run off the
+        UI thread; see stop_streams/finalize.
+        """
+        self.stop_streams()
+        return self.finalize()
+
+    def stop_streams(self):
+        """Stop the capture devices and freeze elapsed time. Fast.
+
+        Safe to call on the UI thread, and it has to be: in per-app mode
+        the streams own comtypes COM proxies, which have apartment affinity
+        — releasing them from a worker thread can take the whole process
+        down natively (the same hazard that put pycaw in its own process).
+
+        Deliberately leaves the writers open and mixes nothing. That is the
+        expensive half and belongs in finalize().
         """
         self._recording = False
         if self._start_time:
             self._elapsed += time.time() - self._start_time
             self._start_time = None
 
-        results = {"mic": None, "system": None, "combined": None}
-
-        # Stop all streams first so nothing keeps capturing while we finish.
         for label, stream in (("mic", self.mic_stream),
                               ("mic 2", self.mic_stream_2),
                               ("system", self.system_stream)):
@@ -676,6 +685,31 @@ class DualAudioCapture:
                     stream.stop()
                 except Exception:
                     logger.exception("Failed to stop %s stream", label)
+
+    def discard(self):
+        """Abort the writers and delete their files, skipping the mix.
+
+        For a recording that's about to be thrown away (under the minimum
+        length): mixing it first would be wasted seconds, and on Windows
+        the writers must release their handles before the session
+        directory can be removed.
+        """
+        for key, writer in self._writers.items():
+            try:
+                writer.abort()
+            except Exception:
+                logger.exception("Failed to abort %s writer", key)
+        self._writers = {}
+
+    def finalize(self):
+        """Close the writers and assemble the track files. Slow — off-thread.
+
+        Two full passes over every track (peak, then write), so this costs
+        seconds on a long recording. Every step is individually guarded: a
+        failing device (e.g. mic unplugged mid-call) or file write must not
+        prevent saving the other tracks.
+        """
+        results = {"mic": None, "system": None, "combined": None}
 
         # Close writers — drains queues, deletes zero-frame files.
         for key, writer in self._writers.items():

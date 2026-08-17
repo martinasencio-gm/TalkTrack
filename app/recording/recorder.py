@@ -14,6 +14,63 @@ from app.recording.audio_capture import DualAudioCapture
 logger = logging.getLogger(__name__)
 
 
+def convert_to_mp3(audio_files):
+    """Add MP3 copies of every WAV track, in place. Best-effort."""
+    mp3_files = {}
+    for key, wav_path in audio_files.items():
+        if wav_path and wav_path.endswith(".wav"):
+            mp3_path = wav_path.replace(".wav", ".mp3")
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame",
+                     "-qscale:a", "2", mp3_path],
+                    capture_output=True, check=True, timeout=300,
+                )
+                mp3_files[key + "_mp3"] = mp3_path
+            except (subprocess.CalledProcessError, FileNotFoundError,
+                    subprocess.TimeoutExpired):
+                pass  # FFmpeg missing, failed, or hung — keep the WAV
+    audio_files.update(mp3_files)
+
+
+class FinalizeWorker(QThread):
+    """Assembles a stopped recording's files off the UI thread.
+
+    Only file work runs here. The devices — and in per-app mode their
+    comtypes COM proxies — are already closed by the caller on the UI
+    thread, because releasing those off-thread can crash the process
+    natively.
+    """
+
+    progress = pyqtSignal(str)
+    finalized = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, capture, convert_mp3=False):
+        super().__init__()
+        self._capture = capture
+        self._convert_mp3 = convert_mp3
+        # Also exposed as an attribute, not just via the signal: at
+        # shutdown the queued signal never gets delivered (the event loop
+        # is on its way out), and the result still has to be saved.
+        self.audio_files = None
+
+    def run(self):
+        try:
+            self.progress.emit("Saving audio tracks...")
+            audio_files = self._capture.finalize()
+            if self._convert_mp3:
+                self.progress.emit("Converting to MP3...")
+                convert_to_mp3(audio_files)
+            self.audio_files = audio_files
+            self.finalized.emit(audio_files)
+        except Exception as e:
+            # Never raise out of run() — an exception here would lose the
+            # recording silently and leave the recorder stuck in PROCESSING.
+            logger.exception("Finalizing the recording failed")
+            self.failed.emit(str(e))
+
+
 class RecordingState(Enum):
     IDLE = "idle"
     RECORDING = "recording"
@@ -29,6 +86,7 @@ class Recorder(QObject):
     time_updated = pyqtSignal(float)
     recording_finished = pyqtSignal(dict)
     recording_discarded = pyqtSignal(float)  # duration of discarded recording
+    finalize_progress = pyqtSignal(str)      # what the finalize worker is doing
     error_occurred = pyqtSignal(str)
     mic_level = pyqtSignal(object)
     system_level = pyqtSignal(object)
@@ -44,6 +102,7 @@ class Recorder(QObject):
         self._capture = None
         self._timer_thread = None
         self._current_session = None
+        self._finalize_worker = None
 
     @property
     def state(self):
@@ -128,7 +187,14 @@ class Recorder(QObject):
         self._set_state(RecordingState.RECORDING)
 
     def stop_recording(self):
-        """Stop recording and save files."""
+        """Stop capture and hand the file work to a worker thread.
+
+        Returns as soon as the devices are closed. Mixing the tracks costs
+        seconds on a long recording (~6s for 20 minutes), and doing it here
+        froze the window — this method runs on the UI thread. The session
+        is not announced until the worker finishes; state is PROCESSING in
+        between, which blocks a new recording from starting on top of it.
+        """
         if self._state not in (RecordingState.RECORDING, RecordingState.PAUSED):
             return
 
@@ -138,62 +204,92 @@ class Recorder(QObject):
         self._stop_timer()
 
         try:
-            audio_files = self._capture.stop()
+            self._capture.stop_streams()
+        except Exception as e:
+            logger.exception("Failed to stop capture streams")
+            self.error_occurred.emit(f"Error stopping recording: {e}")
+            self._set_state(RecordingState.IDLE)
+            return
 
-            duration = self._capture.get_elapsed_time()
-            self._current_session["stopped_at"] = datetime.now().isoformat()
-            if self._capture._capture_status is not None:
-                self._current_session["capture_status"] = self._capture._capture_status
-            self._current_session["duration"] = duration
-            self._current_session["audio_files"] = audio_files
+        duration = self._capture.get_elapsed_time()
+        self._current_session["stopped_at"] = datetime.now().isoformat()
+        if self._capture._capture_status is not None:
+            self._current_session["capture_status"] = self._capture._capture_status
+        self._current_session["duration"] = duration
 
-            # Check min recording length — discard if too short
-            min_length = self.config.get("general", "min_recording_length")
-            if min_length and duration < min_length:
-                # Delete the session directory
-                import shutil
-                session_dir = self._current_session["directory"]
-                try:
-                    shutil.rmtree(session_dir)
-                except OSError:
-                    pass
-                self._set_state(RecordingState.IDLE)
-                self.recording_discarded.emit(duration)
-                return
+        # Too short to keep — drop the tracks without paying for the mix.
+        min_length = self.config.get("general", "min_recording_length")
+        if min_length and duration < min_length:
+            self._discard_session(duration)
+            return
 
-            # Convert to output format if needed
-            output_format = self.config.get("output", "format")
-            if output_format == "mp3":
-                self._convert_to_mp3(audio_files)
+        self._set_state(RecordingState.PROCESSING)
+        self._start_finalize_worker()
 
-            # Save session metadata
+    def _discard_session(self, duration):
+        """Throw away a recording that came in under the minimum length."""
+        import shutil
+        try:
+            self._capture.discard()
+        except Exception:
+            logger.exception("Failed to discard capture writers")
+        try:
+            shutil.rmtree(self._current_session["directory"])
+        except OSError:
+            logger.exception("Could not remove discarded session directory")
+        self._set_state(RecordingState.IDLE)
+        self.recording_discarded.emit(duration)
+
+    def _start_finalize_worker(self):
+        convert_mp3 = self.config.get("output", "format") == "mp3"
+        self._finalize_worker = FinalizeWorker(self._capture, convert_mp3=convert_mp3)
+        self._finalize_worker.progress.connect(self.finalize_progress.emit)
+        self._finalize_worker.finalized.connect(self._on_finalized)
+        self._finalize_worker.failed.connect(self._on_finalize_failed)
+        self._finalize_worker.start()
+
+    def _on_finalized(self, audio_files):
+        self._current_session["audio_files"] = audio_files
+        try:
             from app.utils.atomic_io import atomic_write_json
             meta_path = Path(self._current_session["directory"]) / "metadata.json"
             atomic_write_json(meta_path, self._current_session, indent=2)
+        except OSError as e:
+            logger.exception("Could not write session metadata")
+            self.error_occurred.emit(f"Could not save recording metadata: {e}")
+        self._set_state(RecordingState.IDLE)
+        self.recording_finished.emit(self._current_session)
 
-            self._set_state(RecordingState.IDLE)
-            self.recording_finished.emit(self._current_session)
-        except Exception as e:
-            self.error_occurred.emit(f"Error stopping recording: {e}")
-            self._set_state(RecordingState.IDLE)
+    def _on_finalize_failed(self, message):
+        self.error_occurred.emit(f"Error stopping recording: {message}")
+        self._set_state(RecordingState.IDLE)
 
-    def _convert_to_mp3(self, audio_files):
-        """Convert WAV files to MP3 using FFmpeg."""
-        mp3_files = {}
-        for key, wav_path in audio_files.items():
-            if wav_path and wav_path.endswith(".wav"):
-                mp3_path = wav_path.replace(".wav", ".mp3")
-                try:
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame",
-                         "-qscale:a", "2", mp3_path],
-                        capture_output=True, check=True, timeout=300,
-                    )
-                    mp3_files[key + "_mp3"] = mp3_path
-                except (subprocess.CalledProcessError, FileNotFoundError,
-                        subprocess.TimeoutExpired):
-                    pass  # FFmpeg missing, failed, or hung — keep the WAV
-        audio_files.update(mp3_files)
+    def is_finalizing(self):
+        return (self._finalize_worker is not None
+                and self._finalize_worker.isRunning())
+
+    def finalize_worker(self):
+        """The running finalize worker, for shutdown coordination."""
+        return self._finalize_worker
+
+    def finish_pending_finalize(self):
+        """Apply a completed finalize result without the event loop.
+
+        Shutdown waits for the worker, but the queued `finalized` signal is
+        never delivered — nothing is spinning the event loop by then.
+        Without this the tracks would be left on disk with no metadata.json
+        beside them, i.e. an orphaned session that only the crash-recovery
+        scan would find. Safe to call twice; the PROCESSING check is the
+        guard, since _on_finalized leaves the state IDLE.
+        """
+        worker = self._finalize_worker
+        if worker is None or worker.isRunning():
+            return
+        if self._state != RecordingState.PROCESSING:
+            return
+        if worker.audio_files is None:
+            return  # it failed — there is nothing to record
+        self._on_finalized(worker.audio_files)
 
     def _start_timer(self):
         self._timer_running = True
