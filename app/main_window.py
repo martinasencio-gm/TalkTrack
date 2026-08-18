@@ -20,7 +20,7 @@ from PyQt6.QtGui import QAction
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
-from app.utils import session_io
+from app.utils import batch_queue, session_io
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
@@ -1055,19 +1055,41 @@ class MainWindow(QMainWindow):
         auto_transcribe = self.config.get("general", "auto_transcribe")
         if not auto_transcribe:
             if audio_for_transcript:
+                queued = self._maybe_queue_for_batch(session)
                 self.status_label.setText(
+                    "Recording saved — queued for the next batch transcription run."
+                    if queued else
                     "Recording saved — auto-transcribe disabled. "
                     "Use Transcribe button to transcribe manually."
                 )
         elif audio_for_transcript and duration >= min_duration:
             self._start_transcription(audio_for_transcript)
         elif audio_for_transcript:
+            queued = self._maybe_queue_for_batch(session)
             self.status_label.setText(
                 f"Recording too short ({duration:.0f}s < {min_duration}s) — "
-                "skipping auto-transcription. Use Transcribe button to transcribe manually."
+                + ("queued for the next batch transcription run." if queued else
+                   "skipping auto-transcription. Use Transcribe button to "
+                   "transcribe manually.")
             )
 
         self._maybe_lookup_calendar(session)
+
+    def _maybe_queue_for_batch(self, session):
+        """Tag a recording the app isn't going to transcribe itself.
+
+        Without this the feature needs a right-click after every call,
+        which is exactly the manual step an overnight run exists to
+        remove. Returns whether the tag was written.
+        """
+        if not self.config.get("general", "batch_auto_queue"):
+            return False
+        if not session or not session.get("directory"):
+            return False
+        if not batch_queue.set_queued(session["directory"], True):
+            return False
+        self.recordings_list.refresh()
+        return True
 
     def _transcription_busy(self):
         return (

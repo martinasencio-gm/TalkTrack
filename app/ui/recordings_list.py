@@ -17,6 +17,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QFontMetrics
 
 from app.ui.search_bar import SearchBar
+from app.utils import batch_queue
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
@@ -35,6 +36,20 @@ TRANSCRIPTION_FILENAMES = [
 # rather than read from metadata["audio_files"] alone so a "recordings only"
 # delete also catches dual-mic raw temps or a track metadata lost track of.
 _AUDIO_GLOB_PATTERNS = ("*_audio.wav", "*_audio.mp3", "*_raw.wav")
+
+
+def partition_by_queue_state(metadatas):
+    """Split recordings into (not yet queued, already queued).
+
+    Kept out of the widget so the menu's labels and enablement can be
+    tested without a QListWidget.
+    """
+    queued, unqueued = [], []
+    for metadata in metadatas or []:
+        if not metadata or "directory" not in metadata:
+            continue
+        (queued if batch_queue.is_queued(metadata) else unqueued).append(metadata)
+    return unqueued, queued
 
 
 class _RecordingRow(QWidget):
@@ -507,6 +522,21 @@ class RecordingsList(QWidget):
             )
             meta_row.addWidget(badge, 0)
 
+        # Peach rather than the in-progress yellow: waiting for a scheduled
+        # run is a different state from being worked on right now, and the
+        # two pills can appear on the same row after a re-queue.
+        if batch_queue.is_queued(metadata):
+            queued_badge = QLabel("Queued")
+            queued_badge.setStyleSheet(
+                "color: #fab387; font-size: 9px; font-weight: bold;"
+                "background-color: rgba(250, 179, 135, 0.15);"
+                "border-radius: 7px; padding: 2px 8px;"
+            )
+            queued_badge.setToolTip(
+                "Waiting for the next batch transcription run"
+            )
+            meta_row.addWidget(queued_badge, 0)
+
         outer.addLayout(meta_row)
         return widget
 
@@ -558,6 +588,9 @@ class RecordingsList(QWidget):
             )
             menu.addAction(export_action)
 
+            self._add_batch_queue_actions(
+                menu, [i.data(Qt.ItemDataRole.UserRole) for i in selected_items])
+
             menu.addSeparator()
 
             count = len(selected_items)
@@ -584,6 +617,8 @@ class RecordingsList(QWidget):
             play_action.triggered.connect(lambda: self._play_audio(metadata))
             menu.addAction(play_action)
 
+            self._add_batch_queue_actions(menu, [metadata])
+
             menu.addSeparator()
 
             delete_action = QAction("Delete Recording", self)
@@ -591,6 +626,48 @@ class RecordingsList(QWidget):
             menu.addAction(delete_action)
 
         menu.exec(self.list_widget.mapToGlobal(position))
+
+    def _add_batch_queue_actions(self, menu, metadatas):
+        """Queue / unqueue entries for the scheduled batch transcription run.
+
+        Both directions are always offered when they apply: a mixed
+        selection can be pushed either way in one click rather than making
+        the user work out which recordings are in which state.
+        """
+        unqueued, queued = partition_by_queue_state(metadatas)
+        if not unqueued and not queued:
+            return
+
+        menu.addSeparator()
+
+        if unqueued:
+            label = ("Queue for Batch Transcription" if len(unqueued) == 1
+                     else f"Queue {len(unqueued)} for Batch Transcription")
+            action = QAction(label, self)
+            action.setToolTip(
+                "Transcribe these on the next scheduled batch run instead of now"
+            )
+            action.triggered.connect(lambda: self._set_queued(unqueued, True))
+            menu.addAction(action)
+
+        if queued:
+            label = ("Remove from Batch Queue" if len(queued) == 1
+                     else f"Remove {len(queued)} from Batch Queue")
+            action = QAction(label, self)
+            action.triggered.connect(lambda: self._set_queued(queued, False))
+            menu.addAction(action)
+
+    def _set_queued(self, metadatas, queued):
+        """Write the tag for each recording, then redraw the pills."""
+        failures = [m for m in metadatas
+                    if not batch_queue.set_queued(m["directory"], queued)]
+        self.refresh()
+        if failures:
+            QMessageBox.warning(
+                self, "Batch Queue",
+                f"Could not update {len(failures)} recording(s) — their "
+                "metadata.json is missing or unreadable.",
+            )
 
     def _open_folder(self, directory):
         os.startfile(directory)

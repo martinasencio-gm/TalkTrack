@@ -64,6 +64,10 @@ DEFAULT_CONFIG = {
         "auto_record": False,
         "auto_record_threshold": 5,
         "auto_transcribe": True,
+        # Recordings the app doesn't transcribe itself (auto-transcribe off,
+        # or under min_duration) get tagged for the scheduled batch run
+        # instead of quietly piling up untranscribed.
+        "batch_auto_queue": True,
         "silence_auto_stop": True,
         "silence_duration": 120,
         "minimize_to_tray": False,

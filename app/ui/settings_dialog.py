@@ -119,6 +119,16 @@ class SettingsDialog(QDialog):
         )
         recording_form.addRow(self.auto_transcribe_cb)
 
+        self.batch_auto_queue_cb = QCheckBox(
+            "Queue skipped recordings for batch transcription")
+        self.batch_auto_queue_cb.setToolTip(
+            "When a recording is not transcribed on the spot - auto-transcribe\n"
+            "is off, or the recording is shorter than the minimum - tag it for\n"
+            "the scheduled batch run instead of leaving it untranscribed.\n"
+            "Run batch_transcribe.py from Windows Task Scheduler to process them."
+        )
+        recording_form.addRow(self.batch_auto_queue_cb)
+
         self.silence_auto_stop_cb = QCheckBox("Auto-stop recording after sustained silence")
         self.silence_auto_stop_cb.setToolTip(
             "Automatically stop recording when the system/app audio\n"
@@ -459,6 +469,7 @@ class SettingsDialog(QDialog):
         self.use_window_title_cb.setChecked(
             self.config.get("meeting_detection", "use_window_title"))
         self.auto_transcribe_cb.setChecked(self.config.get("general", "auto_transcribe"))
+        self.batch_auto_queue_cb.setChecked(self.config.get("general", "batch_auto_queue"))
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
@@ -590,6 +601,7 @@ class SettingsDialog(QDialog):
         self.config.set("meeting_detection", "use_window_title",
                         self.use_window_title_cb.isChecked())
         self.config.set("general", "auto_transcribe", self.auto_transcribe_cb.isChecked())
+        self.config.set("general", "batch_auto_queue", self.batch_auto_queue_cb.isChecked())
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())
