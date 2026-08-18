@@ -25,6 +25,9 @@ class TestSingleInstanceGuard(unittest.TestCase):
     def setUp(self):
         _get_app()
         self.tmp = tempfile.mkdtemp()
+        patcher = patch("app.utils.single_instance.SERVER_NAME", f"TalkTrackTest_{os.getpid()}")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

@@ -302,6 +302,7 @@ class RecordingsList(QWidget):
     import_requested = pyqtSignal(str)  # chosen audio file path
     transcribe_selected_requested = pyqtSignal(list)  # list[dict] metadata, untranscribed only
     export_selected_requested = pyqtSignal(list)      # list[dict] metadata, transcribed only
+    run_batch_requested = pyqtSignal()
 
     def __init__(self, recordings_dir, parent=None):
         super().__init__(parent)
@@ -334,6 +335,16 @@ class RecordingsList(QWidget):
         layout.addWidget(self.search_bar)
 
         import_row = QHBoxLayout()
+        self.batch_btn = QPushButton("Run Batch")
+        self.batch_btn.setToolTip("Open the batch transcription launcher for queued recordings")
+        self.batch_btn.setStyleSheet(
+            "QPushButton { background-color: rgba(250, 179, 135, 0.18); color: #fab387; "
+            "font-size: 11px; font-weight: bold; border-radius: 4px; padding: 4px 8px; }"
+            "QPushButton:hover { background-color: rgba(250, 179, 135, 0.32); }"
+        )
+        self.batch_btn.clicked.connect(self.run_batch_requested.emit)
+        self.batch_btn.setVisible(False)
+        import_row.addWidget(self.batch_btn)
         import_row.addStretch()
         self.import_btn = QPushButton("Import...")
         self.import_btn.setToolTip(
@@ -417,6 +428,14 @@ class RecordingsList(QWidget):
             row_widget = self._build_row_widget(metadata)
             item.setSizeHint(row_widget.sizeHint())
             self.list_widget.setItemWidget(item, row_widget)
+
+        queued_count = sum(
+            1 for m in self._recordings
+            if batch_queue.is_queued(m) and not batch_queue.exhausted(m)
+        )
+        if hasattr(self, "batch_btn"):
+            self.batch_btn.setText(f"Run Batch ({queued_count})")
+            self.batch_btn.setVisible(queued_count > 0)
 
     def _build_row_widget(self, metadata):
         """Build a two-line recording row: bold name over a muted
@@ -656,6 +675,10 @@ class RecordingsList(QWidget):
             action = QAction(label, self)
             action.triggered.connect(lambda: self._set_queued(queued, False))
             menu.addAction(action)
+
+            run_batch_action = QAction("Process Batch Queue Now...", self)
+            run_batch_action.triggered.connect(self.run_batch_requested.emit)
+            menu.addAction(run_batch_action)
 
     def _set_queued(self, metadatas, queued):
         """Write the tag for each recording, then redraw the pills."""

@@ -19,7 +19,19 @@ recordings for batch transcription"*.
 The tag lives in the recording's own `metadata.json` (`batch_pending`), so
 it travels with the folder.
 
-## Running it
+## Running it from the app
+
+You can run batch transcription on demand directly inside TalkTrack:
+
+- Click **File > Run Batch Transcription...** in the menu bar.
+- Or click the **Run Batch (N)** button above the recordings list when queued items exist.
+- Or right-click in the recordings list and choose **Process Batch Queue Now...**.
+
+The launch dialog offers two execution modes:
+1. **Process inside app (recommended):** Runs as a background task in TalkTrack with live status bar progress and model caching in memory.
+2. **Run as independent background process:** Spawns a detached `pythonw.exe` process that continues running even if TalkTrack is closed.
+
+## Running it from the command line
 
 ```bash
 .venv\Scripts\python.exe batch_transcribe.py --until 07:00

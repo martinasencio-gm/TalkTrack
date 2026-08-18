@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self.recorder = Recorder(self.config)
         self._current_session = None
         self._transcription_worker = None
+        self._batch_worker = None
         self._calendar_lookup_workers = []
         self._calendar_banner_session = None
         self._rename_candidate_events = []
@@ -156,6 +157,10 @@ class MainWindow(QMainWindow):
         open_recordings_action = QAction("&Open Recordings Folder", self)
         open_recordings_action.triggered.connect(self._open_recordings_folder)
         file_menu.addAction(open_recordings_action)
+
+        batch_action = QAction("Run &Batch Transcription...", self)
+        batch_action.triggered.connect(self._open_batch_run_dialog)
+        file_menu.addAction(batch_action)
 
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
@@ -449,6 +454,7 @@ class MainWindow(QMainWindow):
         self.recordings_list.import_requested.connect(self._on_import_requested)
         self.recordings_list.transcribe_selected_requested.connect(self._on_transcribe_selected)
         self.recordings_list.export_selected_requested.connect(self._on_export_selected)
+        self.recordings_list.run_batch_requested.connect(self._open_batch_run_dialog)
 
         # Mic device change: restart monitor on new device if it's running
         self.source_selector.mic_changed.connect(self._on_mic_device_changed)
@@ -1096,6 +1102,7 @@ class MainWindow(QMainWindow):
             (self._transcription_worker is not None and self._transcription_worker.isRunning())
             or (self._diarization_worker is not None and self._diarization_worker.isRunning())
             or (self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning())
+            or (self._batch_worker is not None and self._batch_worker.isRunning())
         )
 
     def _on_transcribe_selected(self, recordings):
@@ -1114,6 +1121,121 @@ class MainWindow(QMainWindow):
         for metadata in recordings:
             self._export_transcript(metadata)
         self.status_label.setText(f"Exported {len(recordings)} transcript(s).")
+
+    def _open_batch_run_dialog(self):
+        """Show the batch transcription launch options dialog."""
+        if self._batch_worker is not None and self._batch_worker.isRunning():
+            QMessageBox.information(
+                self, "Batch Transcription",
+                "A batch transcription run is already active in the background.",
+            )
+            return
+
+        from app.batch.worklist import build_worklist
+        from app.ui.batch_run_dialog import BatchRunDialog, MODE_IN_APP, MODE_DETACHED
+
+        recordings_dir = self.config.get("output", "directory")
+        jobs = build_worklist(recordings_dir)
+        dialog = BatchRunDialog(queued_count=len(jobs), config=self.config, parent=self)
+        if not dialog.exec() or len(jobs) == 0:
+            return
+
+        mode = dialog.execution_mode()
+        diarize = dialog.diarize_enabled()
+        limit = dialog.limit()
+
+        if mode == MODE_IN_APP:
+            self._start_in_app_batch(diarize=diarize, limit=limit)
+        else:
+            self._launch_detached_batch(diarize=diarize, limit=limit)
+
+    def _start_in_app_batch(self, diarize=None, limit=None):
+        """Run batch transcription asynchronously in a background QThread."""
+        if self._closing or (self._batch_worker is not None and self._batch_worker.isRunning()):
+            return
+
+        from app.batch.pipeline import BatchSettings
+        from app.batch.worker import BatchRunnerWorker
+
+        recordings_dir = self.config.get("output", "directory")
+        settings = BatchSettings.from_config(self.config, diarize=diarize)
+
+        self._batch_worker = BatchRunnerWorker(
+            recordings_dir, settings=settings, limit=limit, parent=self
+        )
+        self._batch_worker.job_started.connect(self._on_batch_job_started)
+        self._batch_worker.job_progress.connect(self._on_batch_job_progress)
+        self._batch_worker.job_finished.connect(self._on_batch_job_finished)
+        self._batch_worker.batch_finished.connect(self._on_batch_finished)
+        self._batch_worker.cancelled.connect(self._on_batch_cancelled)
+        self._batch_worker.start(QThread.Priority.LowPriority)
+
+        self.status_label.setText("Starting batch transcription...")
+        self._update_activity_visibility()
+
+    def _launch_detached_batch(self, diarize=None, limit=None):
+        """Spawn batch_transcribe.py as a detached background OS process."""
+        from app.batch.launcher import launch_detached_batch
+
+        try:
+            proc = launch_detached_batch(diarize=diarize, limit=limit)
+            self.status_label.setText(
+                f"Background batch process started (PID {proc.pid})."
+            )
+            QMessageBox.information(
+                self, "Batch Transcription",
+                f"Background batch process launched (PID {proc.pid}).\n\n"
+                "It will continue running even if TalkTrack is closed.\n"
+                "Detailed progress is logged to Documents\\TalkTrack\\batch Log.",
+            )
+        except Exception as e:
+            logger.exception("Failed to launch detached batch process")
+            QMessageBox.warning(
+                self, "Batch Launch Failed",
+                f"Could not launch background batch process: {e}",
+            )
+
+    def _on_batch_job_started(self, label, index, total):
+        self.status_label.setText(f"Batch [{index}/{total}]: Transcribing {label}...")
+        self._update_activity_visibility()
+
+    def _on_batch_job_progress(self, message):
+        self.status_label.setText(message)
+
+    def _on_batch_job_finished(self, job, outcome):
+        self.recordings_list.refresh()
+        if (
+            self._current_session
+            and self._current_session.get("directory") == job.directory
+            and outcome.ok
+        ):
+            self._on_recording_selected(self._current_session)
+
+    def _on_batch_finished(self, processed, failed, deferred):
+        self.recordings_list.refresh()
+        self._batch_worker = None
+        self._update_activity_visibility()
+
+        msg = f"Batch transcription finished: {processed} recording(s) processed."
+        if failed:
+            msg += f" {failed} failed."
+        if deferred:
+            msg += f" {deferred} deferred past cutoff."
+
+        self.status_label.setText(msg)
+        if self._is_hidden_to_tray():
+            if failed:
+                self._flag_error_notification()
+            else:
+                self._flag_success_notification()
+        else:
+            QMessageBox.information(self, "Batch Run Finished", msg)
+
+    def _on_batch_cancelled(self):
+        self.recordings_list.refresh()
+        self._batch_worker = None
+        self._update_activity_visibility()
+        self.status_label.setText("Batch transcription cancelled.")
 
     def _start_transcription(self, audio_path, session=None):
         if self._closing:
@@ -2342,11 +2464,14 @@ class MainWindow(QMainWindow):
 
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             self._transcription_worker.cancel()
+        if self._batch_worker is not None and self._batch_worker.isRunning():
+            self._batch_worker.cancel()
         workers = [
             self._transcription_worker,
             self._diarization_worker,
             self._simple_diarize_worker,
             self._summarize_worker,
+            self._batch_worker,
             self.chat_panel.active_worker(),
             self.recordings_list.active_search_worker(),
         ] + list(self._calendar_lookup_workers)
