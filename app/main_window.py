@@ -20,7 +20,7 @@ from PyQt6.QtGui import QAction
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
-from app.utils import transcript_export
+from app.utils import session_io
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
@@ -1333,28 +1333,9 @@ class MainWindow(QMainWindow):
 
     def _write_transcript_for_session(self, result, session):
         """Persist a transcript for a session that is no longer displayed."""
-        if not session or not session.get("directory"):
-            return
-        directory = Path(session["directory"])
-        names = {}
-        names_path = directory / "speaker_names.json"
-        if names_path.exists():
-            try:
-                with open(names_path, "r", encoding="utf-8") as f:
-                    names = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-        try:
-            atomic_write_json(directory / "transcript.json",
-                              result.to_dict(speaker_names=names),
-                              indent=2, ensure_ascii=False)
-            atomic_write_text(directory / "transcript.txt",
-                              result.to_text(speaker_names=names))
-        except OSError:
-            self.status_label.setText("Failed to save transcript.")
-            return
-
-        self._export_transcript(session)
+        if not session_io.write_transcript(session, result):
+            if session and session.get("directory"):
+                self.status_label.setText("Failed to save transcript.")
 
     def _export_transcript(self, session=None):
         """Best-effort LLM-readable Markdown export for a session, reading
@@ -1363,59 +1344,7 @@ class MainWindow(QMainWindow):
         _on_recording_selected runs this for a session that is no longer
         the one those widgets currently display."""
         session = session if session is not None else self._current_session
-        if not session or not session.get("directory"):
-            return
-        directory = Path(session["directory"])
-
-        transcript_path = directory / "transcript.json"
-        if not transcript_path.exists():
-            return  # nothing transcribed yet — nothing useful to export
-        try:
-            with open(transcript_path, "r", encoding="utf-8") as f:
-                transcript_data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return
-
-        speaker_names = {}
-        names_path = directory / "speaker_names.json"
-        if names_path.exists():
-            try:
-                with open(names_path, "r", encoding="utf-8") as f:
-                    speaker_names = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        calendar_event, _ = self._load_calendar_event(session)
-
-        notes = ""
-        notes_path = directory / "notes.txt"
-        if notes_path.exists():
-            try:
-                notes = notes_path.read_text(encoding="utf-8")
-            except OSError:
-                pass
-
-        summary_markdown = None
-        summary_path = directory / "summary.md"
-        if summary_path.exists():
-            try:
-                summary_markdown = summary_path.read_text(encoding="utf-8")
-            except OSError:
-                pass
-
-        action_items = None
-        actions_path = directory / "action_items.json"
-        if actions_path.exists():
-            try:
-                with open(actions_path, "r", encoding="utf-8") as f:
-                    action_items = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        transcript_export.export_transcript(
-            session, transcript_data, speaker_names, calendar_event,
-            notes, summary_markdown, action_items,
-        )
+        session_io.export_session_markdown(session)
 
     def _load_calendar_event(self, session):
         """Load calendar_event.json for a session, if present.
@@ -1425,19 +1354,7 @@ class MainWindow(QMainWindow):
         _on_recording_selected (browse-to-past-recording path) so both show
         a previously saved calendar tag, not just the former.
         """
-        calendar_event = None
-        attendees = []
-        if not session or not session.get("directory"):
-            return calendar_event, attendees
-        calendar_path = Path(session["directory"]) / "calendar_event.json"
-        if calendar_path.exists():
-            try:
-                with open(calendar_path, "r", encoding="utf-8") as f:
-                    calendar_event = json.load(f)
-                attendees = calendar_event.get("attendees", [])
-            except (json.JSONDecodeError, OSError):
-                pass
-        return calendar_event, attendees
+        return session_io.load_calendar_event(session)
 
     def _display_final_transcript(self, result, session=None):
         result.merge_adjacent_same_speaker()
