@@ -18,7 +18,8 @@
 
 - **Non-UI logic**: TDD — write failing tests in `tests/`, confirm failure, implement, confirm pass.
 - **UI / PyQt code**: smoke-test with `python -c "from app.x import Y; ..."` — no Qt widget tests beyond pure-helper unit tests.
-- `python -m pytest tests/ -v` is the full suite. Run it with **global** `python`, never bare `uv run` — the `.venv` has no pytest, and `uv run` triggers a sync first (pulls CPU torch over the CUDA build, can die on locked DLLs and corrupt package metadata). If uv is required, pass `--no-sync`.
+- `.venv\Scripts\python.exe -m pytest tests/ -q` is the full suite. Run it with the **venv** interpreter — the global Python has no pytest (this is the reverse of what this file said until 2026-08-17; the global install lost pytest at some point). Never bare `uv run`: it triggers a sync first (pulls CPU torch over the CUDA build, can die on locked DLLs and corrupt package metadata). If uv is required, pass `--no-sync`.
+- Two tests in `tests/test_single_instance.py` fail whenever TalkTrack itself is running: they use the real `TalkTrackSingleInstance` pipe name, which the live app holds. Pre-existing; they need a per-test pipe name.
 - Tests use `unittest` + `pytest` runner, mocks for hardware-dependent code.
 - **Verifying a launched PyQt app**: PowerShell `Get-Process` MainWindowHandle/CPU are unreliable for PyQt apps (read 0/near-0 even with the window up, especially post-splash) — don't judge running/hung by them. Authority is the app log `~/.talktrack/talktrack.log` (`TalkTrack UI ready` = window shown; stderr is redirected there too). Confirm which interpreter an app runs under via its process path (`.venv\Scripts\pythonw.exe` = venv vs a global Python path).
 

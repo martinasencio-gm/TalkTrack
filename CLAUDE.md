@@ -35,11 +35,19 @@ TalkTrack is a Windows desktop application that records, transcribes, and diariz
 ```
 TalkTrack/
   main.py                              # Entry point, QApplication setup
+  batch_transcribe.py                  # Headless batch CLI entry point (Task Scheduler)
   start.bat                            # Launcher (uv-first, .venv isolation, falls back to pip)
   start_debug.bat                      # Debug launcher with console output
   requirements.txt                     # Dependencies
   app/
     main_window.py                     # Main window + orchestration
+    batch/
+      __init__.py                      # Package init
+      runner.py                        # Batch run loop: args, worklist, reporting, exit codes
+      pipeline.py                      # One recording through transcribe (+diarize), headless
+      worklist.py                      # Which queued recordings to process, oldest first
+      cutoff.py                        # --until wall-clock cutoff parsing and checking
+      logging_setup.py                 # Per-run log under Documents/TalkTrack/batch Log
     audio/
       __init__.py                      # Package init
       segment_player.py               # Audio clip playback for transcript segments
@@ -93,10 +101,12 @@ TalkTrack/
       about_dialog.py                  # About dialog with donation link
     utils/
       audio_devices.py                # Device enumeration (sounddevice)
+      batch_queue.py                  # batch_pending/batch_attempts tag in metadata.json
       audio_session_monitor.py        # Per-app audio session enumeration (pycaw)
       com_session_worker.py           # Isolated worker process for pycaw/comtypes COM polling
       render_activity.py              # Which output endpoint is actually rendering (auto-picks the loopback source)
       config.py                       # JSON config management
+      session_io.py                   # Disk-driven transcript/calendar/speaker-name I/O for a session (Qt-free; shared by MainWindow and the batch CLI)
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
       transcript_export.py            # Pure Markdown builder for LLM-ready transcript.md (written into the recording's own folder)
@@ -130,6 +140,13 @@ TalkTrack/
     test_search_index.py               # Transcript search tests
     test_chat.py                       # Chat context builder tests
     test_transcript_export.py          # LLM-ready transcript Markdown export tests
+    test_batch_queue.py                # batch_pending/batch_attempts tag tests
+    test_batch_cutoff.py               # --until parsing and cutoff checking tests
+    test_batch_worklist.py             # Batch worklist selection tests
+    test_batch_pipeline.py             # Per-recording batch pipeline tests (workers faked)
+    test_batch_runner.py               # Batch run loop, tag bookkeeping, exit codes
+    test_session_io.py                 # Session file reader/writer tests
+    test_recordings_list_batch.py      # Batch-queue menu helper tests
   resources/
     style.qss                          # Dark theme stylesheet (Catppuccin Mocha)
     talktrack.ico                      # App icon (multi-size: 16-256px)
@@ -138,6 +155,7 @@ TalkTrack/
     favicon.ico                        # Favicon for web use
     TT_icon_*.png                      # Icon source files (32, 64, 128, 256, 512px)
     TT_logo_*.png                      # Logo files (655x200, 1300x400)
+  docs/batch-transcription.md         # Batch CLI usage + Task Scheduler setup
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory (each session folder also holds its transcript.md export)
 ```
@@ -197,6 +215,7 @@ TalkTrack/
 - **Silent-capture warning:** per-app recordings that receive zero audio for 15s trigger a one-shot warning (Teams/Zoom opt out of process-loopback; suggests legacy mode)
 - **Recovered recordings:** crash-orphaned recording dirs (audio but no metadata) are salvaged on startup as "Recovered" entries — never auto-deleted
 - **Transcription queue:** back-to-back recordings queue for transcription instead of being dropped; jobs run serially with the session bound at start
+- **Batch transcription (companion CLI):** `batch_transcribe.py --until HH:MM` transcribes (and optionally diarizes) every recording tagged for batch processing, then stops before starting one past the cutoff. Meant for Windows Task Scheduler. Recordings are tagged from the recordings list context menu (a peach "Queued" pill marks them), and anything the app declines to transcribe itself is tagged automatically when `general.batch_auto_queue` is on. See [docs/batch-transcription.md](docs/batch-transcription.md).
 - **Notes autosave:** switching recordings saves the previous recording's notes before loading the new ones
 
 ## Architecture Notes
@@ -280,7 +299,7 @@ TalkTrack/
 - Device selections persist by **name** (indices shift as hardware comes and goes): `last_mic`, `last_mic2`, `last_loopback`. System-audio selection priority is **saved choice → endpoint actually rendering audio → `get_default_output()` → first device**. The Windows default output is frequently not the endpoint the meeting app renders to, and capturing the wrong one yields a silent track that `ChunkWriter` then deletes. Capture mode and selected apps are persisted too
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
-- General settings: min_recording_length, silence_auto_stop, silence_duration
+- General settings: min_recording_length, silence_auto_stop, silence_duration, `batch_auto_queue` (tag recordings the app doesn't transcribe itself for the batch run)
 - Meeting detection settings (`meeting_detection`): mode ("off"/"suggest"/"auto"), threshold_seconds, detect_end, end_grace_seconds, end_action ("stop"/"pause"), use_mic_capture, use_calendar, use_window_title, apps. Replaces the old `general.auto_record` flag, which `app/utils/config_migration.py` migrates into `mode` ("auto" or "off") on first load after upgrade — `silence_auto_stop` is unaffected and still applies as an independent backstop.
 - Output settings: `output.directory` (recordings output folder — `transcript.md` lives inside each session folder here, not a separate directory)
 - `transcripts.session_import_done`: one-time flag; once set, `app/utils/transcripts_migration.py` (called from `MainWindow.__init__`) skips re-scanning for exports stranded in the old separate transcripts/ folder (removed) that predate this per-session layout
@@ -292,6 +311,7 @@ TalkTrack/
 - action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history
 - embeddings.npz: Cached segment embeddings for semantic search (auto-invalidated on edit)
+- metadata.json: `batch_pending` (queued for the batch run) and `batch_attempts` (failed batch attempts; 3 retires it) are optional keys — absent means not queued
 
 ## Setup Instructions
 
@@ -318,8 +338,12 @@ Start a Teams meeting normally, then click Record in TalkTrack.
 ## Running Tests
 
 ```bash
-python -m pytest tests/ -v
+.venv\Scripts\python.exe -m pytest tests/ -q
 ```
+
+The venv interpreter, not the global `python` — the global install has no
+pytest. Never bare `uv run` (it syncs first and can pull CPU torch over the
+CUDA build); pass `--no-sync` if uv is required.
 
 ## Coding Conventions
 

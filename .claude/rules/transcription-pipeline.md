@@ -65,3 +65,37 @@ Now reached only when `dual_track_plan` declines but metadata still names both t
 
 - `TranscriptSegment.confidence` = `exp(segment.avg_logprob)` — populated since #29.
 - `word_timestamps` is deliberately NOT requested (unused output, real alignment cost). If a feature needs word timing, re-enable it and actually consume `segment.words`.
+
+## Headless batch runs (`batch_transcribe.py`, `app/batch/`)
+
+The scheduled batch CLI reuses the app's workers **verbatim** rather than
+reimplementing the pipeline. Keep it that way — a second implementation
+drifts, and `transcript.md` is consumed by tooling that shouldn't have to
+cope with two dialects.
+
+- `app/batch/pipeline.py` creates the same `TranscriptionWorker` /
+  `DiarizationWorker` / `SimpleDiarizeWorker` and calls **`run()` directly**,
+  not `start()`. `run()` is an ordinary method: called inline it executes on
+  the calling thread, and signals emitted back to that thread are direct
+  connections that fire before `run()` returns. No event loop is started.
+  `runner.main()` creates a `QCoreApplication` (never `QApplication` — no
+  widgets, no display in a scheduled run) for the workers to live in.
+- **`run_job`'s branch structure mirrors `MainWindow._on_transcription_finished`
+  exactly** — per-track first, then pyannote, then the SimpleDiarizer
+  fallback. Change one and the other has to change with it.
+- `full_cpu=True` unconditionally: nothing is capturing audio in a batch
+  run, so there is no real-time callback to leave headroom for.
+- Writers go through `app/utils/session_io.py`, which is the extracted
+  (Qt-free) form of what were `MainWindow._write_transcript_for_session` /
+  `_export_transcript` / `_load_calendar_event`. MainWindow now delegates to
+  it. Add new session-file I/O there, not back on MainWindow.
+- The queue tag is `batch_pending` / `batch_attempts` in the recording's own
+  `metadata.json` (`app/utils/batch_queue.py`), not a list in settings.json —
+  it travels with the folder. Three failures retires a recording until it is
+  queued again.
+- **No coordination with a running GUI** (deliberate, confirmed). Both can
+  run at once; each loads its own Whisper model.
+- Diarization failing must still save the transcript, same invariant as the
+  GUI. The batch runner records it as a warning on a successful outcome.
+- **Never log `diarization.hf_token` or `ai.api_key`.** The runner logs the
+  settings *path* only. `tests/` do not cover this — the rule is the guard.
