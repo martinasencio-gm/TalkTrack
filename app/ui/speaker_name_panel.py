@@ -141,13 +141,13 @@ class SpeakerNamePanel(QWidget):
 
             # Speaker ID label
             id_label = QLabel(speaker_id)
-            id_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+            id_label.setObjectName("speakerIdLabel")
             id_label.setFixedWidth(100)
             row_layout.addWidget(id_label)
 
             # Arrow
             arrow_label = QLabel("\u2192")
-            arrow_label.setStyleSheet("color: #585b70;")
+            arrow_label.setObjectName("speakerArrowLabel")
             arrow_label.setFixedWidth(20)
             row_layout.addWidget(arrow_label)
 

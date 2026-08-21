@@ -53,6 +53,47 @@ class TestMainWindowMeetingSignalsComPoller(unittest.TestCase):
             self.assertEqual(kwargs["_audio_apps_fn"](), fake_snapshot["audio_apps"])
             self.assertEqual(kwargs["_mic_pids_fn"](), {1})
 
+    def test_maybe_tag_detected_meeting_saves_calendar_event(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            window = self._make_window()
+            session = {
+                "id": "rec1",
+                "directory": tmpdir,
+                "started_at": "2026-08-20T12:00:00",
+                "stopped_at": "2026-08-20T12:05:00",
+            }
+            window._current_session = session
+            with patch("app.main_window.QInputDialog.getText", return_value=("", False)), \
+                 patch("app.main_window.get_current_user_name", return_value="Martin Asencio"):
+                window._maybe_tag_detected_meeting(session, "Jane Doe")
+            self.assertEqual(window._calendar_attendees, ["Jane Doe", "Martin Asencio"])
+            event_file = Path(tmpdir) / "calendar_event.json"
+            self.assertTrue(event_file.exists())
+            import json
+            with open(event_file, "r") as f:
+                data = json.load(f)
+            self.assertEqual(data["subject"], "Jane Doe")
+            self.assertEqual(data["attendees"], ["Jane Doe", "Martin Asencio"])
+            self.assertEqual(data["organizer"], "Martin Asencio")
+
+    def test_generic_app_name_is_not_tagged(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            window = self._make_window()
+            session = {
+                "id": "rec1",
+                "directory": tmpdir,
+                "started_at": "2026-08-20T12:00:00",
+                "stopped_at": "2026-08-20T12:05:00",
+            }
+            window._current_session = session
+            window._maybe_tag_detected_meeting(session, "ms-teams")
+            event_file = Path(tmpdir) / "calendar_event.json"
+            self.assertFalse(event_file.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,11 @@ _PIPELINE_CACHE_LOCK = threading.Lock()
 def _get_pipeline(hf_token):
     with _PIPELINE_CACHE_LOCK:
         if hf_token not in _PIPELINE_CACHE:
+            import warnings
+            # Suppress pyannote's torchcodec warning — TalkTrack preloads waveforms
+            # into memory via soundfile (see DiarizationWorker.run), so torchcodec
+            # is never used for audio decoding.
+            warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
             from pyannote.audio import Pipeline
             _PIPELINE_CACHE[hf_token] = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-community-1",

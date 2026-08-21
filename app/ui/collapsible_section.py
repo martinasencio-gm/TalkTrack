@@ -40,13 +40,6 @@ class CollapsibleSection(QWidget):
         self._toggle_btn.setChecked(False)
         self._toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._toggle_btn.toggled.connect(self._on_toggled)
-        self._toggle_btn.setStyleSheet(
-            "QToolButton { border: none; background: transparent; "
-            "color: #89b4fa; font-weight: bold; "
-            "font-family: 'Bahnschrift', 'Segoe UI Semibold', 'Segoe UI', sans-serif; "
-            "text-align: left; padding: 4px 0; }"
-            "QToolButton:hover { color: #b4befe; }"
-        )
         self._header_row.addWidget(self._toggle_btn)
         self._header_row.addStretch()
         layout.addWidget(self._header_frame)

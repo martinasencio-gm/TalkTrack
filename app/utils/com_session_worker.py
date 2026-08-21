@@ -21,7 +21,7 @@ _JOIN_TIMEOUT_SECONDS = 2.0
 
 def _worker_loop(result_queue, interval, stop_event, main_pid):
     """Entry point for the child process. Loops until stop_event is set."""
-    from app.utils.audio_session_monitor import get_active_audio_apps
+    from app.utils.audio_session_monitor import get_active_audio_apps, get_app_active_devices
     from app.utils.meeting_signals import get_mic_capture_pids
     from app.utils.render_activity import sample_render_peaks
 
@@ -38,9 +38,13 @@ def _worker_loop(result_queue, interval, stop_event, main_pid):
             render_peaks = sample_render_peaks()
         except Exception:
             render_peaks = {}
+        try:
+            app_devices = get_app_active_devices(exclude_pid=main_pid)
+        except Exception:
+            app_devices = {}
 
         snapshot = {"audio_apps": audio_apps, "mic_pids": mic_pids,
-                    "render_peaks": render_peaks}
+                    "render_peaks": render_peaks, "app_devices": app_devices}
         try:
             result_queue.get_nowait()
         except queue.Empty:
@@ -69,7 +73,7 @@ class ComSessionPoller:
         self._stop_event = multiprocessing.Event()
         self._process = None
         self._cached_snapshot = {"audio_apps": [], "mic_pids": set(),
-                                 "render_peaks": {}}
+                                 "render_peaks": {}, "app_devices": {}}
         self._last_restart_ts = float("-inf")
         self._render_history = {}
 

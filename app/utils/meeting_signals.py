@@ -10,13 +10,92 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Window titles that indicate a live call. Deliberately narrow: this signal may
-# only ever confirm a meeting, never trigger one, because titles drift across
-# app versions and locales.
-_MEETING_TITLE_MARKERS = ("zoom meeting", "meeting with", "| microsoft teams call")
+# Window titles that indicate a live call. Deliberately focused on active call
+# patterns across Teams, Zoom, Webex, and calendar-style windows.
+_MEETING_TITLE_MARKERS = (
+    "zoom meeting",
+    "zoom workplace",
+    "meeting with",
+    "| microsoft teams",
+    "| teams",
+    "microsoft teams, meeting window",
+    "microsoft teams call",
+    "| webex",
+)
 
 # IAudioSessionControl::GetState -> AudioSessionStateActive
 _SESSION_ACTIVE = 1
+
+
+def parse_meeting_title(title: str) -> str | None:
+    """Extract a clean person or meeting name from a conferencing window title.
+
+    Returns None if the title is generic (e.g. "Microsoft Teams", "Zoom Meeting")
+    or cannot be meaningfully parsed.
+    """
+    if not title or not isinstance(title, str):
+        return None
+
+    t = title.strip()
+    lower = t.lower()
+
+    # Teams patterns:
+    # "Jane Doe | Microsoft Teams, meeting window"
+    # "Jane Doe | Microsoft Teams call"
+    # "Jane Doe | Microsoft Teams"
+    # "Chat | Jane Doe | Microsoft Teams"
+    # "Sprint Planning | Microsoft Teams"
+    if "microsoft teams" in lower or "| teams" in lower:
+        clean_t = t
+        for suffix in [", meeting window", " call"]:
+            if clean_t.lower().endswith(suffix):
+                clean_t = clean_t[:-len(suffix)].strip()
+        parts = [p.strip() for p in clean_t.split("|") if p.strip()]
+        generic_markers = {
+            "microsoft teams", "teams", "chat", "meeting", "calls", "call"
+        }
+        meaningful = [
+            p for p in parts
+            if p.lower() not in generic_markers and not p.lower().startswith("microsoft teams")
+        ]
+        if meaningful:
+            return meaningful[0]
+        return None
+
+    # Zoom patterns:
+    # "Sprint Planning - Zoom"
+    # "Zoom Meeting - Sprint Planning"
+    # "Zoom Workplace - Sprint Planning"
+    if "zoom" in lower:
+        parts = [p.strip() for p in t.split("-") if p.strip()]
+        generic = {"zoom", "zoom meeting", "zoom workplace", "zoom cloud meetings"}
+        meaningful = [
+            p for p in parts
+            if p.lower() not in generic and not p.lower().startswith("zoom")
+        ]
+        if meaningful:
+            return meaningful[0]
+        return None
+
+    # Webex patterns:
+    # "Sprint Planning | Webex"
+    if "webex" in lower:
+        parts = [p.strip() for p in t.split("|") if p.strip()]
+        generic = {"webex", "cisco webex", "cisco webex meetings"}
+        meaningful = [
+            p for p in parts
+            if p.lower() not in generic and not p.lower().startswith("webex") and not p.lower().startswith("cisco webex")
+        ]
+        if meaningful:
+            return meaningful[0]
+        return None
+
+    # "Meeting with Jane Doe" -> "Jane Doe"
+    if lower.startswith("meeting with "):
+        candidate = t[len("meeting with "):].strip()
+        return candidate if candidate else None
+
+    return None
 
 
 def _base_name(process_name):

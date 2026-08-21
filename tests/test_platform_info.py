@@ -30,6 +30,24 @@ class TestPlatformInfo(unittest.TestCase):
         from app.utils.platform_info import is_windows
         self.assertFalse(is_windows())
 
+    def test_get_current_user_name_from_config(self):
+        from app.utils.platform_info import get_current_user_name
+        from unittest.mock import MagicMock
+        config = MagicMock()
+        config.get.return_value = "Custom User"
+        self.assertEqual(get_current_user_name(config), "Custom User")
+
+    def test_get_current_user_name_from_windows_display_name(self):
+        from app.utils.platform_info import get_current_user_name
+        with patch("win32api.GetUserNameEx", return_value="Jane Smith", create=True):
+            self.assertEqual(get_current_user_name(), "Jane Smith")
+
+    def test_get_current_user_name_fallback_to_env(self):
+        from app.utils.platform_info import get_current_user_name
+        with patch.dict("os.environ", {"USERNAME": "janesmith"}):
+            with patch("win32api.GetUserNameEx", side_effect=Exception("unavailable"), create=True):
+                self.assertEqual(get_current_user_name(), "janesmith")
+
 
 if __name__ == "__main__":
     unittest.main()

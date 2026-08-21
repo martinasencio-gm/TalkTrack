@@ -30,6 +30,10 @@ class TestMainWindowMeetingNotificationClick(unittest.TestCase):
 
         def _close():
             window._really_quit = True
+            if hasattr(window, "_meeting_signals_timer"):
+                window._meeting_signals_timer.stop()
+            if hasattr(window, "_com_session_poller") and window._com_session_poller:
+                window._com_session_poller.stop()
             window.close()
         self.addCleanup(_close)
         return window
@@ -80,6 +84,28 @@ class TestMainWindowMeetingNotificationClick(unittest.TestCase):
             window._on_tray_message_clicked()
         mock_accept.assert_not_called()
         mock_restore.assert_not_called()
+
+    def test_banner_hidden_when_recording_starts(self):
+        from app.recording.recorder import RecordingState
+        window = self._make_window()
+        window.meeting_banner.show_start("Daily Standup", 0)
+        self.assertFalse(window.meeting_banner.isHidden())
+        # Simulate recording state changed to RECORDING
+        window._on_state_changed(RecordingState.RECORDING)
+        self.assertTrue(window.meeting_banner.isHidden())
+
+    def test_suggest_start_ignored_when_recording_active(self):
+        from app.recording.recorder import RecordingState
+        window = self._make_window()
+        window.recorder._state = RecordingState.RECORDING
+        try:
+            with patch.object(window.meeting_banner, "show_start") as mock_show:
+                window._handle_meeting_decision(
+                    Decision("suggest_start", "Planning"), {"timestamp": 0}
+                )
+                mock_show.assert_not_called()
+        finally:
+            window.recorder._state = RecordingState.IDLE
 
 
 if __name__ == "__main__":

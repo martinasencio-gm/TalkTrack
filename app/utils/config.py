@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
         "provider_settings": {},
     },
     "general": {
+        "user_name": "",
         "min_recording_length": 5,
         "auto_record": False,
         "auto_record_threshold": 5,
@@ -82,7 +83,7 @@ DEFAULT_CONFIG = {
         "end_action": "stop",       # auto mode only: "stop" | "pause"
         "use_mic_capture": True,    # strongest signal; opt-out for privacy/perf
         "use_calendar": True,       # reuses the existing Outlook integration
-        "use_window_title": False,  # brittle across app versions and locales
+        "use_window_title": True,   # captures meeting / contact names from window titles
         "apps": ["ms-teams", "Teams", "Zoom", "Webex"],
     },
     "ui": {

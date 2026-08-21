@@ -200,3 +200,108 @@ def get_active_audio_apps():
 
     apps.sort(key=lambda a: a["name"].lower())
     return apps
+
+
+def get_app_active_devices(exclude_pid=None):
+    """Return a mapping of apps with active audio sessions to their physical devices.
+
+    Returns dict:
+        {
+            display_name: {
+                "app": str,
+                "process_name": str,
+                "mic": str | None,     # friendly name of active capture endpoint
+                "output": str | None,  # friendly name of active render endpoint
+                "pids": list[int],
+            }
+        }
+    """
+    import comtypes
+    from comtypes import CLSCTX_ALL, POINTER, cast
+    from pycaw.constants import CLSID_MMDeviceEnumerator, DEVICE_STATE, EDataFlow
+    from pycaw.pycaw import (IAudioSessionControl2, IAudioSessionManager2,
+                             IMMDeviceEnumerator, AudioUtilities)
+
+    result = {}
+    enumerator = None
+    try:
+        enumerator = comtypes.CoCreateInstance(
+            CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, comtypes.CLSCTX_INPROC_SERVER
+        )
+    except Exception:
+        return result
+
+    flows = [
+        (EDataFlow.eCapture.value, "mic"),
+        (EDataFlow.eRender.value, "output"),
+    ]
+
+    for flow_value, dev_type in flows:
+        collection = None
+        try:
+            collection = enumerator.EnumAudioEndpoints(flow_value, DEVICE_STATE.ACTIVE.value)
+            count = collection.GetCount()
+            for i in range(count):
+                device = manager = sessions = None
+                try:
+                    device = collection.Item(i)
+                    dev_name = AudioUtilities.CreateDevice(device).FriendlyName
+                    if not dev_name:
+                        continue
+
+                    manager = cast(
+                        device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None),
+                        POINTER(IAudioSessionManager2),
+                    )
+                    sessions = manager.GetSessionEnumerator()
+                    for j in range(sessions.GetCount()):
+                        control = None
+                        try:
+                            control = sessions.GetSession(j)
+                            if control.GetState() != _AUDIO_SESSION_STATE_ACTIVE:
+                                continue
+                            control2 = control.QueryInterface(IAudioSessionControl2)
+                            pid = control2.GetProcessId()
+                            if not pid or pid == exclude_pid:
+                                continue
+
+                            try:
+                                proc = psutil.Process(pid)
+                                proc_name = proc.name()
+                            except Exception:
+                                continue
+
+                            ancestor = _find_webview_ancestor(pid, psutil)
+                            if ancestor is not None:
+                                proc_name = ancestor[0]
+
+                            display_name = _friendly_name(proc_name)
+                            if display_name not in result:
+                                result[display_name] = {
+                                    "app": display_name,
+                                    "process_name": proc_name,
+                                    "mic": None,
+                                    "output": None,
+                                    "pids": set(),
+                                }
+                            result[display_name]["pids"].add(pid)
+                            if not result[display_name][dev_type]:
+                                result[display_name][dev_type] = dev_name
+                        except Exception:
+                            continue
+                        finally:
+                            del control
+                except Exception:
+                    continue
+                finally:
+                    del sessions, manager, device
+        except Exception:
+            continue
+        finally:
+            del collection
+
+    for app_info in result.values():
+        app_info["pids"] = sorted(app_info["pids"])
+
+    return result
+

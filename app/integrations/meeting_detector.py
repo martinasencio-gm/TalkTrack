@@ -14,6 +14,7 @@ suggestion is an annoyance the user dismisses; a premature stop loses audio that
 cannot be recovered. So a start confirms in seconds and an end waits a minute.
 """
 from collections import namedtuple
+from app.utils.meeting_signals import parse_meeting_title
 
 Decision = namedtuple("Decision", ["action", "meeting_name"])
 NONE = Decision("none", None)
@@ -65,6 +66,11 @@ class MeetingDetector:
         event = snapshot.get("calendar_event")
         if event and event.get("subject"):
             return event["subject"]
+        titles = snapshot.get("meeting_titles") or []
+        for t in titles:
+            parsed = parse_meeting_title(t)
+            if parsed:
+                return parsed
         apps = snapshot["mic_capture_apps"] or snapshot["audio_apps"]
         return apps[0] if apps else None
 

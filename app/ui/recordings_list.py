@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QAction, QFontMetrics
 
 from app.ui.search_bar import SearchBar
@@ -74,6 +74,12 @@ class _RecordingRow(QWidget):
     def __init__(self):
         super().__init__()
         self._elidable = []  # list of (label, full_text)
+
+    def sizeHint(self):
+        # Report 0 width so QListWidget doesn't widen its column beyond the
+        # visible viewport width when populating items on initial load.
+        hint = super().sizeHint()
+        return QSize(0, hint.height())
 
     def register_elidable(self, label, full_text):
         label.setToolTip(full_text)
@@ -312,6 +318,12 @@ class RecordingsList(QWidget):
         self._pending_search = None
         self._showing_search_results = False
         self._transcribing = set()
+        self._batch_running = False
+        try:
+            from app.batch.process_monitor import find_running_batch_processes
+            self._batch_running = bool(find_running_batch_processes())
+        except Exception:
+            pass
         try:
             salvage_orphaned_recordings(self.recordings_dir)
         except Exception:
@@ -336,12 +348,8 @@ class RecordingsList(QWidget):
 
         import_row = QHBoxLayout()
         self.batch_btn = QPushButton("Run Batch")
+        self.batch_btn.setObjectName("batchListBtn")
         self.batch_btn.setToolTip("Open the batch transcription launcher for queued recordings")
-        self.batch_btn.setStyleSheet(
-            "QPushButton { background-color: rgba(250, 179, 135, 0.18); color: #fab387; "
-            "font-size: 11px; font-weight: bold; border-radius: 4px; padding: 4px 8px; }"
-            "QPushButton:hover { background-color: rgba(250, 179, 135, 0.32); }"
-        )
         self.batch_btn.clicked.connect(self.run_batch_requested.emit)
         self.batch_btn.setVisible(False)
         import_row.addWidget(self.batch_btn)
@@ -360,6 +368,8 @@ class RecordingsList(QWidget):
         self.list_widget.setMinimumHeight(100)
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list_widget.setUniformItemSizes(True)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -376,6 +386,21 @@ class RecordingsList(QWidget):
     def _set_empty_message(self, text):
         self._empty_label.setText(text)
         self._empty_label.setVisible(bool(text))
+
+    def set_batch_running(self, running: bool):
+        """Update whether a batch transcription process is currently active."""
+        self._batch_running = running
+        self._update_batch_btn_visibility()
+
+    def _update_batch_btn_visibility(self):
+        if not hasattr(self, "batch_btn"):
+            return
+        queued_count = sum(
+            1 for m in self._recordings
+            if batch_queue.is_queued(m) and not batch_queue.exhausted(m)
+        )
+        self.batch_btn.setText(f"Run Batch ({queued_count})")
+        self.batch_btn.setVisible(queued_count > 0 and not self._batch_running)
 
     def set_transcribing(self, directories):
         """Mark these session directories as having work in flight.
@@ -429,13 +454,7 @@ class RecordingsList(QWidget):
             item.setSizeHint(row_widget.sizeHint())
             self.list_widget.setItemWidget(item, row_widget)
 
-        queued_count = sum(
-            1 for m in self._recordings
-            if batch_queue.is_queued(m) and not batch_queue.exhausted(m)
-        )
-        if hasattr(self, "batch_btn"):
-            self.batch_btn.setText(f"Run Batch ({queued_count})")
-            self.batch_btn.setVisible(queued_count > 0)
+        self._update_batch_btn_visibility()
 
     def _build_row_widget(self, metadata):
         """Build a two-line recording row: bold name over a muted
@@ -470,7 +489,7 @@ class RecordingsList(QWidget):
         # which measures with the correctly-polished font — hand-measuring with
         # QFontMetrics here reads the wrong font and produces wrong widths.
         name_label = QLabel()
-        name_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #cdd6f4;")
+        name_label.setObjectName("recordingRowName")
         name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         outer.addWidget(name_label)
         widget.register_elidable(name_label, name or date_str)
@@ -484,7 +503,7 @@ class RecordingsList(QWidget):
         # pressure and keeps it off the duration and the pill.
         if name:
             date_label = QLabel()
-            date_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+            date_label.setObjectName("recordingRowDate")
             date_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             meta_row.addWidget(date_label, 1)
             widget.register_elidable(date_label, date_str)
@@ -499,7 +518,7 @@ class RecordingsList(QWidget):
         # own sizeHint by Qt, using the real polished font, so the box is
         # always wider than the glyphs regardless of DPI or font substitution.
         dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
-        dur_label.setStyleSheet("color: #a6adc8; font-size: 10px; padding: 0px 4px;")
+        dur_label.setObjectName("recordingRowDur")
         meta_row.addWidget(dur_label, 0)
 
         # Checked live against disk rather than trusting metadata — a delete
@@ -513,46 +532,33 @@ class RecordingsList(QWidget):
         # Neither ever shrinks — all shrink pressure lands on the elidable
         # date label beside them, which is the only Ignored-policy item here.
         if has_audio:
-            audio_badge = QLabel("Audio")
-            audio_badge.setStyleSheet(
-                "color: #89b4fa; font-size: 9px; font-weight: bold;"
-                "background-color: rgba(137, 180, 250, 0.15);"
-                "border-radius: 7px; padding: 2px 8px;"
-            )
+            audio_badge = QLabel("\U0001f3b5")
+            audio_badge.setObjectName("recordingBadgeAudio")
+            audio_badge.setToolTip("Audio recording available")
             meta_row.addWidget(audio_badge, 0)
 
         # In-progress wins over Transcribed: a re-transcribe of an already
         # transcribed recording would otherwise look like nothing was
         # happening, which is exactly the ambiguity this pill removes.
         if metadata.get("directory") in self._transcribing:
-            working_badge = QLabel("Transcribing…")
-            working_badge.setStyleSheet(
-                "color: #f9e2af; font-size: 9px; font-weight: bold;"
-                "background-color: rgba(249, 226, 175, 0.15);"
-                "border-radius: 7px; padding: 2px 8px;"
-            )
+            working_badge = QLabel("\u21bb")
+            working_badge.setObjectName("recordingBadgeWorking")
+            working_badge.setToolTip("Transcription in progress...")
             meta_row.addWidget(working_badge, 0)
         elif has_transcript:
-            badge = QLabel("Transcribed")
-            badge.setStyleSheet(
-                "color: #a6e3a1; font-size: 9px; font-weight: bold;"
-                "background-color: rgba(166, 227, 161, 0.15);"
-                "border-radius: 7px; padding: 2px 8px;"
-            )
+            badge = QLabel("\U0001f4dd")
+            badge.setObjectName("recordingBadgeTranscribed")
+            badge.setToolTip("Transcript available")
             meta_row.addWidget(badge, 0)
 
         # Peach rather than the in-progress yellow: waiting for a scheduled
         # run is a different state from being worked on right now, and the
         # two pills can appear on the same row after a re-queue.
         if batch_queue.is_queued(metadata):
-            queued_badge = QLabel("Queued")
-            queued_badge.setStyleSheet(
-                "color: #fab387; font-size: 9px; font-weight: bold;"
-                "background-color: rgba(250, 179, 135, 0.15);"
-                "border-radius: 7px; padding: 2px 8px;"
-            )
+            queued_badge = QLabel("\u23f3")
+            queued_badge.setObjectName("recordingBadgeQueued")
             queued_badge.setToolTip(
-                "Waiting for the next batch transcription run"
+                "Queued for batch transcription"
             )
             meta_row.addWidget(queued_badge, 0)
 
@@ -682,6 +688,37 @@ class RecordingsList(QWidget):
 
     def _set_queued(self, metadatas, queued):
         """Write the tag for each recording, then redraw the pills."""
+        if queued:
+            transcribed = [
+                m for m in metadatas
+                if m and m.get("directory") and (Path(m["directory"]) / "transcript.json").exists()
+            ]
+            if transcribed:
+                if len(transcribed) == 1:
+                    name = transcribed[0].get("name") or Path(transcribed[0]["directory"]).name
+                    msg = (
+                        f"The recording '{name}' already has a transcription.\n\n"
+                        "Queueing it for batch transcription will re-transcribe it and "
+                        "overwrite the existing transcript.\n\n"
+                        "Do you want to continue?"
+                    )
+                else:
+                    msg = (
+                        f"{len(transcribed)} of the selected recordings already have a transcription.\n\n"
+                        "Queueing them for batch transcription will re-transcribe them and "
+                        "overwrite existing transcripts.\n\n"
+                        "Do you want to continue?"
+                    )
+                reply = QMessageBox.question(
+                    self,
+                    "Overwrite Existing Transcription?",
+                    msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
         failures = [m for m in metadatas
                     if not batch_queue.set_queued(m["directory"], queued)]
         self.refresh()
@@ -692,8 +729,26 @@ class RecordingsList(QWidget):
                 "metadata.json is missing or unreadable.",
             )
 
+    def _is_safe_recording_path(self, target_path) -> bool:
+        """Security check: ensure path is within self.recordings_dir."""
+        try:
+            target = Path(target_path).resolve()
+            root = self.recordings_dir.resolve()
+            return target.is_relative_to(root) and target != root
+        except Exception:
+            return False
+
     def _open_folder(self, directory):
-        os.startfile(directory)
+        try:
+            target = Path(directory).resolve()
+            root = self.recordings_dir.resolve()
+            if target == root or target.is_relative_to(root):
+                if target.exists():
+                    os.startfile(directory)
+                return
+        except Exception:
+            pass
+        logger.warning("Rejected request to open folder outside recordings directory: %s", directory)
 
     def _selected_untranscribed(self, items):
         result = []
@@ -762,6 +817,13 @@ class RecordingsList(QWidget):
         is for, so the folder itself is removed instead.
         """
         directory = metadata.get("directory", "")
+        if not directory:
+            return
+
+        if not self._is_safe_recording_path(directory):
+            logger.warning("Rejected delete operation for path outside recordings directory: %s", directory)
+            QMessageBox.warning(self, "Security Error", "Cannot delete directory outside the recordings folder.")
+            return
 
         if scope in (DELETE_RECORDINGS, DELETE_BOTH):
             self.about_to_delete.emit(directory)
@@ -791,8 +853,15 @@ class RecordingsList(QWidget):
     def _play_audio(self, metadata):
         audio_files = metadata.get("audio_files", {})
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
-        if audio_path and os.path.exists(audio_path):
-            os.startfile(audio_path)
+        if audio_path:
+            try:
+                target = Path(audio_path).resolve()
+                root = self.recordings_dir.resolve()
+                if target.is_relative_to(root) and target.is_file():
+                    os.startfile(audio_path)
+                    return
+            except Exception as e:
+                logger.warning("Could not play audio for %s: %s", audio_path, e)
 
     def _on_filter_changed(self, text):
         """Live, local filter of the visible recordings by name/date.

@@ -128,3 +128,65 @@ def get_default_output():
     except Exception:
         pass
     return outputs[0]["index"] if outputs else None
+
+
+def _clean_device_tokens(name: str) -> set[str]:
+    """Extract normalized alphanumeric tokens from a device name for fuzzy matching."""
+    import re
+    if not name:
+        return set()
+    # Strip common wrappers/APIs
+    cleaned = re.sub(r"\((wasapi loopback|windows wasapi|mme|directsound|wdm-ks|wasapi)\)", "", name, flags=re.IGNORECASE)
+    # Remove punctuation
+    tokens = re.findall(r"[a-z0-9]+", cleaned.lower())
+    # Generic audio terms that shouldn't alone determine identity
+    generic = {"audio", "device", "endpoint", "driver", "for", "high", "definition",
+               "microphone", "mic", "headset", "headphones", "speakers", "array", "default"}
+    meaningful = {t for t in tokens if t not in generic and len(t) > 1}
+    return meaningful if meaningful else set(tokens)
+
+
+def device_names_match(name1: str, name2: str) -> bool:
+    """Return True if two device names refer to the same audio hardware endpoint."""
+    if not name1 or not name2:
+        return False
+
+    n1 = name1.strip().lower()
+    n2 = name2.strip().lower()
+
+    if n1 == n2:
+        return True
+
+    # Check prefix / substring match (handles MME 31-char truncation)
+    if n1.startswith(n2) or n2.startswith(n1):
+        return True
+
+    tokens1 = _clean_device_tokens(n1)
+    tokens2 = _clean_device_tokens(n2)
+
+    if not tokens1 or not tokens2:
+        return False
+
+    # If the core tokens of one are a subset of another, they match
+    if tokens1.issubset(tokens2) or tokens2.issubset(tokens1):
+        return True
+
+    # If token overlap ratio is high (e.g. 75%+)
+    overlap = tokens1.intersection(tokens2)
+    if overlap:
+        ratio = len(overlap) / min(len(tokens1), len(tokens2))
+        if ratio >= 0.75:
+            return True
+
+    return False
+
+
+def find_matching_device_index(target_endpoint_name: str, device_list: list[dict]) -> int | None:
+    """Find the device index in device_list matching target_endpoint_name."""
+    if not target_endpoint_name or not device_list:
+        return None
+    for dev in device_list:
+        if device_names_match(dev.get("name", ""), target_endpoint_name):
+            return dev.get("index")
+    return None
+

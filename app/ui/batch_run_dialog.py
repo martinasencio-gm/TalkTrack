@@ -2,7 +2,7 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFrame,
-    QGroupBox, QHBoxLayout, QLabel, QRadioButton, QSpinBox, QVBoxLayout
+    QGroupBox, QHBoxLayout, QLabel, QPushButton, QRadioButton, QSpinBox, QVBoxLayout
 )
 
 MODE_IN_APP = "in_app"
@@ -161,6 +161,13 @@ class BatchRunDialog(QDialog):
             layout.addWidget(limit_group)
 
         # Dialog Buttons
+        bottom_row = QHBoxLayout()
+        self.view_logs_btn = QPushButton("View Logs...")
+        self.view_logs_btn.setToolTip("Open the batch process logs folder for review")
+        self.view_logs_btn.clicked.connect(self._open_logs)
+        bottom_row.addWidget(self.view_logs_btn)
+        bottom_row.addStretch()
+
         buttons = QDialogButtonBox()
         if self._queued_count > 0:
             start_btn = buttons.addButton("Start Batch Run", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -171,7 +178,12 @@ class BatchRunDialog(QDialog):
 
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        bottom_row.addWidget(buttons)
+        layout.addLayout(bottom_row)
+
+    def _open_logs(self):
+        from app.batch.logging_setup import open_batch_log
+        open_batch_log()
 
     def execution_mode(self):
         """Return MODE_IN_APP or MODE_DETACHED."""

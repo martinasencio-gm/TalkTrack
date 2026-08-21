@@ -19,6 +19,63 @@ class TestIsMeetingApp(unittest.TestCase):
         self.assertFalse(meeting_signals.is_meeting_app("chrome.exe", self.APPS))
 
 
+class TestParseMeetingTitle(unittest.TestCase):
+    def test_parses_teams_1_on_1_call_window(self):
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Jane Doe | Microsoft Teams"),
+            "Jane Doe"
+        )
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Jane Doe | Microsoft Teams call"),
+            "Jane Doe"
+        )
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Jane Doe | Microsoft Teams, meeting window"),
+            "Jane Doe"
+        )
+
+    def test_parses_teams_chat_or_group(self):
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Chat | Jane Doe | Microsoft Teams"),
+            "Jane Doe"
+        )
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Sprint Planning | Microsoft Teams"),
+            "Sprint Planning"
+        )
+
+    def test_rejects_generic_teams_titles(self):
+        self.assertIsNone(meeting_signals.parse_meeting_title("Microsoft Teams"))
+        self.assertIsNone(meeting_signals.parse_meeting_title("Microsoft Teams, meeting window"))
+        self.assertIsNone(meeting_signals.parse_meeting_title("Teams"))
+
+    def test_parses_zoom_titles(self):
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Sprint Planning - Zoom"),
+            "Sprint Planning"
+        )
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Zoom Meeting - Sprint Planning"),
+            "Sprint Planning"
+        )
+        self.assertIsNone(meeting_signals.parse_meeting_title("Zoom Meeting"))
+
+    def test_parses_webex_and_meeting_with(self):
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Sprint Planning | Webex"),
+            "Sprint Planning"
+        )
+        self.assertEqual(
+            meeting_signals.parse_meeting_title("Meeting with John Doe"),
+            "John Doe"
+        )
+
+    def test_empty_or_none(self):
+        self.assertIsNone(meeting_signals.parse_meeting_title(""))
+        self.assertIsNone(meeting_signals.parse_meeting_title(None))
+
+
+
 class TestProbe(unittest.TestCase):
     SETTINGS = {"apps": ["ms-teams", "Zoom"], "use_mic_capture": True,
                 "use_calendar": True, "use_window_title": False}

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog,
-    QFrame
+    QFrame, QPushButton
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QThread
 from PyQt6.QtGui import QAction
@@ -50,12 +50,14 @@ from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
 from app.ui.meeting_banner import MeetingBanner
+from app.ui.meeting_toast import MeetingNotificationToast
 from app.integrations.meeting_detector import MeetingDetector
 from app.utils import meeting_signals
 from app.utils.com_session_worker import ComSessionPoller
 from app.ui.calendar_lookup_worker import CalendarLookupWorker
 from app.ui.import_timestamp_dialog import ImportTimestampDialog
 from app.recording.import_session import build_import_metadata, needs_conversion
+from app.utils.platform_info import get_current_user_name
 
 # Bleed duplicates below this count are the odd loud moment, not a setup
 # worth interrupting the user about.
@@ -93,6 +95,8 @@ class MainWindow(QMainWindow):
         # which triggered on any audio from a selected app.
         self._meeting_detector = MeetingDetector()
         self._last_meeting_snapshot = None
+        self._active_detected_meeting_name = None
+        self._detected_session_meeting_name = None
         # "start" | "end" | None — which meeting suggestion the last tray
         # balloon was for, so a click on it (see _on_tray_message_clicked)
         # knows whether to start recording or just bring the window forward.
@@ -104,6 +108,13 @@ class MainWindow(QMainWindow):
 
         self._com_poller = ComSessionPoller(main_pid=os.getpid())
         self._com_poller.start()
+
+        self._batch_worker_start_time = None
+        self._running_batch_processes = []
+        self._batch_monitor_timer = QTimer(self)
+        self._batch_monitor_timer.setInterval(2000)
+        self._batch_monitor_timer.timeout.connect(self._poll_batch_processes)
+        self._batch_monitor_timer.start()
 
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1000, 700)
@@ -158,6 +169,10 @@ class MainWindow(QMainWindow):
         open_recordings_action.triggered.connect(self._open_recordings_folder)
         file_menu.addAction(open_recordings_action)
 
+        open_batch_logs_action = QAction("Open Batch &Logs Folder", self)
+        open_batch_logs_action.triggered.connect(self._open_batch_logs_folder)
+        file_menu.addAction(open_batch_logs_action)
+
         batch_action = QAction("Run &Batch Transcription...", self)
         batch_action.triggered.connect(self._open_batch_run_dialog)
         file_menu.addAction(batch_action)
@@ -186,6 +201,10 @@ class MainWindow(QMainWindow):
         log_action = QAction("Open &Log File", self)
         log_action.triggered.connect(self._open_log_file)
         help_menu.addAction(log_action)
+
+        batch_log_action = QAction("Open &Batch Log", self)
+        batch_log_action.triggered.connect(self._open_batch_log_file)
+        help_menu.addAction(batch_log_action)
 
         report_action = QAction("&Report a Bug...", self)
         report_action.triggered.connect(self._report_bug)
@@ -340,6 +359,11 @@ class MainWindow(QMainWindow):
         self.meeting_banner.end_chosen.connect(self._on_meeting_end_chosen)
         right_layout.addWidget(self.meeting_banner)
 
+        self.meeting_toast = MeetingNotificationToast()
+        self.meeting_toast.record_accepted.connect(self._on_meeting_start_accepted)
+        self.meeting_toast.dismissed.connect(self._on_meeting_start_dismissed)
+        self.meeting_toast.end_chosen.connect(self._on_meeting_end_chosen)
+
         self.tabs = QTabWidget()
 
         # Transcript tab
@@ -417,6 +441,26 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Ready")
         self.statusbar.addWidget(self.status_label)
 
+        self.batch_indicator = QPushButton()
+        self.batch_indicator.setObjectName("batchIndicatorBtn")
+        self.batch_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.batch_indicator.setStyleSheet(
+            "QPushButton#batchIndicatorBtn {"
+            " background-color: rgba(203, 166, 247, 0.18);"
+            " color: #cba6f7;"
+            " font-size: 11px; font-weight: bold;"
+            " border: 1px solid rgba(203, 166, 247, 0.4);"
+            " border-radius: 10px; padding: 2px 10px;"
+            "}"
+            "QPushButton#batchIndicatorBtn:hover {"
+            " background-color: rgba(203, 166, 247, 0.32);"
+            " border-color: #cba6f7;"
+            "}"
+        )
+        self.batch_indicator.clicked.connect(self._show_batch_process_info)
+        self.batch_indicator.hide()
+        self.statusbar.addPermanentWidget(self.batch_indicator)
+
     def _connect_signals(self):
         # Recording controls
         self.recording_controls.record_clicked.connect(self._start_recording)
@@ -439,7 +483,7 @@ class MainWindow(QMainWindow):
         self.recorder.system_level.connect(self.waveform.append_system_audio)
 
         # Transcript
-        self.transcript_viewer.transcribe_requested.connect(self._start_transcription)
+        self.transcript_viewer.transcribe_requested.connect(self._on_viewer_transcribe_requested)
         self.transcript_viewer.cancel_requested.connect(self._cancel_transcription)
         self.transcript_viewer.diarize_toggled.connect(self._on_diarize_toggled)
         self.transcript_viewer.diarize_requested.connect(self._on_diarize_requested)
@@ -481,6 +525,11 @@ class MainWindow(QMainWindow):
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
     def _start_recording(self):
+        self.meeting_banner.hide_and_clear()
+        if hasattr(self, "meeting_toast"):
+            self.meeting_toast.hide_and_clear()
+        if getattr(self, "_pending_meeting_notification", None) == "start":
+            self._pending_meeting_notification = None
         self._silent_capture_warned = False
 
         mic = self.source_selector.get_selected_mic()
@@ -710,6 +759,8 @@ class MainWindow(QMainWindow):
         if settings.get("mode", "off") == "off":
             return
         com_snapshot = self._com_poller.get_snapshot()
+        if hasattr(self, "source_selector") and self.source_selector is not None:
+            self.source_selector.check_device_mismatches(com_snapshot.get("app_devices", {}))
         snapshot = meeting_signals.probe(
             settings, calendar_event=self._current_calendar_event,
             _audio_apps_fn=lambda: com_snapshot["audio_apps"],
@@ -735,23 +786,34 @@ class MainWindow(QMainWindow):
         if action in ("suggest_start", "start") and self.recorder.state != RecordingState.IDLE:
             # Belt-and-suspenders: never offer or auto-start a recording on
             # top of one already running.
+            self.meeting_banner.hide_and_clear()
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.hide_and_clear()
             return
         if action == "suggest_start":
-            self.meeting_banner.show_start(
-                decision.meeting_name, self._meeting_elapsed(snapshot))
+            self._active_detected_meeting_name = decision.meeting_name
+            elapsed = self._meeting_elapsed(snapshot)
+            self.meeting_banner.show_start(decision.meeting_name, elapsed)
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.show_start(decision.meeting_name, elapsed)
             if hasattr(self, "tray") and self.tray.is_supported():
                 self._pending_meeting_notification = "start"
+                display_name = decision.meeting_name or "A meeting"
                 self.tray.notify_meeting(
                     "Meeting detected",
-                    f"{decision.meeting_name or 'A meeting'} is running — "
+                    f"{display_name} is running — "
                     "click here to record it."
                 )
         elif action == "start":
-            self.status_label.setText("Meeting detected — auto-recording...")
+            self._active_detected_meeting_name = decision.meeting_name
+            display_name = decision.meeting_name or "Meeting"
+            self.status_label.setText(f"{display_name} detected — auto-recording...")
             self._start_recording()
         elif action == "suggest_end":
-            self.meeting_banner.show_end(
-                decision.meeting_name, self.recorder.get_elapsed_time())
+            elapsed = self.recorder.get_elapsed_time()
+            self.meeting_banner.show_end(decision.meeting_name, elapsed)
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.show_end(decision.meeting_name, elapsed)
             if hasattr(self, "tray") and self.tray.is_supported():
                 self._pending_meeting_notification = "end"
                 self.tray.notify_meeting(
@@ -777,6 +839,9 @@ class MainWindow(QMainWindow):
 
     def _on_meeting_start_accepted(self):
         self._meeting_detector.accept_start()
+        self.meeting_banner.hide_and_clear()
+        if hasattr(self, "meeting_toast"):
+            self.meeting_toast.hide_and_clear()
         if self.recorder.state == RecordingState.IDLE:
             self._start_recording()
 
@@ -795,15 +860,23 @@ class MainWindow(QMainWindow):
         self._pending_meeting_notification = None
         if kind == "start":
             self.meeting_banner.hide_and_clear()
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.hide_and_clear()
             self._on_meeting_start_accepted()
         elif kind == "end":
             self._restore_from_tray()
 
     def _on_meeting_start_dismissed(self):
         self._meeting_detector.dismiss_start()
+        self.meeting_banner.hide_and_clear()
+        if hasattr(self, "meeting_toast"):
+            self.meeting_toast.hide_and_clear()
 
     def _on_meeting_end_chosen(self, action):
         self._meeting_detector.choose_end(action)
+        self.meeting_banner.hide_and_clear()
+        if hasattr(self, "meeting_toast"):
+            self.meeting_toast.hide_and_clear()
         if action == "stop":
             self.recorder.stop_recording()
         elif action == "pause":
@@ -827,6 +900,11 @@ class MainWindow(QMainWindow):
             self.tray.set_state(state, int(self.recorder.get_elapsed_time()))
 
         if state == RecordingState.RECORDING:
+            self.meeting_banner.hide_and_clear()
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.hide_and_clear()
+            if getattr(self, "_pending_meeting_notification", None) == "start":
+                self._pending_meeting_notification = None
             self.source_selector.set_recording_active(True)
             if not self.waveform.isVisible():
                 self.waveform.start()
@@ -835,6 +913,9 @@ class MainWindow(QMainWindow):
             if self._last_meeting_snapshot and self._meeting_detector.state not in (
                     "recording", "paused_by_detection"):
                 self._meeting_detector.note_recording_started(self._last_meeting_snapshot)
+            if not self._active_detected_meeting_name and self._last_meeting_snapshot:
+                self._active_detected_meeting_name = MeetingDetector._name(self._last_meeting_snapshot)
+            self._detected_session_meeting_name = self._active_detected_meeting_name
         elif state == RecordingState.PAUSED:
             self.waveform._paint_timer.stop()
         elif state == RecordingState.IDLE:
@@ -848,6 +929,9 @@ class MainWindow(QMainWindow):
             self.source_selector.mark_capture_failures({})
             self._meeting_detector.note_recording_stopped()
             self.meeting_banner.hide_and_clear()
+            if hasattr(self, "meeting_toast"):
+                self.meeting_toast.hide_and_clear()
+            self._active_detected_meeting_name = None
 
         self._update_activity_visibility()
 
@@ -1079,7 +1163,9 @@ class MainWindow(QMainWindow):
                    "transcribe manually.")
             )
 
-        self._maybe_lookup_calendar(session)
+        detected_name = self._detected_session_meeting_name
+        self._detected_session_meeting_name = None
+        self._maybe_lookup_calendar(session, detected_name=detected_name)
 
     def _maybe_queue_for_batch(self, session):
         """Tag a recording the app isn't going to transcribe itself.
@@ -1154,12 +1240,14 @@ class MainWindow(QMainWindow):
         if self._closing or (self._batch_worker is not None and self._batch_worker.isRunning()):
             return
 
+        import time
         from app.batch.pipeline import BatchSettings
         from app.batch.worker import BatchRunnerWorker
 
         recordings_dir = self.config.get("output", "directory")
         settings = BatchSettings.from_config(self.config, diarize=diarize)
 
+        self._batch_worker_start_time = time.time()
         self._batch_worker = BatchRunnerWorker(
             recordings_dir, settings=settings, limit=limit, parent=self
         )
@@ -1172,6 +1260,7 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText("Starting batch transcription...")
         self._update_activity_visibility()
+        self._poll_batch_processes()
 
     def _launch_detached_batch(self, diarize=None, limit=None):
         """Spawn batch_transcribe.py as a detached background OS process."""
@@ -1182,6 +1271,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(
                 f"Background batch process started (PID {proc.pid})."
             )
+            self._poll_batch_processes()
             QMessageBox.information(
                 self, "Batch Transcription",
                 f"Background batch process launched (PID {proc.pid}).\n\n"
@@ -1194,6 +1284,90 @@ class MainWindow(QMainWindow):
                 self, "Batch Launch Failed",
                 f"Could not launch background batch process: {e}",
             )
+
+    def _poll_batch_processes(self):
+        """Check for active batch processes (detached OS processes or in-app worker)
+        and update the status bar batch indicator."""
+        from app.batch.process_monitor import find_running_batch_processes
+
+        try:
+            self._running_batch_processes = find_running_batch_processes(
+                in_app_worker=self._batch_worker,
+                in_app_start_time=self._batch_worker_start_time,
+            )
+        except Exception as e:
+            logger.debug("Error polling batch processes: %s", e)
+            self._running_batch_processes = []
+
+        is_batch_running = bool(self._running_batch_processes)
+        if hasattr(self, "recordings_list"):
+            self.recordings_list.set_batch_running(is_batch_running)
+
+        if self._running_batch_processes:
+            primary = self._running_batch_processes[0]
+            count = len(self._running_batch_processes)
+            if count == 1:
+                text = f"⚡ Batch Active (PID {primary.pid})"
+                tooltip = (
+                    f"Batch transcription running ({primary.process_type_label}, "
+                    f"PID {primary.pid}, {primary.formatted_duration} elapsed).\n"
+                    "Click to view details or end process."
+                )
+            else:
+                text = f"⚡ Batch Active ({count} jobs)"
+                tooltip = (
+                    f"{count} batch transcription processes running.\n"
+                    "Click to view details or end process."
+                )
+            self.batch_indicator.setText(text)
+            self.batch_indicator.setToolTip(tooltip)
+            self.batch_indicator.show()
+        else:
+            self.batch_indicator.hide()
+
+    def _show_batch_process_info(self):
+        """Show dialog with information about the currently active batch process."""
+        from app.ui.batch_process_info_dialog import BatchProcessInfoDialog
+
+        self._poll_batch_processes()
+        if not self._running_batch_processes:
+            QMessageBox.information(
+                self, "Batch Process", "No batch transcription process is currently active."
+            )
+            return
+
+        dialog = BatchProcessInfoDialog(
+            self._running_batch_processes,
+            in_app_worker=self._batch_worker,
+            parent=self,
+        )
+        dialog.process_terminated.connect(self._on_batch_process_terminated)
+        dialog.exec()
+        self._poll_batch_processes()
+
+    def _on_batch_process_terminated(self, pid):
+        if self._batch_worker is not None and getattr(self._batch_worker, "isRunning", lambda: False)():
+            self._batch_worker = None
+            self._batch_worker_start_time = None
+        self._poll_batch_processes()
+        self.recordings_list.refresh()
+
+    def _open_batch_logs_folder(self):
+        """Open the folder containing batch process logs in Windows Explorer."""
+        from app.batch.logging_setup import open_batch_logs_folder
+        open_batch_logs_folder()
+
+    def _open_batch_log_file(self):
+        """Open the newest batch process log file, or folder if none exists."""
+        from app.batch.logging_setup import open_batch_log, get_latest_log
+        latest = get_latest_log()
+        if latest and latest.exists():
+            open_batch_log(latest)
+        else:
+            QMessageBox.information(
+                self, "Batch Log", "No batch process log file found yet. Opening logs folder."
+            )
+            open_batch_log()
 
     def _on_batch_job_started(self, label, index, total):
         self.status_label.setText(f"Batch [{index}/{total}]: Transcribing {label}...")
@@ -1214,7 +1388,9 @@ class MainWindow(QMainWindow):
     def _on_batch_finished(self, processed, failed, deferred):
         self.recordings_list.refresh()
         self._batch_worker = None
+        self._batch_worker_start_time = None
         self._update_activity_visibility()
+        self._poll_batch_processes()
 
         msg = f"Batch transcription finished: {processed} recording(s) processed."
         if failed:
@@ -1234,8 +1410,29 @@ class MainWindow(QMainWindow):
     def _on_batch_cancelled(self):
         self.recordings_list.refresh()
         self._batch_worker = None
+        self._batch_worker_start_time = None
         self._update_activity_visibility()
+        self._poll_batch_processes()
         self.status_label.setText("Batch transcription cancelled.")
+
+    def _on_viewer_transcribe_requested(self, audio_path):
+        session = self._current_session
+        if session and session.get("directory"):
+            transcript_file = Path(session["directory"]) / "transcript.json"
+            if transcript_file.is_file():
+                name = session.get("name") or Path(session["directory"]).name
+                reply = QMessageBox.question(
+                    self,
+                    "Overwrite Existing Transcription?",
+                    f"The recording '{name}' already has a transcription.\n\n"
+                    "Transcribing it again will overwrite the existing transcript.\n\n"
+                    "Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+        self._start_transcription(audio_path, session=session)
 
     def _start_transcription(self, audio_path, session=None):
         if self._closing:
@@ -1244,6 +1441,7 @@ class MainWindow(QMainWindow):
         # self._current_session, which the user may have switched meanwhile.
         if session is None:
             session = self._current_session
+
         if self._transcription_busy():
             if not any(p[0] == audio_path for p in self._pending_transcriptions):
                 self._pending_transcriptions.append((audio_path, session))
@@ -1634,6 +1832,16 @@ class MainWindow(QMainWindow):
 
         audio_files = metadata.get("audio_files", {})
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
+        if audio_path and not Path(audio_path).exists():
+            session_dir = Path(metadata.get("directory", ""))
+            found_audio = None
+            if session_dir.exists():
+                for pat in ("combined_audio.wav", "combined_audio.mp3", "system_audio.wav", "mic_audio.wav", "*.wav", "*.mp3", "*.m4a"):
+                    matches = list(session_dir.glob(pat))
+                    if matches:
+                        found_audio = str(matches[0])
+                        break
+            audio_path = found_audio
         self.transcript_viewer.set_audio_path(audio_path)
 
         # Load speaker names
@@ -2020,11 +2228,57 @@ class MainWindow(QMainWindow):
         except Exception:
             self.chat_panel.set_provider(None)
 
-    def _maybe_lookup_calendar(self, session):
+    @staticmethod
+    def _is_generic_meeting_name(name):
+        if not name:
+            return True
+        return name.lower().strip() in ("ms-teams", "teams", "zoom", "webex", "microsoft teams")
+
+    def _maybe_tag_detected_meeting(self, session, detected_name):
+        """Tag a recorded session with detected meeting/contact name when no Outlook calendar event exists."""
+        if not session or not detected_name or self._is_generic_meeting_name(detected_name):
+            return
+        session_dir = session.get("directory")
+        if session_dir and (Path(session_dir) / "calendar_event.json").exists():
+            return
+        from datetime import datetime
+        started = session.get("started_at")
+        stopped = session.get("stopped_at")
+        try:
+            started_dt = datetime.fromisoformat(started) if started else datetime.now()
+            stopped_dt = datetime.fromisoformat(stopped) if stopped else datetime.now()
+        except (ValueError, TypeError):
+            started_dt = datetime.now()
+            stopped_dt = datetime.now()
+
+        current_user = get_current_user_name(self.config)
+        attendees = [detected_name]
+        if current_user and current_user.lower() != detected_name.lower():
+            attendees.append(current_user)
+
+        event = {
+            "subject": detected_name,
+            "start": started_dt,
+            "end": stopped_dt,
+            "organizer": current_user or "",
+            "attendees": attendees,
+        }
+        if self._is_current_session(session):
+            event_to_save = self._apply_calendar_event(event)
+            self._maybe_suggest_rename(session, event_to_save)
+            self._export_transcript()
+        else:
+            event_to_save = dict(event)
+            event_to_save["start"] = started_dt.isoformat()
+            event_to_save["end"] = stopped_dt.isoformat()
+            atomic_write_json(Path(session["directory"]) / "calendar_event.json", event_to_save, indent=2)
+
+    def _maybe_lookup_calendar(self, session, detected_name=None):
         """Kick off an off-thread Outlook calendar lookup for this session,
         if the feature is enabled. Best-effort — no-op on any failure,
         never surfaces an error to the user (see outlook_calendar.py)."""
         if not self.config.get("calendar", "enabled"):
+            self._maybe_tag_detected_meeting(session, detected_name)
             return
         if session is None:
             return
@@ -2036,15 +2290,17 @@ class MainWindow(QMainWindow):
         started = session.get("started_at")
         stopped = session.get("stopped_at")
         if not started or not stopped:
+            self._maybe_tag_detected_meeting(session, detected_name)
             return
         from datetime import datetime
         try:
             started_dt = datetime.fromisoformat(started)
             stopped_dt = datetime.fromisoformat(stopped)
         except ValueError:
+            self._maybe_tag_detected_meeting(session, detected_name)
             return
 
-        self._dispatch_calendar_lookup(session, started_dt, stopped_dt)
+        self._dispatch_calendar_lookup(session, started_dt, stopped_dt, detected_name=detected_name)
 
     def _on_rename_started(self):
         """Fetch calendar matches to offer as rename suggestions.
@@ -2075,11 +2331,12 @@ class MainWindow(QMainWindow):
         self._rename_candidate_events = []
 
     def _dispatch_calendar_lookup(self, session, started_dt, stopped_dt, manual=False,
-                                  for_rename=False):
+                                  for_rename=False, detected_name=None):
         worker = CalendarLookupWorker(started_dt, stopped_dt)
         worker.session = session
         worker.manual = manual
         worker.for_rename = for_rename
+        worker.detected_name = detected_name
         worker.finished.connect(self._on_calendar_lookup_finished)
         self._calendar_lookup_workers.append(worker)
         worker.start()
@@ -2094,6 +2351,7 @@ class MainWindow(QMainWindow):
         session = getattr(worker, "session", None) if worker else None
         manual = getattr(worker, "manual", False) if worker else False
         for_rename = getattr(worker, "for_rename", False) if worker else False
+        detected_name = getattr(worker, "detected_name", None) if worker else None
         if worker in self._calendar_lookup_workers:
             self._calendar_lookup_workers.remove(worker)
         if session is None:
@@ -2113,6 +2371,8 @@ class MainWindow(QMainWindow):
             # status — the automatic post-recording lookup fires for every
             # untagged recording and would otherwise clobber transient
             # status text like "Transcribing...".
+            if not manual:
+                self._maybe_tag_detected_meeting(session, detected_name)
             if manual and self._is_current_session(session):
                 self.status_label.setText("No other matching calendar events found.")
             return
@@ -2150,8 +2410,10 @@ class MainWindow(QMainWindow):
         """
         session_dir = Path(self._current_session["directory"])
         event_to_save = dict(event)
-        event_to_save["start"] = event["start"].isoformat()
-        event_to_save["end"] = event["end"].isoformat()
+        start_val = event.get("start")
+        end_val = event.get("end")
+        event_to_save["start"] = start_val.isoformat() if hasattr(start_val, "isoformat") else str(start_val or "")
+        event_to_save["end"] = end_val.isoformat() if hasattr(end_val, "isoformat") else str(end_val or "")
         atomic_write_json(session_dir / "calendar_event.json", event_to_save, indent=2)
         self.recording_header.set_recording(
             self._current_session,
@@ -2390,6 +2652,8 @@ class MainWindow(QMainWindow):
             self._meeting_poll_timer.stop()
         self._com_poller.stop()
         self._activity_widget.close()
+        if hasattr(self, "meeting_toast"):
+            self.meeting_toast.close()
         if hasattr(self, "mic_monitor"):
             self.mic_monitor.stop()
         if hasattr(self, "mic_monitor_2"):
@@ -2449,6 +2713,9 @@ class MainWindow(QMainWindow):
         network code, so after a bounded wait terminate() is the last resort —
         risky in general, but the process is exiting anyway.
         """
+        if hasattr(self, "_batch_monitor_timer") and self._batch_monitor_timer.isActive():
+            self._batch_monitor_timer.stop()
+
         # Finalizing is writing the user's audio to disk. Interrupting it
         # loses the recording outright, so it gets a generous wait of its
         # own instead of joining the terminate-after-5s list below. The

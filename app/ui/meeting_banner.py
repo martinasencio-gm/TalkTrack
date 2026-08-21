@@ -3,8 +3,12 @@
 Mirrors CalendarSuggestionBanner's frame, colours and spacing so the two read as
 the same kind of prompt when they appear in the same column.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QGraphicsDropShadowEffect
+)
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QColor
 
 
 def _minutes_phrase(seconds):
@@ -43,25 +47,35 @@ class MeetingBanner(QWidget):
     def _setup_ui(self):
         self._frame = QFrame(self)
         self._frame.setObjectName("meetingBanner")
-        self._frame.setStyleSheet(
-            "#meetingBanner { background-color: #313244; border-radius: 4px; }"
-        )
+
+        # Subtle drop shadow
+        shadow = QGraphicsDropShadowEffect(self._frame)
+        shadow.setBlurRadius(16)
+        shadow.setColor(QColor(0, 0, 0, 90))
+        shadow.setOffset(0, 4)
+        self._frame.setGraphicsEffect(shadow)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 8)
         outer.addWidget(self._frame)
 
-        self._layout = QVBoxLayout(self._frame)
-        self._layout.setContentsMargins(10, 8, 10, 8)
-        self._layout.setSpacing(6)
+        self._layout = QHBoxLayout(self._frame)
+        self._layout.setContentsMargins(14, 8, 14, 8)
+        self._layout.setSpacing(10)
+
+        self._icon = QLabel("🎙️")
+        self._icon.setObjectName("meetingBannerIcon")
+        self._layout.addWidget(self._icon)
 
         self._text = QLabel()
+        self._text.setObjectName("meetingBannerText")
         self._text.setWordWrap(True)
-        self._text.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        self._layout.addWidget(self._text)
+        self._layout.addWidget(self._text, 1)
 
         self._buttons = QWidget()
         self._button_row = QHBoxLayout(self._buttons)
         self._button_row.setContentsMargins(0, 0, 0, 0)
+        self._button_row.setSpacing(8)
         self._layout.addWidget(self._buttons)
 
     def _clear_buttons(self):
@@ -72,26 +86,39 @@ class MeetingBanner(QWidget):
 
     def _set_buttons(self, specs):
         self._clear_buttons()
-        self._button_row.addStretch()
-        for label, handler in specs:
+        for label, handler, btn_type in specs:
             button = QPushButton(label)
+            if btn_type == "primary":
+                button.setObjectName("bannerRecordBtn")
+            elif btn_type == "pause":
+                button.setObjectName("bannerPauseBtn")
+            else:
+                button.setObjectName("bannerDismissBtn")
             button.clicked.connect(handler)
             self._button_row.addWidget(button)
 
     def show_start(self, meeting_name, elapsed_seconds):
+        self._icon.setText("🎙️")
+        self._frame.setProperty("mode", "start")
+        self._frame.style().unpolish(self._frame)
+        self._frame.style().polish(self._frame)
         self._text.setText(format_start_text(meeting_name, elapsed_seconds))
         self._set_buttons([
-            ("Record", self._on_record),
-            ("Not now", self._on_not_now),
+            ("Record", self._on_record, "primary"),
+            ("Not now", self._on_not_now, "secondary"),
         ])
         self.show()
 
     def show_end(self, meeting_name, recorded_seconds):
+        self._icon.setText("⏹️")
+        self._frame.setProperty("mode", "end")
+        self._frame.style().unpolish(self._frame)
+        self._frame.style().polish(self._frame)
         self._text.setText(format_end_text(meeting_name, recorded_seconds))
         self._set_buttons([
-            ("Stop & save", lambda checked=False: self._on_end("stop")),
-            ("Pause", lambda checked=False: self._on_end("pause")),
-            ("Keep recording", lambda checked=False: self._on_end("keep")),
+            ("Stop & save", lambda checked=False: self._on_end("stop"), "primary"),
+            ("Pause", lambda checked=False: self._on_end("pause"), "pause"),
+            ("Keep recording", lambda checked=False: self._on_end("keep"), "secondary"),
         ])
         self.show()
 

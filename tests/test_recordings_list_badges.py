@@ -60,33 +60,40 @@ class TestRecordingsListBadges(unittest.TestCase):
         row = widget._build_row_widget(metadata)
         return {label.text() for label in row.findChildren(QLabel)}
 
+    def _badge_tooltips(self, widget, metadata):
+        row = widget._build_row_widget(metadata)
+        return {label.toolTip() for label in row.findChildren(QLabel) if label.toolTip()}
+
     def test_shows_both_badges_when_audio_and_transcript_exist(self):
         widget = self._widget()
         metadata = self._make_session("both", with_audio=True, with_transcript=True)
         texts = self._badge_texts(widget, metadata)
-        self.assertIn("Audio", texts)
-        self.assertIn("Transcribed", texts)
+        self.assertIn("\U0001f3b5", texts)
+        self.assertIn("\U0001f4dd", texts)
+        tooltips = self._badge_tooltips(widget, metadata)
+        self.assertIn("Audio recording available", tooltips)
+        self.assertIn("Transcript available", tooltips)
 
     def test_shows_only_audio_badge_when_no_transcript(self):
         widget = self._widget()
         metadata = self._make_session("audio_only", with_audio=True, with_transcript=False)
         texts = self._badge_texts(widget, metadata)
-        self.assertIn("Audio", texts)
-        self.assertNotIn("Transcribed", texts)
+        self.assertIn("\U0001f3b5", texts)
+        self.assertNotIn("\U0001f4dd", texts)
 
     def test_shows_only_transcribed_badge_when_no_audio(self):
         widget = self._widget()
         metadata = self._make_session("transcript_only", with_audio=False, with_transcript=True)
         texts = self._badge_texts(widget, metadata)
-        self.assertNotIn("Audio", texts)
-        self.assertIn("Transcribed", texts)
+        self.assertNotIn("\U0001f3b5", texts)
+        self.assertIn("\U0001f4dd", texts)
 
     def test_shows_neither_badge_when_both_deleted(self):
         widget = self._widget()
         metadata = self._make_session("neither", with_audio=False, with_transcript=False)
         texts = self._badge_texts(widget, metadata)
-        self.assertNotIn("Audio", texts)
-        self.assertNotIn("Transcribed", texts)
+        self.assertNotIn("\U0001f3b5", texts)
+        self.assertNotIn("\U0001f4dd", texts)
 
     def test_stale_audio_files_entry_pointing_at_deleted_file_is_not_a_badge(self):
         # audio_files can list a path whose file is already gone (e.g. between
@@ -103,7 +110,7 @@ class TestRecordingsListBadges(unittest.TestCase):
             "audio_files": {"combined": str(d / "gone.wav")},
         }
         texts = self._badge_texts(widget, metadata)
-        self.assertNotIn("Audio", texts)
+        self.assertNotIn("\U0001f3b5", texts)
 
     def test_transcribed_badge_reflects_transcript_json_only_recording(self):
         """A recording made before transcript.md started shipping alongside
@@ -118,7 +125,7 @@ class TestRecordingsListBadges(unittest.TestCase):
             "started_at": "2026-08-14T10:00:00", "duration": 60, "audio_files": {},
         }
         texts = self._badge_texts(widget, metadata)
-        self.assertIn("Transcribed", texts)
+        self.assertIn("\U0001f4dd", texts)
 
 
 if __name__ == "__main__":

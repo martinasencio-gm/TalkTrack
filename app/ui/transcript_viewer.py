@@ -111,7 +111,6 @@ class TranscriptViewer(QWidget):
             "Much slower — on CPU it often takes longer than the recording.\n"
             "Unchecked, separate mic and system tracks still label You/Remote."
         )
-        self.diarize_cb.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self.diarize_cb.toggled.connect(self.diarize_toggled)
         header.addWidget(self.diarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -144,11 +143,6 @@ class TranscriptViewer(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet(
-            "QProgressBar { border: 1px solid #313244; border-radius: 4px; "
-            "background-color: #181825; }"
-            "QProgressBar::chunk { background-color: #89b4fa; border-radius: 3px; }"
-        )
         self.progress_bar.hide()
         progress_row.addWidget(self.progress_bar)
 
@@ -183,10 +177,6 @@ class TranscriptViewer(QWidget):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setStyleSheet(
-            "QScrollArea { border: 1px solid #313244; border-radius: 6px; "
-            "background-color: #181825; }"
-        )
 
         self._segments_container = QWidget()
         self._segments_container.setStyleSheet("background-color: #181825;")
@@ -202,7 +192,7 @@ class TranscriptViewer(QWidget):
         self._placeholder = QLabel(
             "Transcript will appear here after recording and transcription..."
         )
-        self._placeholder.setStyleSheet("color: #585b70; padding: 20px;")
+        self._placeholder.setObjectName("transcriptPlaceholder")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._segments_layout.insertWidget(0, self._placeholder)
 
@@ -228,7 +218,6 @@ class TranscriptViewer(QWidget):
             "When checked, clicking a segment's play button\n"
             "will continue playing all segments from that point."
         )
-        self.continue_from_cb.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self.continue_from_cb.toggled.connect(self._on_continue_toggled)
         export_row.addWidget(self.continue_from_cb, 0, row_align)
 
@@ -263,9 +252,14 @@ class TranscriptViewer(QWidget):
             self._player.playback_finished.connect(self._on_playback_finished)
 
     def set_audio_path(self, path):
-        self._audio_path = path
-        self.transcribe_btn.setEnabled(path is not None)
+        self._audio_path = str(path) if path else None
+        has_audio = self._audio_path is not None
+        self.transcribe_btn.setEnabled(has_audio)
+        self.play_all_btn.setEnabled(has_audio)
+        self.continue_from_cb.setEnabled(has_audio)
         self._update_diarize_button()
+        for widget in self._segment_widgets:
+            widget.set_has_audio(has_audio)
         if self._player:
             self._player.stop()
             self._player.clear_cache()
@@ -395,6 +389,8 @@ class TranscriptViewer(QWidget):
         # Build segment widgets
         from app.ui.segment_widget import SegmentWidget
 
+        has_audio = self._audio_path is not None
+
         for i, seg in enumerate(transcript.segments):
             color = self._speaker_colors.get(seg.speaker, "#cdd6f4")
             name = self._speaker_names.get(seg.speaker, "")
@@ -404,6 +400,7 @@ class TranscriptViewer(QWidget):
                 segment=seg,
                 speaker_color=color,
                 speaker_name=name,
+                has_audio=has_audio,
                 parent=self._segments_container,
             )
             widget.play_requested.connect(self._on_play_requested)
@@ -428,7 +425,8 @@ class TranscriptViewer(QWidget):
         self.copy_all_btn.setEnabled(True)
         self.export_txt_btn.setEnabled(True)
         self.export_srt_btn.setEnabled(True)
-        self.play_all_btn.setEnabled(self._audio_path is not None)
+        self.play_all_btn.setEnabled(has_audio)
+        self.continue_from_cb.setEnabled(has_audio)
         self._update_diarize_button()
 
     def clear(self):
@@ -453,7 +451,7 @@ class TranscriptViewer(QWidget):
         self._placeholder = QLabel(
             "Transcript will appear here after recording and transcription..."
         )
-        self._placeholder.setStyleSheet("color: #585b70; padding: 20px;")
+        self._placeholder.setObjectName("transcriptPlaceholder")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._segments_layout.addWidget(self._placeholder)
         self._segments_layout.addStretch()

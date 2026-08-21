@@ -39,6 +39,38 @@ def prune_old_logs(directory=None, keep=KEEP_RUNS):
     return removed
 
 
+def get_latest_log(directory=None):
+    """Find the most recent batch run log file, or None if none exist."""
+    directory = Path(directory) if directory else log_dir()
+    try:
+        logs = sorted(directory.glob("batch_*.log"))
+        return logs[-1] if logs else None
+    except OSError:
+        return None
+
+
+def open_batch_logs_folder(directory=None):
+    """Open the batch logs directory in Windows Explorer (creating it if needed)."""
+    import os
+    directory = Path(directory) if directory else log_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(str(directory))
+    return directory
+
+
+def open_batch_log(log_path=None, directory=None):
+    """Open the given or newest batch run log file. Falls back to opening the folder."""
+    import os
+    if log_path is None:
+        log_path = get_latest_log(directory=directory)
+    if log_path and Path(log_path).exists():
+        if sys.platform == "win32":
+            os.startfile(str(log_path))
+        return Path(log_path)
+    return open_batch_logs_folder(directory=directory)
+
+
 def setup_logging(directory=None, now=None, verbose=False):
     """Start a new run log. Returns its path.
 

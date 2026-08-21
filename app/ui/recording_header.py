@@ -114,14 +114,12 @@ class RecordingHeader(QWidget):
         # Bottom row: date, duration, speaker count
         self.info_label = QLabel("")
         self.info_label.setObjectName("recordingInfo")
-        self.info_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         layout.addWidget(self.info_label)
 
         # Calendar event line + remap button
         calendar_row = QHBoxLayout()
         self.calendar_label = QLabel("")
         self.calendar_label.setObjectName("recordingCalendarInfo")
-        self.calendar_label.setStyleSheet("color: #89b4fa; font-size: 12px;")
         self.calendar_label.hide()
         calendar_row.addWidget(self.calendar_label)
 

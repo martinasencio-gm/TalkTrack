@@ -74,6 +74,61 @@ class TestMainWindowBatchLauncher(unittest.TestCase):
             window._shutdown_workers()
             mock_worker.cancel.assert_called_once()
 
+    def test_batch_indicator_updates_on_poll(self):
+        from app.batch.process_monitor import BatchProcessInfo
+        window = self._make_window()
+
+        # No processes -> indicator hidden
+        with patch("app.batch.process_monitor.find_running_batch_processes", return_value=[]):
+            window._poll_batch_processes()
+            self.assertTrue(window.batch_indicator.isHidden())
+
+        # Running process -> indicator visible
+        proc_info = BatchProcessInfo(pid=7777, create_time=1000.0, is_in_app=False)
+        with patch("app.batch.process_monitor.find_running_batch_processes", return_value=[proc_info]):
+            window._poll_batch_processes()
+            self.assertFalse(window.batch_indicator.isHidden())
+            self.assertIn("7777", window.batch_indicator.text())
+
+    def test_show_batch_process_info_opens_dialog(self):
+        from app.batch.process_monitor import BatchProcessInfo
+        window = self._make_window()
+        proc_info = BatchProcessInfo(pid=8888, create_time=1000.0, is_in_app=False)
+
+        with patch("app.batch.process_monitor.find_running_batch_processes", return_value=[proc_info]), \
+             patch("app.ui.batch_process_info_dialog.BatchProcessInfoDialog.exec") as mock_exec:
+            window._show_batch_process_info()
+            mock_exec.assert_called_once()
+
+    def test_batch_btn_hides_when_batch_process_is_running(self):
+        from app.batch.process_monitor import BatchProcessInfo
+        window = self._make_window()
+        # Mock queued recording
+        window.recordings_list._recordings = [{"directory": "test_rec", "batch_pending": True}]
+
+        # When no batch process is running, batch button should be visible (not hidden)
+        with patch("app.batch.process_monitor.find_running_batch_processes", return_value=[]):
+            window._poll_batch_processes()
+            self.assertFalse(window.recordings_list.batch_btn.isHidden())
+            self.assertEqual(window.recordings_list.batch_btn.text(), "Run Batch (1)")
+
+        # When batch process is running, batch button should hide
+        proc_info = BatchProcessInfo(pid=9999, create_time=1000.0, is_in_app=False)
+        with patch("app.batch.process_monitor.find_running_batch_processes", return_value=[proc_info]):
+            window._poll_batch_processes()
+            self.assertTrue(window.recordings_list.batch_btn.isHidden())
+
+    def test_open_batch_logs_actions(self):
+        window = self._make_window()
+
+        with patch("app.batch.logging_setup.open_batch_logs_folder") as mock_open_folder:
+            window._open_batch_logs_folder()
+            mock_open_folder.assert_called_once()
+
+        with patch("app.batch.logging_setup.open_batch_log") as mock_open_log:
+            window._open_batch_log_file()
+            mock_open_log.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

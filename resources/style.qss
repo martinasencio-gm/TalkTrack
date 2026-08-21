@@ -503,6 +503,11 @@ QToolTip {
     font-size: 12px;
 }
 
+#recordingCalendarInfo {
+    color: #89b4fa;
+    font-size: 12px;
+}
+
 #renameButton, #changeCalendarButton {
     padding: 4px 12px;
     font-size: 12px;
@@ -606,10 +611,314 @@ QToolTip {
     font-size: 13pt;
 }
 
-/* Collapsible section title band */
+/* Collapsible section title band & toggle */
 QFrame#collapsibleHeader {
     background-color: #313244;
     border-radius: 4px;
+}
+
+QToolButton#collapsibleToggle {
+    border: none;
+    background: transparent;
+    color: #89b4fa;
+    font-weight: bold;
+    font-family: 'Bahnschrift', 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+    text-align: left;
+    padding: 4px 0;
+}
+
+QToolButton#collapsibleToggle:hover {
+    color: #b4befe;
+}
+
+/* Banners */
+QFrame#calendarBanner {
+    background-color: #313244;
+    border-radius: 6px;
+    border: 1px solid #45475a;
+}
+
+QFrame#meetingBanner {
+    background-color: #242538;
+    border-radius: 6px;
+    border: 1px solid #45475a;
+    border-left: 4px solid #f38ba8;
+}
+
+QFrame#meetingBanner[mode="end"] {
+    border-left: 4px solid #89b4fa;
+}
+
+QLabel#meetingBannerIcon {
+    font-size: 13pt;
+    padding-right: 2px;
+}
+
+QLabel#meetingBannerText {
+    color: #cdd6f4;
+    font-size: 9.5pt;
+    font-weight: 500;
+}
+
+QPushButton#bannerRecordBtn {
+    background-color: #f38ba8;
+    color: #11111b;
+    font-weight: bold;
+    font-size: 9pt;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 14px;
+    min-height: 22px;
+}
+
+QPushButton#bannerRecordBtn:hover {
+    background-color: #eba0ac;
+}
+
+QPushButton#bannerRecordBtn:pressed {
+    background-color: #f2cdcd;
+}
+
+QPushButton#bannerDismissBtn {
+    background-color: #313244;
+    color: #a6adc8;
+    font-size: 9pt;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 5px 12px;
+    min-height: 22px;
+}
+
+QPushButton#bannerDismissBtn:hover {
+    background-color: #45475a;
+    color: #cdd6f4;
+}
+
+QPushButton#bannerPauseBtn {
+    background-color: #f9e2af;
+    color: #11111b;
+    font-weight: bold;
+    font-size: 9pt;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 14px;
+    min-height: 22px;
+}
+
+QPushButton#bannerPauseBtn:hover {
+    background-color: #f5e0dc;
+}
+
+QLabel#bannerTitle {
+    font-weight: bold;
+    color: #89b4fa;
+}
+
+QLabel#bannerText {
+    color: #cdd6f4;
+}
+
+/* Controls state styling */
+QPushButton#testMicButton[testing="true"] {
+    background-color: #a6e3a1;
+    color: #1e1e2e;
+    border: 1px solid #a6e3a1;
+    font-weight: bold;
+}
+
+QPushButton#muteButton[muted="true"] {
+    background-color: #f38ba8;
+    color: #1e1e2e;
+    border: 1px solid #f38ba8;
+    font-weight: bold;
+}
+
+/* Source selector warnings & labels */
+QLabel#groupHeading {
+    color: #7f849c;
+    font-size: 8pt;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding: 6px 0 2px 0;
+}
+
+QLabel#captureWarning {
+    color: #f9e2af;
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+QLabel#conferencingWarning {
+    color: #f9e2af;
+    background-color: #313244;
+    border: 1px solid #f9e2af;
+    border-radius: 4px;
+    padding: 6px;
+    font-size: 9pt;
+}
+
+QFrame#deviceMismatchBanner {
+    background-color: #2a283e;
+    border: 1px solid #f9e2af;
+    border-radius: 4px;
+    padding: 4px 6px;
+    margin: 2px 0;
+}
+
+QLabel#deviceMismatchText {
+    color: #f9e2af;
+    font-size: 8.5pt;
+}
+
+QPushButton#deviceMismatchSwitchBtn {
+    background-color: #f9e2af;
+    color: #11111b;
+    font-size: 8pt;
+    font-weight: bold;
+    border: none;
+    border-radius: 3px;
+    padding: 3px 8px;
+    min-width: 60px;
+}
+
+QPushButton#deviceMismatchSwitchBtn:hover {
+    background-color: #f5c2e7;
+}
+
+QPushButton#deviceMismatchSwitchBtn:pressed {
+    background-color: #fab387;
+}
+
+/* Summary Panel */
+QLabel#summaryStatus {
+    color: #a6adc8;
+    padding: 8px;
+}
+
+QTextEdit#summaryTextEdit {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border: none;
+    padding: 8px;
+    font-size: 13px;
+}
+
+QLineEdit#summaryInstructionInput {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+/* Transcript Search Bar */
+QLabel#transcriptMatchCount {
+    color: #a6adc8;
+    font-size: 11px;
+}
+
+/* Transcript Viewer */
+QLabel#transcriptPlaceholder {
+    color: #585b70;
+    padding: 20px;
+}
+
+/* Recordings List Rows & Badges */
+QLabel#recordingRowName {
+    font-weight: bold;
+    font-size: 12px;
+    color: #cdd6f4;
+}
+
+QLabel#recordingRowDate {
+    color: #a6adc8;
+    font-size: 10px;
+}
+
+QLabel#recordingRowDur {
+    color: #a6adc8;
+    font-size: 10px;
+    padding: 0px 4px;
+}
+
+QLabel#recordingBadgeAudio {
+    color: #89b4fa;
+    font-size: 12px;
+    background-color: transparent;
+    padding: 0px 2px;
+}
+
+QLabel#recordingBadgeWorking {
+    color: #f9e2af;
+    font-size: 12px;
+    font-weight: bold;
+    background-color: transparent;
+    padding: 0px 2px;
+}
+
+QLabel#recordingBadgeTranscribed {
+    color: #a6e3a1;
+    font-size: 12px;
+    background-color: transparent;
+    padding: 0px 2px;
+}
+
+QLabel#recordingBadgeQueued {
+    color: #fab387;
+    font-size: 12px;
+    background-color: transparent;
+    padding: 0px 2px;
+}
+
+QPushButton#batchListBtn {
+    background-color: rgba(250, 179, 135, 0.18);
+    color: #fab387;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 4px 8px;
+    border: 1px solid rgba(250, 179, 135, 0.3);
+}
+
+QPushButton#batchListBtn:hover {
+    background-color: rgba(250, 179, 135, 0.32);
+}
+
+/* Meters Panel */
+QLabel#meterTitle {
+    color: #a6adc8;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+QLabel#meterClipLed {
+    color: #45475a;
+    font-size: 12px;
+}
+
+QLabel#meterClipLed[active="true"] {
+    color: #f38ba8;
+}
+
+QLabel#meterGainLabel {
+    color: #a6adc8;
+    font-size: 11px;
+}
+
+QLabel#meterGainReadout {
+    color: #cdd6f4;
+    font-size: 11px;
+    min-width: 34px;
+}
+
+/* Speaker Name Panel */
+QLabel#speakerIdLabel {
+    color: #a6adc8;
+    font-size: 12px;
+}
+
+QLabel#speakerArrowLabel {
+    color: #585b70;
 }
 
 /* Meters + waveform region: transparent border by default so toggling to
@@ -623,3 +932,4 @@ QFrame#captureRegion {
 QFrame#captureRegion[recording="true"] {
     border: 1px solid #f38ba8;
 }
+

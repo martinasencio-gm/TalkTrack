@@ -57,6 +57,11 @@ def _find_launch_target(app_dir):
     return sys.executable, f'"{app_dir / "main.py"}"'
 
 
+def _ps_quote(val) -> str:
+    """Escape a string/Path for safe embedding in PowerShell single-quoted string literals."""
+    return str(val).replace("'", "''")
+
+
 def shortcut_path():
     """Return the full path where the shortcut would be created."""
     return _start_menu_dir() / SHORTCUT_NAME
@@ -81,7 +86,7 @@ def needs_shortcut(app_dir):
     # Use PowerShell to check the real filesystem
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command",
-         f"Test-Path '{lnk}'"],
+         f"Test-Path '{_ps_quote(lnk)}'"],
         capture_output=True, text=True,
     )
     if result.stdout.strip() != "True":
@@ -123,11 +128,11 @@ def create_shortcut(app_dir):
     # PowerShell script to create the shortcut outside the MS Store sandbox
     ps_script = f"""
 $ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut('{lnk}')
-$sc.TargetPath = '{target_exe}'
-$sc.Arguments = '{arguments}'
-$sc.WorkingDirectory = '{app_dir}'
-$sc.IconLocation = '{icon_path},0'
+$sc = $ws.CreateShortcut('{_ps_quote(lnk)}')
+$sc.TargetPath = '{_ps_quote(target_exe)}'
+$sc.Arguments = '{_ps_quote(arguments)}'
+$sc.WorkingDirectory = '{_ps_quote(app_dir)}'
+$sc.IconLocation = '{_ps_quote(icon_path)},0'
 $sc.Description = 'TalkTrack - Call Recorder, Transcriber and AI Summary'
 $sc.Save()
 """
@@ -152,8 +157,8 @@ def _set_shortcut_app_id_via_powershell(lnk_path, app_id):
     # Use the Windows Shell COM to set the property
     ps_script = f"""
 $shell = New-Object -ComObject Shell.Application
-$dir = $shell.Namespace((Split-Path '{lnk_path}'))
-$lnk = $dir.ParseName((Split-Path '{lnk_path}' -Leaf))
+$dir = $shell.Namespace((Split-Path '{_ps_quote(lnk_path)}'))
+$lnk = $dir.ParseName((Split-Path '{_ps_quote(lnk_path)}' -Leaf))
 # Property System.AppUserModel.ID has column index that varies;
 # set it via the ShellLinkObject approach instead
 Add-Type -TypeDefinition @'
@@ -213,7 +218,7 @@ public class ShortcutHelper {{
     }}
 }}
 '@
-[ShortcutHelper]::SetAppId('{lnk_path}', '{app_id}')
+[ShortcutHelper]::SetAppId('{_ps_quote(lnk_path)}', '{_ps_quote(app_id)}')
 """
 
     result = subprocess.run(
@@ -332,7 +337,7 @@ def _read_shortcut(lnk_path):
 
     ps_script = f"""
 $ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut('{lnk_path}')
+$sc = $ws.CreateShortcut('{_ps_quote(lnk_path)}')
 $sc.TargetPath
 $sc.Arguments
 $sc.IconLocation

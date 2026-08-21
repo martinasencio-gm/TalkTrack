@@ -1,6 +1,10 @@
 """Banner suggesting a calendar-event tag for a finished recording."""
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QGraphicsDropShadowEffect
+)
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 
 
 class CalendarSuggestionBanner(QWidget):
@@ -18,19 +22,24 @@ class CalendarSuggestionBanner(QWidget):
     def _setup_ui(self):
         self._frame = QFrame(self)
         self._frame.setObjectName("calendarBanner")
-        self._frame.setStyleSheet(
-            "#calendarBanner { background-color: #313244; border-radius: 4px; }"
-        )
+
+        # Subtle drop shadow to give depth
+        shadow = QGraphicsDropShadowEffect(self._frame)
+        shadow.setBlurRadius(16)
+        shadow.setColor(QColor(0, 0, 0, 90))
+        shadow.setOffset(0, 4)
+        self._frame.setGraphicsEffect(shadow)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 8)
         outer.addWidget(self._frame)
 
         self._layout = QVBoxLayout(self._frame)
-        self._layout.setContentsMargins(10, 8, 10, 8)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(12, 10, 12, 10)
+        self._layout.setSpacing(6)
 
         self._title_label = QLabel("Calendar match found")
-        self._title_label.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        self._title_label.setObjectName("bannerTitle")
         self._layout.addWidget(self._title_label)
 
         self._rows_container = QWidget()
@@ -65,7 +74,7 @@ class CalendarSuggestionBanner(QWidget):
             if organizer:
                 text += f"  ·  {organizer}"
             label = QLabel(text)
-            label.setStyleSheet("color: #cdd6f4;")
+            label.setObjectName("bannerText")
             row.addWidget(label, 1)
 
             tag_btn = QPushButton("Tag Recording")

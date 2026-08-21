@@ -147,12 +147,13 @@ class SegmentWidget(QWidget):
     speaker_clicked = pyqtSignal(str)      # speaker ID
 
     def __init__(self, index, segment, speaker_color="#cdd6f4",
-                 speaker_name="", parent=None):
+                 speaker_name="", has_audio=True, parent=None):
         super().__init__(parent)
         self._index = index
         self._segment = segment
         self._speaker_color = speaker_color
         self._speaker_name = speaker_name
+        self._has_audio = bool(has_audio)
         self._editing = False
         self._playing = False
         self._history = EditHistory(segment.text)
@@ -171,6 +172,7 @@ class SegmentWidget(QWidget):
         self.play_btn.setIcon(_get_play_icon())
         self._apply_play_style()
         self.play_btn.clicked.connect(self._on_play_clicked)
+        self.play_btn.setVisible(self._has_audio)
         layout.addWidget(self.play_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         # Timestamp
@@ -230,6 +232,13 @@ class SegmentWidget(QWidget):
         else:
             self.speaker_label.setText("")
             self.speaker_label.setFixedWidth(0)
+
+    def set_has_audio(self, has_audio: bool):
+        """Show or hide the play button depending on whether audio is available."""
+        self._has_audio = bool(has_audio)
+        if not self._has_audio and self._playing:
+            self.set_playing(False)
+        self.play_btn.setVisible(self._has_audio)
 
     def _apply_play_style(self):
         self.play_btn.setStyleSheet(

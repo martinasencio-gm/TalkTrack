@@ -261,7 +261,7 @@ class MetersPanel(QWidget):
         mic_header = QHBoxLayout()
         mic_header.setSpacing(4)
         self._mic_clip_led = QLabel("\u25cf")  # filled circle
-        self._mic_clip_led.setStyleSheet("color: #45475a; font-size: 12px;")
+        self._mic_clip_led.setObjectName("meterClipLed")
         self._mic_clip_led.setToolTip("Clip indicator - lights red on clipping")
         mic_header.addWidget(self._mic_clip_led)
         mic_header.addStretch()
@@ -271,7 +271,7 @@ class MetersPanel(QWidget):
         mic_col.addWidget(self._mic_meter, 0, Qt.AlignmentFlag.AlignHCenter)
 
         mic_title = QLabel("MIC")
-        mic_title.setStyleSheet("color: #a6adc8; font-size: 10px; font-weight: bold;")
+        mic_title.setObjectName("meterTitle")
         mic_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mic_col.addWidget(mic_title)
 
@@ -284,7 +284,7 @@ class MetersPanel(QWidget):
         sys_header = QHBoxLayout()
         sys_header.setSpacing(4)
         self._sys_clip_led = QLabel("\u25cf")
-        self._sys_clip_led.setStyleSheet("color: #45475a; font-size: 12px;")
+        self._sys_clip_led.setObjectName("meterClipLed")
         self._sys_clip_led.setToolTip("Clip indicator - lights red on clipping")
         sys_header.addWidget(self._sys_clip_led)
         sys_header.addStretch()
@@ -294,7 +294,7 @@ class MetersPanel(QWidget):
         sys_col.addWidget(self._sys_meter, 0, Qt.AlignmentFlag.AlignHCenter)
 
         sys_title = QLabel("SYS")
-        sys_title.setStyleSheet("color: #a6adc8; font-size: 10px; font-weight: bold;")
+        sys_title.setObjectName("meterTitle")
         sys_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sys_col.addWidget(sys_title)
 
@@ -307,7 +307,7 @@ class MetersPanel(QWidget):
         gain_row = QHBoxLayout()
         gain_row.setSpacing(6)
         gain_label = QLabel("Mic Gain:")
-        gain_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        gain_label.setObjectName("meterGainLabel")
         gain_row.addWidget(gain_label)
 
         self._gain_slider = QSlider(Qt.Orientation.Horizontal)
@@ -323,9 +323,7 @@ class MetersPanel(QWidget):
         gain_row.addWidget(self._gain_slider, 1)
 
         self._gain_readout = QLabel("1.0x")
-        self._gain_readout.setStyleSheet(
-            "color: #cdd6f4; font-size: 11px; min-width: 34px;"
-        )
+        self._gain_readout.setObjectName("meterGainReadout")
         self._gain_readout.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
@@ -371,7 +369,6 @@ class MetersPanel(QWidget):
         self._set_clip_led(self._sys_clip_led, self._sys_meter.is_clipping())
 
     def _set_clip_led(self, label: QLabel, active: bool):
-        if active:
-            label.setStyleSheet("color: #f38ba8; font-size: 12px;")
-        else:
-            label.setStyleSheet("color: #45475a; font-size: 12px;")
+        label.setProperty("active", bool(active))
+        label.style().unpolish(label)
+        label.style().polish(label)

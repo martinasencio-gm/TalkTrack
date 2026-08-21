@@ -53,6 +53,20 @@ class TestStartDetection(unittest.TestCase):
         d.update(snap(0, mic=["Zoom"]), SETTINGS)
         self.assertEqual(d.update(snap(10, mic=["Zoom"]), SETTINGS).meeting_name, "Zoom")
 
+    def test_meeting_name_from_window_title_for_unscheduled_call(self):
+        d = MeetingDetector()
+        d.update(snap(0, mic=["ms-teams"], titles=["Jane Doe | Microsoft Teams, meeting window"]), SETTINGS)
+        decision = d.update(snap(10, mic=["ms-teams"], titles=["Jane Doe | Microsoft Teams, meeting window"]), SETTINGS)
+        self.assertEqual(decision.action, "suggest_start")
+        self.assertEqual(decision.meeting_name, "Jane Doe")
+
+    def test_calendar_takes_precedence_over_window_title(self):
+        d = MeetingDetector()
+        event = {"subject": "Sprint Planning"}
+        d.update(snap(0, mic=["ms-teams"], titles=["Jane Doe | Microsoft Teams"], event=event), SETTINGS)
+        decision = d.update(snap(10, mic=["ms-teams"], titles=["Jane Doe | Microsoft Teams"], event=event), SETTINGS)
+        self.assertEqual(decision.meeting_name, "Sprint Planning")
+
     def test_auto_mode_starts_without_suggesting(self):
         d = MeetingDetector()
         settings = dict(SETTINGS, mode="auto")

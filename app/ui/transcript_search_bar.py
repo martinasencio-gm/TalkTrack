@@ -78,7 +78,7 @@ class TranscriptSearchBar(QWidget):
         layout.addWidget(self.next_btn)
 
         self.match_label = QLabel("")
-        self.match_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self.match_label.setObjectName("transcriptMatchCount")
         layout.addWidget(self.match_label)
 
         self.replace_btn = QPushButton("Replace")
