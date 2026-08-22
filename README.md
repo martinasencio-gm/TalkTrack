@@ -78,7 +78,10 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Play All** — sequential playback of the full transcript with real-time line highlighting and auto-scroll
 - **Export** to TXT, SRT (subtitles), or JSON
 - **Call notes** with timestamp insertion
-- **Recording browser** — browse, replay, and bulk-delete past recordings (multi-select with Ctrl/Shift+click)
+- **Tagging system** — create, manage, rename, recolor, and delete custom tags; assign and unassign tags from recordings at any moment
+- **Auto-tagging & Retag Suggestions** — automatically apply tags from past recordings with matching names, or get prompted to retag if already assigned
+- **Post-recording tag prompt** — optional instant tag prompt banner when a recording finishes
+- **Recording browser** — browse, replay, search/filter by name/date/tag, and bulk-delete past recordings (multi-select with Ctrl/Shift+click)
 - **Hidden devices filter** — hide unwanted audio devices (e.g., Voicemeeter) from dropdowns via Settings
 - **Remembers capture settings** — capture mode and selected apps persist across sessions
 - **Min recording length** — automatically discard recordings shorter than a configurable threshold (Settings > General)
@@ -362,6 +365,8 @@ Access configuration via the gear icon or **Edit > Settings**:
 | **Diarization** | `Enabled`/`Disabled`, min/max speaker counts | `Disabled` |
 | **AI Provider** | `None`, `Claude`, `OpenAI`, `Grok`, `Gemini`, `Mistral`, `Local` | `None` |
 | **Min Recording Length** | Discard recordings shorter than N seconds | `5s` |
+| **Prompt for Tags** | Show quick tagging banner when recording stops | `Enabled` |
+| **Auto-Tag by Name** | Copy tags from previous recordings with same name | `Enabled` |
 | **Silence Auto-Stop** | Stop recording after sustained silence | `Enabled (120s)` |
 | **Hidden Devices** | Filter out unwanted virtual audio devices | `None` |
 

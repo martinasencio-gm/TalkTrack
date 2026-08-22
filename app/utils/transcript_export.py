@@ -103,6 +103,12 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
         for speaker_id, name in speaker_names.items():
             lines.append(f"  {speaker_id}: {_yaml_str(name or '')}")
 
+    tags = metadata.get("tags") or []
+    if tags:
+        lines.append("tags:")
+        for tag in tags:
+            lines.append(f"  - {_yaml_str(str(tag))}")
+
     lines.append("---")
     lines.append("")
 

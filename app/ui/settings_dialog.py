@@ -127,7 +127,23 @@ class SettingsDialog(QDialog):
             "the scheduled batch run instead of leaving it untranscribed.\n"
             "Run batch_transcribe.py from Windows Task Scheduler to process them."
         )
-        recording_form.addRow(self.batch_auto_queue_cb)
+        self.prompt_tags_cb = QCheckBox("Prompt for tags after recording stops")
+        self.prompt_tags_cb.setToolTip(
+            "Show a quick tagging banner when a recording finishes to easily\n"
+            "assign tags on the spot."
+        )
+        recording_form.addRow(self.prompt_tags_cb)
+
+        self.auto_tag_by_name_cb = QCheckBox("Auto-tag recordings matching previous names")
+        self.auto_tag_by_name_cb.setToolTip(
+            "When a recording has the same name as a previous one, automatically\n"
+            "apply its tags (or suggest updating tags if already tagged)."
+        )
+        recording_form.addRow(self.auto_tag_by_name_cb)
+
+        manage_tags_btn = QPushButton("Manage Tags...")
+        manage_tags_btn.clicked.connect(self._open_manage_tags)
+        recording_form.addRow("Tags:", manage_tags_btn)
 
         self.silence_auto_stop_cb = QCheckBox("Auto-stop recording after sustained silence")
         self.silence_auto_stop_cb.setToolTip(
@@ -470,6 +486,8 @@ class SettingsDialog(QDialog):
             self.config.get("meeting_detection", "use_window_title"))
         self.auto_transcribe_cb.setChecked(self.config.get("general", "auto_transcribe"))
         self.batch_auto_queue_cb.setChecked(self.config.get("general", "batch_auto_queue"))
+        self.prompt_tags_cb.setChecked(self.config.get("general", "prompt_tags_after_recording"))
+        self.auto_tag_by_name_cb.setChecked(self.config.get("general", "auto_tag_by_name"))
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
@@ -602,6 +620,8 @@ class SettingsDialog(QDialog):
                         self.use_window_title_cb.isChecked())
         self.config.set("general", "auto_transcribe", self.auto_transcribe_cb.isChecked())
         self.config.set("general", "batch_auto_queue", self.batch_auto_queue_cb.isChecked())
+        self.config.set("general", "prompt_tags_after_recording", self.prompt_tags_cb.isChecked())
+        self.config.set("general", "auto_tag_by_name", self.auto_tag_by_name_cb.isChecked())
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())
@@ -902,4 +922,10 @@ class SettingsDialog(QDialog):
         )
         if directory:
             self.output_dir_edit.setText(_clean_path(directory))
+
+    def _open_manage_tags(self):
+        from app.ui.tag_manager_dialog import TagManagerDialog
+        output_dir = self.config.get("output", "directory")
+        dlg = TagManagerDialog(recordings_dir=output_dir, parent=self)
+        dlg.exec()
 

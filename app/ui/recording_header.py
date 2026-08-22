@@ -68,6 +68,10 @@ def match_event_by_subject(name, events):
     return None
 
 
+from app.ui.tag_chip import TagChip, TagPickerPopup
+from app.utils import tag_manager
+
+
 class RecordingHeader(QWidget):
     """Displays recording info (name, date, duration) with rename capability."""
 
@@ -75,12 +79,15 @@ class RecordingHeader(QWidget):
     rename_started = pyqtSignal()   # user opened the inline editor — cue to
                                     # fetch calendar suggestions for it
     change_calendar_requested = pyqtSignal()  # emitted when user clicks "Change" on the calendar line
+    tags_changed = pyqtSignal(list)           # emitted when tags on current recording change
+    manage_tags_requested = pyqtSignal()      # open tag manager
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._metadata = None
         self._editing = False
         self._suggested_subjects = []
+        self._tag_picker = None
         self._setup_ui()
         self.hide()  # hidden until a recording is loaded
 
@@ -115,6 +122,26 @@ class RecordingHeader(QWidget):
         self.info_label = QLabel("")
         self.info_label.setObjectName("recordingInfo")
         layout.addWidget(self.info_label)
+
+        # Tags row
+        self.tags_row = QHBoxLayout()
+        self.tags_row.setContentsMargins(0, 2, 0, 2)
+        self.tags_row.setSpacing(6)
+
+        self.tags_container = QWidget()
+        self.tags_layout = QHBoxLayout(self.tags_container)
+        self.tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tags_layout.setSpacing(6)
+        self.tags_row.addWidget(self.tags_container)
+
+        self.add_tag_btn = QPushButton("+ Tag")
+        self.add_tag_btn.setObjectName("addTagButton")
+        self.add_tag_btn.setToolTip("Add or manage tags for this recording")
+        self.add_tag_btn.clicked.connect(self._on_add_tag_clicked)
+        self.tags_row.addWidget(self.add_tag_btn)
+
+        self.tags_row.addStretch()
+        layout.addLayout(self.tags_row)
 
         # Calendar event line + remap button
         calendar_row = QHBoxLayout()
@@ -169,6 +196,9 @@ class RecordingHeader(QWidget):
 
         self.info_label.setText("  |  ".join(parts))
 
+        # Rebuild tags
+        self._rebuild_tags()
+
         if calendar_event:
             self.calendar_label.setText(_format_calendar_line(calendar_event))
             self.calendar_label.show()
@@ -177,6 +207,58 @@ class RecordingHeader(QWidget):
             self.calendar_label.clear()
             self.calendar_label.hide()
             self.change_calendar_btn.hide()
+
+    def _rebuild_tags(self):
+        while self.tags_layout.count():
+            item = self.tags_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not self._metadata:
+            return
+
+        assigned_tags = tag_manager.get_recording_tags(self._metadata)
+        for t_name in assigned_tags:
+            color = tag_manager.get_tag_color(t_name)
+            chip = TagChip(t_name, color=color, removable=True)
+            chip.remove_clicked.connect(self._on_remove_tag)
+            self.tags_layout.addWidget(chip)
+
+    def _on_remove_tag(self, tag_name: str):
+        if not self._metadata or not self._metadata.get("directory"):
+            return
+        updated = tag_manager.remove_tag_from_recording(self._metadata["directory"], tag_name)
+        self._metadata["tags"] = updated
+        self._rebuild_tags()
+        self.tags_changed.emit(updated)
+
+    def _on_add_tag_clicked(self):
+        if not self._metadata or not self._metadata.get("directory"):
+            return
+        assigned_tags = tag_manager.get_recording_tags(self._metadata)
+        self._tag_picker = TagPickerPopup(assigned_tags=assigned_tags, parent=self)
+        self._tag_picker.tag_toggled.connect(self._on_tag_toggled)
+        self._tag_picker.manage_tags_requested.connect(self.manage_tags_requested.emit)
+
+        # Position popup below the + Tag button
+        btn_pos = self.add_tag_btn.mapToGlobal(self.add_tag_btn.rect().bottomLeft())
+        self._tag_picker.show_at(btn_pos)
+
+    def _on_tag_toggled(self, tag_name: str, is_assigned: bool):
+        if not self._metadata or not self._metadata.get("directory"):
+            return
+        if is_assigned:
+            updated = tag_manager.add_tag_to_recording(self._metadata["directory"], tag_name)
+        else:
+            updated = tag_manager.remove_tag_from_recording(self._metadata["directory"], tag_name)
+
+        self._metadata["tags"] = updated
+        self._rebuild_tags()
+        self.tags_changed.emit(updated)
+
+    def refresh_tags(self):
+        """External call to refresh tag chips on the current recording."""
+        self._rebuild_tags()
 
     def clear(self):
         """Clear the header, hiding it."""

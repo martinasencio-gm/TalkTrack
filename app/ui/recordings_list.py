@@ -14,10 +14,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QAction, QFontMetrics
+from PyQt6.QtGui import QAction, QFontMetrics, QColor
 
 from app.ui.search_bar import SearchBar
-from app.utils import batch_queue
+from app.utils import batch_queue, tag_manager
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
@@ -309,6 +309,8 @@ class RecordingsList(QWidget):
     transcribe_selected_requested = pyqtSignal(list)  # list[dict] metadata, untranscribed only
     export_selected_requested = pyqtSignal(list)      # list[dict] metadata, transcribed only
     run_batch_requested = pyqtSignal()
+    manage_tags_requested = pyqtSignal()
+    recording_tags_changed = pyqtSignal(str, list)    # directory, tags list
 
     def __init__(self, recordings_dir, parent=None):
         super().__init__(parent)
@@ -562,6 +564,28 @@ class RecordingsList(QWidget):
             )
             meta_row.addWidget(queued_badge, 0)
 
+        # Assigned tags badges
+        tags = tag_manager.get_recording_tags(metadata)
+        if tags:
+            for t_name in tags[:2]:
+                t_color = tag_manager.get_tag_color(t_name)
+                qc = QColor(t_color)
+                tag_badge = QLabel(t_name)
+                tag_badge.setObjectName("recordingRowTag")
+                tag_badge.setToolTip(f"Tag: {t_name}")
+                tag_badge.setStyleSheet(
+                    f"color: {t_color}; "
+                    f"background-color: rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.18); "
+                    f"border: 1px solid rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.45); "
+                    f"border-radius: 3px; padding: 0px 4px; font-size: 8pt; font-weight: 500;"
+                )
+                meta_row.addWidget(tag_badge, 0)
+            if len(tags) > 2:
+                more_tag_badge = QLabel(f"+{len(tags) - 2}")
+                more_tag_badge.setToolTip(", ".join(tags[2:]))
+                more_tag_badge.setStyleSheet("color: #a6adc8; font-size: 8pt; padding: 0px 2px;")
+                meta_row.addWidget(more_tag_badge, 0)
+
         outer.addLayout(meta_row)
         return widget
 
@@ -616,6 +640,9 @@ class RecordingsList(QWidget):
             self._add_batch_queue_actions(
                 menu, [i.data(Qt.ItemDataRole.UserRole) for i in selected_items])
 
+            self._add_tag_actions(
+                menu, [i.data(Qt.ItemDataRole.UserRole) for i in selected_items])
+
             menu.addSeparator()
 
             count = len(selected_items)
@@ -643,6 +670,7 @@ class RecordingsList(QWidget):
             menu.addAction(play_action)
 
             self._add_batch_queue_actions(menu, [metadata])
+            self._add_tag_actions(menu, [metadata])
 
             menu.addSeparator()
 
@@ -651,6 +679,56 @@ class RecordingsList(QWidget):
             menu.addAction(delete_action)
 
         menu.exec(self.list_widget.mapToGlobal(position))
+
+    def _add_tag_actions(self, menu, metadatas):
+        """Add tag assignment submenu."""
+        valid_metas = [m for m in metadatas if m and m.get("directory")]
+        if not valid_metas:
+            return
+
+        tags_menu = menu.addMenu("🏷️ Tags")
+        all_tags = tag_manager.load_all_tags()
+
+        for tag in all_tags:
+            name = tag["name"]
+            all_have = all(name in tag_manager.get_recording_tags(m) for m in valid_metas)
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.setChecked(all_have)
+            action.triggered.connect(
+                lambda checked, n=name, have_all=all_have: self._toggle_tag_on_recordings(valid_metas, n, not have_all)
+            )
+            tags_menu.addAction(action)
+
+        tags_menu.addSeparator()
+
+        new_tag_action = QAction("+ New Tag...", self)
+        new_tag_action.triggered.connect(lambda: self._prompt_new_tag_for_recordings(valid_metas))
+        tags_menu.addAction(new_tag_action)
+
+        manage_tags_action = QAction("Manage Tags...", self)
+        manage_tags_action.triggered.connect(self.manage_tags_requested.emit)
+        tags_menu.addAction(manage_tags_action)
+
+    def _toggle_tag_on_recordings(self, metadatas, tag_name, should_assign):
+        for m in metadatas:
+            d = m.get("directory")
+            if not d:
+                continue
+            if should_assign:
+                updated = tag_manager.add_tag_to_recording(d, tag_name)
+            else:
+                updated = tag_manager.remove_tag_from_recording(d, tag_name)
+            m["tags"] = updated
+            self.recording_tags_changed.emit(d, updated)
+        self.refresh()
+
+    def _prompt_new_tag_for_recordings(self, metadatas):
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New Tag", "Enter tag name:")
+        if ok and name.strip():
+            tag_name = name.strip()
+            self._toggle_tag_on_recordings(metadatas, tag_name, True)
 
     def _add_batch_queue_actions(self, menu, metadatas):
         """Queue / unqueue entries for the scheduled batch transcription run.
@@ -880,7 +958,8 @@ class RecordingsList(QWidget):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             metadata = item.data(Qt.ItemDataRole.UserRole) or {}
-            haystack = f"{metadata.get('name', '')} {metadata.get('started_at', '')}".lower()
+            tags_str = " ".join(tag_manager.get_recording_tags(metadata))
+            haystack = f"{metadata.get('name', '')} {metadata.get('started_at', '')} {tags_str}".lower()
             match = query in haystack
             item.setHidden(not match)
             visible_count += match

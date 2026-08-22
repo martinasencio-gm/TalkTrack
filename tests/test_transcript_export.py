@@ -60,6 +60,14 @@ class TestBuildExportMarkdown(unittest.TestCase):
         self.assertLess(md.index("language:"), md.index("model_size:"))
         self.assertLess(md.index("model_size:"), md.index("source_directory:"))
 
+    def test_frontmatter_includes_tags(self):
+        meta = self._metadata()
+        meta["tags"] = ["Sprint Planning", "Backend"]
+        md = build_export_markdown(
+            meta, self._transcript(), {}, None, "", None, None
+        )
+        self.assertIn("tags:\n  - \"Sprint Planning\"\n  - \"Backend\"", md)
+
     def test_provenance_lines_omitted_when_absent(self):
         transcript = {"segments": [], "duration": 1834}
         md = build_export_markdown(

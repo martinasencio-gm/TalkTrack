@@ -933,3 +933,26 @@ QFrame#captureRegion[recording="true"] {
     border: 1px solid #f38ba8;
 }
 
+/* Tagging System */
+QPushButton#addTagButton {
+    background-color: #313244;
+    color: #89b4fa;
+    border: 1px dashed #89b4fa;
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+    min-height: 18px;
+}
+
+QPushButton#addTagButton:hover {
+    background-color: #45475a;
+    border-color: #b4befe;
+    color: #b4befe;
+}
+
+QLabel#recordingRowTag {
+    font-size: 9px;
+    border-radius: 4px;
+}
+
+

@@ -74,6 +74,8 @@ DEFAULT_CONFIG = {
         "minimize_to_tray": False,
         "show_tray_hint": True,
         "start_menu_offer_done": False,
+        "prompt_tags_after_recording": True,
+        "auto_tag_by_name": True,
     },
     "meeting_detection": {
         "mode": "suggest",          # "off" | "suggest" | "auto"

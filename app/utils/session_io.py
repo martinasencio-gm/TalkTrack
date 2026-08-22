@@ -91,6 +91,23 @@ def write_transcript(session, result, speaker_names=None):
     return True
 
 
+def load_tags(session):
+    """The recording's tag list ([] when unset)."""
+    if not session:
+        return []
+    tags = session.get("tags")
+    if isinstance(tags, list):
+        return [t for t in tags if isinstance(t, str)]
+    directory = session.get("directory")
+    if directory:
+        meta = _read_json(Path(directory) / "metadata.json")
+        if isinstance(meta, dict):
+            tags = meta.get("tags")
+            if isinstance(tags, list):
+                return [t for t in tags if isinstance(t, str)]
+    return []
+
+
 def export_session_markdown(session):
     """Best-effort LLM-readable transcript.md for a session.
 
@@ -107,6 +124,10 @@ def export_session_markdown(session):
     if transcript_data is None:
         return  # nothing transcribed yet — nothing useful to export
 
+    meta = _read_json(directory / "metadata.json") or dict(session)
+    if not meta.get("directory"):
+        meta["directory"] = str(directory)
+
     speaker_names = load_speaker_names(session)
     calendar_event, _ = load_calendar_event(session)
     notes = _read_text(directory / "notes.txt") or ""
@@ -114,6 +135,6 @@ def export_session_markdown(session):
     action_items = _read_json(directory / "action_items.json")
 
     transcript_export.export_transcript(
-        session, transcript_data, speaker_names, calendar_event,
+        meta, transcript_data, speaker_names, calendar_event,
         notes, summary_markdown, action_items,
     )

@@ -49,10 +49,11 @@ from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
+from app.ui.tag_prompt_banner import TagPromptBanner
 from app.ui.meeting_banner import MeetingBanner
 from app.ui.meeting_toast import MeetingNotificationToast
 from app.integrations.meeting_detector import MeetingDetector
-from app.utils import meeting_signals
+from app.utils import meeting_signals, tag_manager
 from app.utils.com_session_worker import ComSessionPoller
 from app.ui.calendar_lookup_worker import CalendarLookupWorker
 from app.ui.import_timestamp_dialog import ImportTimestampDialog
@@ -162,6 +163,10 @@ class MainWindow(QMainWindow):
         settings_action = QAction("&Settings...", self)
         settings_action.triggered.connect(self._open_settings)
         file_menu.addAction(settings_action)
+
+        manage_tags_action = QAction("Manage &Tags...", self)
+        manage_tags_action.triggered.connect(self._open_manage_tags_dialog)
+        file_menu.addAction(manage_tags_action)
 
         file_menu.addSeparator()
 
@@ -348,6 +353,11 @@ class MainWindow(QMainWindow):
         self.recording_header = RecordingHeader()
         right_layout.addWidget(self.recording_header)
 
+        self.tag_prompt_banner = TagPromptBanner()
+        self.tag_prompt_banner.tags_updated.connect(self._on_banner_tags_updated)
+        self.tag_prompt_banner.dismissed.connect(self._on_banner_tags_dismissed)
+        right_layout.addWidget(self.tag_prompt_banner)
+
         self.calendar_banner = CalendarSuggestionBanner()
         self.calendar_banner.tag_requested.connect(self._on_calendar_tag_requested)
         self.calendar_banner.dismissed.connect(self._on_calendar_dismissed)
@@ -514,6 +524,10 @@ class MainWindow(QMainWindow):
         self.recording_header.name_changed.connect(self._on_recording_renamed_with_tag)
         self.recording_header.rename_started.connect(self._on_rename_started)
         self.recording_header.change_calendar_requested.connect(self._on_change_calendar_requested)
+        self.recording_header.tags_changed.connect(self._on_header_tags_changed)
+        self.recording_header.manage_tags_requested.connect(self._open_manage_tags_dialog)
+        self.recordings_list.manage_tags_requested.connect(self._open_manage_tags_dialog)
+        self.recordings_list.recording_tags_changed.connect(self._on_recordings_list_tags_changed)
 
         # Transcript editing
         self.transcript_viewer.transcript_changed.connect(self._save_transcript)
@@ -1167,6 +1181,17 @@ class MainWindow(QMainWindow):
         self._detected_session_meeting_name = None
         self._maybe_lookup_calendar(session, detected_name=detected_name)
 
+        # Auto-tag if matched to previous recording by name
+        rec_name = session.get("name") or detected_name
+        if rec_name:
+            self._maybe_autotag_recording(session, rec_name)
+
+        # Prompt for tagging if enabled
+        if self.config.get("general", "prompt_tags_after_recording"):
+            self.tag_prompt_banner.show_prompt(session)
+        else:
+            self.tag_prompt_banner.hide_and_clear()
+
     def _maybe_queue_for_batch(self, session):
         """Tag a recording the app isn't going to transcribe itself.
 
@@ -1817,6 +1842,7 @@ class MainWindow(QMainWindow):
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
+        self.tag_prompt_banner.hide_and_clear()
         # Suggestions belong to the recording they were looked up for; a
         # leftover one must not tag the recording being opened now.
         self._rename_candidate_events = []
@@ -2011,6 +2037,65 @@ class MainWindow(QMainWindow):
         )
 
         self.recordings_list.refresh()
+
+        # Check for auto-tagging or retag suggestion based on matching previous names
+        self._maybe_autotag_recording(self._current_session, new_name)
+
+    def _maybe_autotag_recording(self, session, name):
+        """Auto-tag recording if another recording with the same name has tags.
+
+        If the recording has no tags: automatically copies the matching tags.
+        If the recording already has tags and they differ from the matching tags:
+        prompts the user suggesting to retag/update tags to match.
+        """
+        if not session or not name:
+            return
+        if not self.config.get("general", "auto_tag_by_name"):
+            return
+
+        session_dir = session.get("directory")
+        if not session_dir:
+            return
+
+        recordings_dir = self.config.get("output", "directory")
+        matching_tags = tag_manager.find_tags_for_recording_name(
+            name, recordings_dir, exclude_dir=session_dir
+        )
+        if not matching_tags:
+            return
+
+        current_tags = tag_manager.get_recording_tags(session)
+
+        if not current_tags:
+            # Auto-apply tags
+            updated = tag_manager.set_recording_tags(session_dir, matching_tags)
+            session["tags"] = updated
+            self.recording_header.refresh_tags()
+            self.recordings_list.refresh()
+            self.status_label.setText(
+                f"Auto-tagged as '{', '.join(matching_tags)}' (matched previous '{name}')."
+            )
+        elif set(current_tags) != set(matching_tags):
+            # Already tagged, but differs: suggest retagging
+            matching_str = ", ".join(matching_tags)
+            current_str = ", ".join(current_tags)
+            reply = QMessageBox.question(
+                self,
+                "Update Tags to Match?",
+                f"Previous recordings named \"{name}\" are tagged with:\n  [{matching_str}]\n\n"
+                f"This recording currently has tags:\n  [{current_str}]\n\n"
+                f"Would you like to update this recording's tags to match?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                updated = tag_manager.set_recording_tags(session_dir, matching_tags)
+                session["tags"] = updated
+                self.recording_header.refresh_tags()
+                self.recordings_list.refresh()
+                self.status_label.setText(
+                    f"Tags updated to '{matching_str}'."
+                )
 
     def _on_error(self, error_msg):
         self.status_label.setText(f"Error: {error_msg}")
@@ -2473,6 +2558,38 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Looking up calendar events...")
         self._calendar_banner_session = session
         self._dispatch_calendar_lookup(session, started_dt, stopped_dt, manual=True)
+
+    def _on_header_tags_changed(self, tags):
+        if self._current_session:
+            self._current_session["tags"] = tags
+        self.recordings_list.refresh()
+
+    def _on_banner_tags_updated(self, tags):
+        if self._current_session:
+            self._current_session["tags"] = tags
+            self.recording_header.refresh_tags()
+        self.recordings_list.refresh()
+
+    def _on_banner_tags_dismissed(self):
+        pass
+
+    def _on_recordings_list_tags_changed(self, directory, tags):
+        if self._current_session and self._current_session.get("directory") == directory:
+            self._current_session["tags"] = tags
+            self.recording_header.refresh_tags()
+
+    def _open_manage_tags_dialog(self):
+        from app.ui.tag_manager_dialog import TagManagerDialog
+        recordings_dir = self.config.get("output", "directory")
+        dlg = TagManagerDialog(recordings_dir=recordings_dir, parent=self)
+        dlg.tags_changed.connect(self._on_global_tags_changed)
+        dlg.exec()
+
+    def _on_global_tags_changed(self):
+        if self._current_session and self._current_session.get("directory"):
+            self._current_session["tags"] = tag_manager.get_recording_tags(self._current_session["directory"])
+            self.recording_header.refresh_tags()
+        self.recordings_list.refresh()
 
     def _maybe_auto_summarize(self):
         if not self.config.get("general", "auto_transcribe"):
