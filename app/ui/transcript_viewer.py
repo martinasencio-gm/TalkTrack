@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QApplication, QToolTip,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QShortcut, QKeySequence
+from PyQt6.QtGui import QShortcut, QKeySequence, QIcon
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 from app.ui.transcript_search_bar import TranscriptSearchBar
@@ -467,7 +467,12 @@ class TranscriptViewer(QWidget):
         layout = QVBoxLayout(placeholder)
         layout.setContentsMargins(22, 0, 22, 0)
         layout.setSpacing(14)
-        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        # Vertical centering via addStretch() (not layout.setAlignment()) so
+        # QVBoxLayout still computes each child's real heightForWidth — setting
+        # alignment on the layout itself switches it to sizeHint-only packing,
+        # which under-allocates height to the word-wrapped subtitle below and
+        # lets the button after it clip/overlap the wrapped text.
+        layout.addStretch(1)
 
         icon = QLabel()
         icon.setPixmap(colored_pixmap("waveform", _EMPTY_ICON_COLOR, _EMPTY_ICON_SIZE))
@@ -483,14 +488,16 @@ class TranscriptViewer(QWidget):
             "transcribe it when you stop."
         )
         subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(440)
-        subtitle.setStyleSheet("font-size: 14px; color: #6c7086; line-height: 1.6;")
+        subtitle.setFixedWidth(440)
+        subtitle.setStyleSheet("font-size: 14px; color: #6c7086;")
         layout.addWidget(subtitle)
 
         open_last_btn = QPushButton("Open the last one")
+        open_last_btn.setIcon(QIcon(colored_pixmap("clock-counter-clockwise", "#9184d9", 16)))
         open_last_btn.setObjectName("primaryAction")
         open_last_btn.clicked.connect(self.open_last_requested.emit)
         layout.addWidget(open_last_btn)
+        layout.addStretch(1)
 
         return placeholder
 

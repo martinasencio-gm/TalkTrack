@@ -15,6 +15,21 @@ logger = logging.getLogger(__name__)
 _REC_MARK_ICON_SIZE = 18
 _REC_MARK_BADGE_SIZE = 48
 
+_CAPTURE_ICON_COLORS = {"ready": "#75798c", "warning": "#f9e2af", "blocked": "#f38ba8"}
+
+
+class _ClickableFrame(QFrame):
+    """A QFrame that emits `clicked` on left-click — used for the
+    "CAPTURING" sources block, which the mock shows as a single clickable
+    card (not a QPushButton) so it can hold a two-line icon+text layout."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
 
 class RecordingControls(QWidget):
     """
@@ -56,28 +71,85 @@ class RecordingControls(QWidget):
             "QFrame#captureBarReady { border-bottom: 1px solid #292b31; }"
         )
         ready_layout = QHBoxLayout(self.ready_widget)
-        ready_layout.setContentsMargins(16, 0, 16, 0)
+        ready_layout.setContentsMargins(17, 0, 17, 0)
 
         self.preflight = PreflightWidget()
-        ready_layout.addWidget(self.preflight, stretch=1)
+        ready_layout.addWidget(self.preflight)
 
-        self.sources_btn = QPushButton("Sources")
-        self.sources_btn.clicked.connect(self.sources_clicked.emit)
+        # Divider between the verdict and the "what's being captured" block.
+        preflight_divider = QFrame()
+        preflight_divider.setFrameShape(QFrame.Shape.VLine)
+        preflight_divider.setFixedHeight(46)
+        preflight_divider.setStyleSheet("background-color: #292b31; max-width: 1px;")
+        ready_layout.addWidget(preflight_divider)
+
+        # "CAPTURING" sources block — mic + call source at a glance,
+        # clickable to open the sources dialog. Replaces the old bare
+        # "Sources" button per the capture-bar design spec.
+        self.capturing_block = _ClickableFrame()
+        self.capturing_block.setObjectName("capturingBlock")
+        self.capturing_block.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.capturing_block.setStyleSheet(
+            "QFrame#capturingBlock {"
+            " border: 1px solid #292b31; border-radius: 8px;"
+            "}"
+            "QFrame#capturingBlock:hover {"
+            " background-color: rgba(233,233,237,0.05);"
+            "}"
+        )
+        cb_layout = QHBoxLayout(self.capturing_block)
+        cb_layout.setContentsMargins(13, 7, 13, 7)
+        cb_layout.setSpacing(12)
+
+        cb_text_layout = QVBoxLayout()
+        cb_text_layout.setSpacing(3)
+        cb_kicker = QLabel("CAPTURING")
+        cb_kicker.setObjectName("sectionHeader")
+        cb_kicker.setStyleSheet("color: #75798c;")
+        cb_text_layout.addWidget(cb_kicker)
+
+        cb_row = QHBoxLayout()
+        cb_row.setSpacing(8)
+        self.capturing_mic_icon = QLabel()
+        self.capturing_mic_name = QLabel("")
+        self.capturing_mic_name.setStyleSheet("font-size: 13px; color: #cfd3e5;")
+        cb_plus = QLabel("+")
+        cb_plus.setStyleSheet("color: #4d5063; font-size: 12px;")
+        self.capturing_call_icon = QLabel()
+        self.capturing_call_name = QLabel("")
+        self.capturing_call_name.setStyleSheet("font-size: 13px; color: #cfd3e5;")
+        cb_row.addWidget(self.capturing_mic_icon)
+        cb_row.addWidget(self.capturing_mic_name)
+        cb_row.addWidget(cb_plus)
+        cb_row.addWidget(self.capturing_call_icon)
+        cb_row.addWidget(self.capturing_call_name)
+        cb_text_layout.addLayout(cb_row)
+
+        cb_layout.addLayout(cb_text_layout)
+        cb_caret = QLabel()
+        cb_caret.setPixmap(colored_pixmap("caret-down", "#75798c", 12))
+        cb_layout.addWidget(cb_caret)
+
+        self.capturing_block.clicked.connect(self.sources_clicked.emit)
+        ready_layout.addWidget(self.capturing_block)
+        self.set_capturing("No microphone", "No source")
+
+        ready_layout.addStretch(1)
 
         self.record_btn = QPushButton("Record")
-        self.record_btn.setObjectName("primaryAction")
-        self._set_button_icon(self.record_btn, "record-fill", "#9184d9")
+        self.record_btn.setObjectName("recordAction")
+        self.record_btn.setStyleSheet("font-size: 15px; padding: 10px 18px;")
+        self._set_button_icon(self.record_btn, "record", "#f38ba8")
         self.record_btn.clicked.connect(self.record_clicked.emit)
 
-        ready_layout.addWidget(self.sources_btn)
         ready_layout.addWidget(self.record_btn)
 
         # 2) Recording Variant (also covers Paused)
         self.rec_widget = QFrame()
         self.rec_widget.setObjectName("captureBarActive")
         rec_layout = QHBoxLayout(self.rec_widget)
-        rec_layout.setContentsMargins(20, 0, 16, 0)
-        rec_layout.setSpacing(18)
+        rec_layout.setContentsMargins(22, 0, 17, 0)
+        rec_layout.setSpacing(17)
 
         self.rec_mark = QLabel()
         self.rec_mark.setFixedSize(_REC_MARK_BADGE_SIZE, _REC_MARK_BADGE_SIZE)
@@ -95,8 +167,23 @@ class RecordingControls(QWidget):
 
         rec_layout.addLayout(timer_layout)
 
+        rec_divider = QFrame()
+        rec_divider.setFrameShape(QFrame.Shape.VLine)
+        rec_divider.setStyleSheet("border-left: 1px solid #292b31; max-height: 40px;")
+        rec_layout.addWidget(rec_divider)
+
         self.live_meters = LevelMeter()
         rec_layout.addWidget(self.live_meters, stretch=1)
+
+        source_layout = QVBoxLayout()
+        source_layout.setSpacing(1)
+        self.source_line = QLabel("")
+        self.source_line.setStyleSheet("font-size: 12px; color: #cfd3e5;")
+        self.health_line = QLabel("")
+        self.health_line.setStyleSheet("font-size: 11.5px; color: #75798c;")
+        source_layout.addWidget(self.source_line)
+        source_layout.addWidget(self.health_line)
+        rec_layout.addLayout(source_layout)
 
         self.mute_btn = QPushButton("Mute mic")
         self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
@@ -128,31 +215,36 @@ class RecordingControls(QWidget):
         self.transcribing_strip.setStyleSheet(
             "QFrame#captureBarTranscribing {"
             " background-color: rgba(145,132,217,0.07);"
-            " border-bottom: 1px solid rgba(145,132,217,0.30);"
+            " border-bottom: 1px solid #423a6a;"
             "}"
         )
         ts_layout = QHBoxLayout(self.transcribing_strip)
-        ts_layout.setContentsMargins(20, 6, 16, 6)
-        ts_layout.setSpacing(10)
+        ts_layout.setContentsMargins(22, 6, 17, 6)
+        ts_layout.setSpacing(11)
 
         self.transcribing_icon = QLabel()
         self.transcribing_icon.setPixmap(colored_pixmap("waveform", "#9184d9", 15))
         ts_layout.addWidget(self.transcribing_icon)
 
         self.transcribing_label = QLabel("Transcribing…")
-        self.transcribing_label.setStyleSheet("font-size: 12.5px; color: #b8b3d9;")
+        self.transcribing_label.setStyleSheet("font-size: 12.5px; color: #d2cefd;")
         ts_layout.addWidget(self.transcribing_label)
 
         self.transcribing_bar = QProgressBar()
         self.transcribing_bar.setTextVisible(False)
+        self.transcribing_bar.setFixedSize(220, 4)
         self.transcribing_bar.setRange(0, 100)
-        ts_layout.addWidget(self.transcribing_bar, stretch=1)
+        ts_layout.addWidget(self.transcribing_bar)
 
         self.transcribing_percent = QLabel("")
         self.transcribing_percent.setStyleSheet(
             "font-size: 11.5px; color: #9397ab; font-family: Consolas, monospace;"
         )
-        ts_layout.addWidget(self.transcribing_percent)
+        ts_layout.addWidget(self.transcribing_percent, stretch=1)
+
+        self.transcribing_queued_label = QLabel("")
+        self.transcribing_queued_label.setStyleSheet("font-size: 11.5px; color: #75798c;")
+        ts_layout.addWidget(self.transcribing_queued_label)
 
         self.transcribing_cancel_btn = QPushButton("Cancel")
         self.transcribing_cancel_btn.setStyleSheet("padding: 3px 10px; font-size: 11.5px;")
@@ -192,20 +284,61 @@ class RecordingControls(QWidget):
             self.pause_btn.setEnabled(False)
             self.mute_btn.setEnabled(False)
 
-    def set_transcribing(self, active, percent=None):
+    def set_transcribing(self, active, percent=None, name=None, elapsed_seconds=None, queued=0):
         """Show/update the slim transcribing strip below the capture bar,
         mirroring CompactStrip's "transcribing" state so both surfaces
-        agree about background work happening between recordings."""
+        agree about background work happening between recordings.
+
+        `name` and `elapsed_seconds` surface the job's identity and pace —
+        per the design spec this strip is where that information belongs,
+        rather than buried in one transcript tab (see
+        transcript_viewer._format_progress_text, which computes the same
+        elapsed/remaining shape for the tab-local status label)."""
         self.transcribing_strip.setVisible(active)
         if not active:
             return
+        self.transcribing_label.setText(
+            f"Transcribing <b>{name}</b>" if name else "Transcribing…"
+        )
         if percent is None:
             self.transcribing_bar.setRange(0, 0)  # indeterminate
             self.transcribing_percent.setText("")
         else:
             self.transcribing_bar.setRange(0, 100)
             self.transcribing_bar.setValue(int(percent))
-            self.transcribing_percent.setText(f"{int(percent)}%")
+            if elapsed_seconds is not None:
+                em, es = divmod(int(elapsed_seconds), 60)
+                pct = int(percent)
+                text = f"{pct}% · {em:02d}:{es:02d} elapsed"
+                if 0 < pct < 100:
+                    remaining = elapsed_seconds * (100 - pct) / pct
+                    rm, rs = divmod(int(remaining), 60)
+                    text += f" · ~{rm:02d}:{rs:02d} left"
+                self.transcribing_percent.setText(text)
+            else:
+                self.transcribing_percent.setText(f"{int(percent)}%")
+        self.transcribing_queued_label.setText(
+            f"{queued} more queued" if queued else ""
+        )
+
+    def set_capturing(self, mic_name, call_name, mic_state="ready", call_state="ready"):
+        """Update the "CAPTURING" sources block next to the pre-flight
+        verdict. `mic_state`/`call_state` are preflight_status severities
+        ("ready"/"warning"/"blocked") — only that side's icon tints to flag
+        the problem, the name text itself stays neutral (matches the mock:
+        the icon carries the warning, not the whole line)."""
+        mic_color = _CAPTURE_ICON_COLORS.get(mic_state, _CAPTURE_ICON_COLORS["ready"])
+        call_color = _CAPTURE_ICON_COLORS.get(call_state, _CAPTURE_ICON_COLORS["ready"])
+        self.capturing_mic_icon.setPixmap(colored_pixmap("microphone", mic_color, 14))
+        self.capturing_mic_name.setText(mic_name)
+        self.capturing_call_icon.setPixmap(colored_pixmap("speaker-high", call_color, 14))
+        self.capturing_call_name.setText(call_name)
+
+    def set_source_summary(self, source_text, health_text=""):
+        """Two-line source/health block next to the level meters — what's
+        being captured and whether it's actually coming through."""
+        self.source_line.setText(source_text)
+        self.health_line.setText(health_text)
 
     def update_time(self, seconds):
         h = int(seconds // 3600)
@@ -239,7 +372,8 @@ class RecordingControls(QWidget):
     def _card_style(self, border_color, tint):
         return (
             f"QFrame#captureBarActive {{"
-            f" background-color: {tint};"
+            f" background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            f" stop:0 {tint}, stop:1 transparent);"
             f" border-bottom: 1px solid {border_color};"
             f"}}"
         )

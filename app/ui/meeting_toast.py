@@ -5,13 +5,14 @@ and [Dismiss] buttons so the user can act immediately without needing to open
 the main window.
 """
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QPushButton, QVBoxLayout, QWidget
 )
 
 from app.ui.meeting_banner import format_start_text, format_end_text
+from app.utils.icons import colored_pixmap
 
 
 class MeetingNotificationToast(QWidget):
@@ -132,15 +133,16 @@ class MeetingNotificationToast(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
 
-        self._icon_label = QLabel("🎙️")
-        self._icon_label.setStyleSheet("font-size: 12pt;")
+        self._icon_label = QLabel()
+        self._icon_label.setPixmap(colored_pixmap("phone-incoming", "#9184d9", 16))
         header.addWidget(self._icon_label)
 
         self._title_label = QLabel("Meeting Detected")
         self._title_label.setObjectName("toastTitle")
         header.addWidget(self._title_label, 1)
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton()
+        close_btn.setIcon(QIcon(colored_pixmap("x", "#9397ab", 12)))
         close_btn.setObjectName("toastCloseBtn")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(self._on_dismiss)
@@ -176,7 +178,7 @@ class MeetingNotificationToast(QWidget):
         self._frame.style().unpolish(self._frame)
         self._frame.style().polish(self._frame)
 
-        self._icon_label.setText("🎙️")
+        self._icon_label.setPixmap(colored_pixmap("phone-incoming", "#9184d9", 16))
         display_name = meeting_name or "A meeting"
         self._title_label.setText(display_name)
         self._body_label.setText(format_start_text(meeting_name, elapsed_seconds))
@@ -206,7 +208,7 @@ class MeetingNotificationToast(QWidget):
         self._frame.style().unpolish(self._frame)
         self._frame.style().polish(self._frame)
 
-        self._icon_label.setText("⏹️")
+        self._icon_label.setPixmap(colored_pixmap("stop", "#f9e2af", 16))
         display_name = meeting_name or "The meeting"
         self._title_label.setText("Meeting Ended")
         self._body_label.setText(format_end_text(meeting_name, recorded_seconds))

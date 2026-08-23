@@ -1,3 +1,4 @@
+import ctypes
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QAction, QFontMetrics, QColor
+from PyQt6.QtGui import QAction, QFontMetrics, QColor, QIcon
 
 from app.ui.search_bar import SearchBar
 from app.utils import batch_queue, tag_manager
@@ -167,6 +168,24 @@ class _SearchWorker(QThread):
         self.results_ready.emit(results)
 
 
+_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
+_INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+
+
+def _is_cloud_placeholder(path):
+    """True if `path` is a OneDrive Files On-Demand placeholder not yet
+    hydrated to local disk (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS). Opening
+    such a file blocks on a synchronous cloud fetch with no timeout - a
+    crash-orphaned recording under a OneDrive-synced output directory can
+    leave one behind, and reading it here runs on the UI thread during
+    MainWindow construction (observed: an 8-minute startup hang on one
+    un-hydrated file)."""
+    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+    if attrs == _INVALID_FILE_ATTRIBUTES:
+        return False
+    return bool(attrs & _FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+
+
 def salvage_orphaned_recordings(recordings_dir, min_age_seconds=600):
     """Give crash-orphaned recording dirs minimal metadata.
 
@@ -205,13 +224,21 @@ def salvage_orphaned_recordings(recordings_dir, min_age_seconds=600):
             continue
 
         duration = 0.0
-        best_audio = (audio_files.get("combined") or audio_files.get("system")
-                      or audio_files.get("mic"))
-        try:
-            import soundfile as sf
-            duration = float(sf.info(best_audio).duration)
-        except Exception:
-            logger.exception("Could not read duration for %s", best_audio)
+        for _key in ("combined", "system", "mic"):
+            candidate = audio_files.get(_key)
+            if not candidate or _is_cloud_placeholder(candidate):
+                continue
+            try:
+                import soundfile as sf
+                duration = float(sf.info(candidate).duration)
+            except Exception:
+                logger.exception("Could not read duration for %s", candidate)
+            break
+        else:
+            logger.warning(
+                "Skipping duration read for %s — audio not hydrated locally "
+                "(OneDrive cloud-only placeholder)", entry,
+            )
 
         created = datetime.fromtimestamp(mtime)
         metadata = {
@@ -439,7 +466,7 @@ class RecordingsList(QWidget):
         self._empty_label = QLabel("")
         self._empty_label.setWordWrap(True)
         self._empty_label.setStyleSheet(
-            "color: #a6adc8; font-size: 10px; padding: 8px 4px;"
+            "color: #75798c; font-size: 11.5px; padding: 8px 6px;"
         )
         self._empty_label.setVisible(False)
         layout.addWidget(self._empty_label)
@@ -528,18 +555,19 @@ class RecordingsList(QWidget):
         self._apply_filters()
 
     def _build_row_widget(self, metadata):
-        """Build a two-line recording row: bold name over a muted
-        "date · duration" line, with a Transcribed pill.
+        """Build a two-line recording row: bold name + duration on top,
+        muted date + colored status pill(s) on the bottom.
 
-        Everything is left-aligned, and the only field allowed to shrink is
-        the date, which elides. Nothing is right-aligned against the row's
-        edge sized to a pixel-exact text fit — that arrangement is what
-        produced the clipped "51s"/"Transcribed" text this layout replaces.
+        Everything is left-aligned except duration/pills, and the only
+        fields allowed to shrink are the name and the date, which elide.
+        Nothing is right-aligned against the row's edge sized to a
+        pixel-exact text fit — that arrangement is what produced the
+        clipped "51s"/"Transcribed" text this layout replaces.
         """
         widget = _RecordingRow()
         outer = QVBoxLayout(widget)
-        outer.setContentsMargins(8, 4, 10, 4)
-        outer.setSpacing(2)
+        outer.setContentsMargins(8, 3, 11, 3)
+        outer.setSpacing(3)
 
         name = metadata.get("name", "")
         started = metadata.get("started_at", "")
@@ -549,29 +577,47 @@ class RecordingsList(QWidget):
         except (ValueError, TypeError):
             date_str = started
 
+        # --- Line 1: name (bold, elidable) ... duration (muted, fixed) ---
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
+
         # Ignored horizontal policy keeps an unbounded-length name from
         # contributing its full text width to this row's sizeHint — see
         # _RecordingRow's docstring for why that matters.
         #
-        # Font sizes live in each label's own stylesheet, never in setFont():
-        # the global "QWidget { font-size: 10pt }" rule in style.qss overrides
-        # setFont() once a widget is polished, but a widget's own stylesheet is
-        # more specific and wins. Widths are then left to Qt's own sizeHint,
-        # which measures with the correctly-polished font — hand-measuring with
-        # QFontMetrics here reads the wrong font and produces wrong widths.
+        # Font sizes/colors live in each label's own objectName-scoped QSS
+        # rule, never in setFont()/inline setStyleSheet: the global
+        # "QWidget { font-size: 10pt }" rule in style.qss overrides
+        # setFont() once a widget is polished, but a QSS selector is more
+        # specific and wins. Widths are then left to Qt's own sizeHint,
+        # which measures with the correctly-polished font — hand-measuring
+        # with QFontMetrics here reads the wrong font and produces wrong
+        # widths.
         name_label = QLabel()
         name_label.setObjectName("recordingRowName")
         name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        outer.addWidget(name_label)
+        top_row.addWidget(name_label, 1)
         widget.register_elidable(name_label, name or date_str)
 
+        # Duration is short and bounded ("1h 23m 45s" at worst), so it keeps
+        # its natural width and never elides — it is information the list
+        # exists to show, and it was the field visibly losing its final glyph
+        # ("51s" drawing as "51c") back when it was right-aligned at the edge.
+        dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
+        dur_label.setObjectName("recordingRowDur")
+        top_row.addWidget(dur_label, 0)
+
+        outer.addLayout(top_row)
+
+        # --- Line 2: date (muted, elidable) ... status pill(s) ---
         meta_row = QHBoxLayout()
         meta_row.setContentsMargins(0, 0, 0, 0)
         meta_row.setSpacing(6)
 
         # The date is the only thing here allowed to shrink: it is the
         # longest field and the least precise, so it absorbs all the elision
-        # pressure and keeps it off the duration and the pill.
+        # pressure and keeps it off the pills beside it.
         if name:
             date_label = QLabel()
             date_label.setObjectName("recordingRowDate")
@@ -581,17 +627,6 @@ class RecordingsList(QWidget):
         else:
             meta_row.addStretch(1)
 
-        # Duration is short and bounded ("1h 23m 45s" at worst), so it keeps
-        # its natural width and never elides — it is information the list
-        # exists to show, and it was the field visibly losing its final glyph
-        # ("51s" drawing as "51c") back when it was right-aligned at the edge.
-        # The horizontal padding is the slack: it is baked into this label's
-        # own sizeHint by Qt, using the real polished font, so the box is
-        # always wider than the glyphs regardless of DPI or font substitution.
-        dur_label = QLabel(self._format_duration(metadata.get("duration", 0)))
-        dur_label.setObjectName("recordingRowDur")
-        meta_row.addWidget(dur_label, 0)
-
         # Checked live against disk rather than trusting metadata — a delete
         # can remove audio or transcript without the other, and the row needs
         # to reflect that on the very next refresh() with no cached state.
@@ -599,43 +634,37 @@ class RecordingsList(QWidget):
         has_audio = any(p and Path(p).exists() for p in audio_files.values())
         row_has_transcript = has_transcript(metadata)
 
-        # Generous padding gives each pill its shape and its slack at once.
-        # Neither ever shrinks — all shrink pressure lands on the elidable
-        # date label beside them, which is the only Ignored-policy item here.
+        # Neither pill ever shrinks — all shrink pressure lands on the
+        # elidable date label beside them, which is the only Ignored-policy
+        # item on this line.
         if has_audio:
-            audio_badge = QLabel()
-            audio_badge.setPixmap(colored_pixmap("music-note", "#9397ab", 12))
-            audio_badge.setObjectName("recordingBadgeAudio")
-            audio_badge.setToolTip("Audio recording available")
-            meta_row.addWidget(audio_badge, 0)
+            self._add_status_pill(
+                meta_row, "music-note", "#9397ab", "audio",
+                "Audio recording available", "recordingBadgeAudio",
+            )
 
         # In-progress wins over Transcribed: a re-transcribe of an already
         # transcribed recording would otherwise look like nothing was
         # happening, which is exactly the ambiguity this pill removes.
         if metadata.get("directory") in self._transcribing:
-            working_badge = QLabel()
-            working_badge.setPixmap(colored_pixmap("waveform", "#f9e2af", 12))
-            working_badge.setObjectName("recordingBadgeWorking")
-            working_badge.setToolTip("Transcription in progress...")
-            meta_row.addWidget(working_badge, 0)
+            self._add_status_pill(
+                meta_row, "waveform", "#f9e2af", "transcribing",
+                "Transcription in progress...", "recordingBadgeWorking",
+            )
         elif row_has_transcript:
-            badge = QLabel()
-            badge.setPixmap(colored_pixmap("file-text", "#a6e3a1", 12))
-            badge.setObjectName("recordingBadgeTranscribed")
-            badge.setToolTip("Transcript available")
-            meta_row.addWidget(badge, 0)
+            self._add_status_pill(
+                meta_row, "file-text", "#a6e3a1", "transcribed",
+                "Transcript available", "recordingBadgeTranscribed",
+            )
 
         # Peach rather than the in-progress yellow: waiting for a scheduled
         # run is a different state from being worked on right now, and the
         # two pills can appear on the same row after a re-queue.
         if batch_queue.is_queued(metadata):
-            queued_badge = QLabel()
-            queued_badge.setPixmap(colored_pixmap("hourglass", "#fab387", 12))
-            queued_badge.setObjectName("recordingBadgeQueued")
-            queued_badge.setToolTip(
-                "Queued for batch transcription"
+            self._add_status_pill(
+                meta_row, "hourglass", "#fab387", "queued",
+                "Queued for batch transcription", "recordingBadgeQueued",
             )
-            meta_row.addWidget(queued_badge, 0)
 
         # Assigned tags badges
         tags = tag_manager.get_recording_tags(metadata)
@@ -650,17 +679,44 @@ class RecordingsList(QWidget):
                     f"color: {t_color}; "
                     f"background-color: rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.18); "
                     f"border: 1px solid rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.45); "
-                    f"border-radius: 3px; padding: 0px 4px; font-size: 8pt; font-weight: 500;"
+                    f"border-radius: 3px; padding: 0px 4px; font-size: 11px; font-weight: 500;"
                 )
                 meta_row.addWidget(tag_badge, 0)
             if len(tags) > 2:
                 more_tag_badge = QLabel(f"+{len(tags) - 2}")
                 more_tag_badge.setToolTip(", ".join(tags[2:]))
-                more_tag_badge.setStyleSheet("color: #a6adc8; font-size: 8pt; padding: 0px 2px;")
+                more_tag_badge.setStyleSheet("color: #75798c; font-size: 11px; padding: 0px 2px;")
                 meta_row.addWidget(more_tag_badge, 0)
 
         outer.addLayout(meta_row)
         return widget
+
+    @staticmethod
+    def _add_status_pill(row_layout, icon_name, color, caption, tooltip, object_name):
+        """A small icon + colored caption for a row's status line (audio /
+        transcribed / transcribing / queued).
+
+        The objectName lives on the icon label, not the container, so the
+        badge-presence tests in test_recordings_list_badges.py keep finding
+        it exactly as before.
+        """
+        container = QWidget()
+        h = QHBoxLayout(container)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+
+        icon_label = QLabel()
+        icon_label.setPixmap(colored_pixmap(icon_name, color, 12))
+        icon_label.setObjectName(object_name)
+        icon_label.setToolTip(tooltip)
+        h.addWidget(icon_label)
+
+        text_label = QLabel(caption)
+        text_label.setToolTip(tooltip)
+        text_label.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600;")
+        h.addWidget(text_label)
+
+        row_layout.addWidget(container, 0)
 
     def _on_item_double_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
@@ -754,12 +810,26 @@ class RecordingsList(QWidget):
         menu.exec(self.list_widget.mapToGlobal(position))
 
     def _add_tag_actions(self, menu, metadatas):
-        """Add tag assignment submenu."""
+        """Add tag assignment action(s).
+
+        A single recording opens the "Tag this recording" dialog — it names
+        the recording in its header, so it only makes sense for one at a
+        time. A multi-selection keeps the checkable Tags submenu, which
+        applies/removes a tag across every selected recording at once.
+        """
         valid_metas = [m for m in metadatas if m and m.get("directory")]
         if not valid_metas:
             return
 
-        tags_menu = menu.addMenu("🏷️ Tags")
+        if len(valid_metas) == 1:
+            tag_action = QAction(
+                QIcon(colored_pixmap("bookmark-simple", "#9397ab", 14)), "Tag...", self
+            )
+            tag_action.triggered.connect(lambda: self._open_tag_dialog(valid_metas[0]))
+            menu.addAction(tag_action)
+            return
+
+        tags_menu = menu.addMenu(QIcon(colored_pixmap("bookmark-simple", "#9397ab", 14)), "Tags")
         all_tags = tag_manager.load_all_tags()
 
         for tag in all_tags:
@@ -782,6 +852,17 @@ class RecordingsList(QWidget):
         manage_tags_action = QAction("Manage Tags...", self)
         manage_tags_action.triggered.connect(self.manage_tags_requested.emit)
         tags_menu.addAction(manage_tags_action)
+
+    def _open_tag_dialog(self, metadata):
+        from app.ui.tag_recording_dialog import TagRecordingDialog
+
+        directory = metadata.get("directory")
+        dialog = TagRecordingDialog(metadata, self.recordings_dir, parent=self)
+        dialog.tags_changed.connect(
+            lambda tags, d=directory: self.recording_tags_changed.emit(d, tags)
+        )
+        dialog.exec()
+        self.refresh()
 
     def _toggle_tag_on_recordings(self, metadatas, tag_name, should_assign):
         for m in metadatas:
@@ -1140,6 +1221,15 @@ class RecordingsList(QWidget):
         elif m > 0:
             return f"{m}m {s}s"
         return f"{s}s"
+
+    def transcribe_selected(self):
+        """Emit transcribe_selected_requested for the current list selection's
+        untranscribed recordings. Menu-bar entry point mirroring the
+        multi-select context menu action."""
+        selected_items = self.list_widget.selectedItems()
+        untranscribed = self._selected_untranscribed(selected_items)
+        if untranscribed:
+            self.transcribe_selected_requested.emit(untranscribed)
 
     def _on_import_clicked(self):
         path, _ = QFileDialog.getOpenFileName(

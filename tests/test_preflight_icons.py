@@ -1,7 +1,6 @@
-"""Smoke tests that PreflightWidget's verdict and check icons actually get
-a rendered pixmap. Before this, verdict_icon and the three check icons were
-QLabel()s created and never given a pixmap - the design's 46 vendored SVGs
-never rendered anywhere in the capture bar.
+"""Smoke tests that PreflightWidget's verdict icon actually gets a rendered
+pixmap. Before this, verdict_icon was a QLabel() created and never given a
+pixmap - the design's vendored SVGs never rendered in the capture bar.
 """
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -33,11 +32,6 @@ class TestPreflightIcons(unittest.TestCase):
         pixmap = widget.verdict_icon.pixmap()
         self.assertFalse(pixmap.isNull())
 
-    def test_check_icons_render_on_construction(self):
-        widget = PreflightWidget()
-        for icon in (widget.voice_icon, widget.call_icon, widget.transcription_icon):
-            self.assertFalse(icon.pixmap().isNull())
-
     def test_set_verdict_updates_the_icon_pixmap(self):
         widget = PreflightWidget()
         before = widget.verdict_icon.pixmap().toImage()
@@ -45,16 +39,11 @@ class TestPreflightIcons(unittest.TestCase):
         after = widget.verdict_icon.pixmap().toImage()
         self.assertNotEqual(before, after)
 
-    def test_update_checks_updates_each_check_icon(self):
+    def test_set_verdict_updates_title_and_subtitle_text(self):
         widget = PreflightWidget()
-        before = widget.voice_icon.pixmap().toImage()
-        widget.update_checks(
-            "blocked", "No microphone selected",
-            "ready", "Ready",
-            "ready", "Ready",
-        )
-        after = widget.voice_icon.pixmap().toImage()
-        self.assertNotEqual(before, after)
+        widget.set_verdict("warning", "Mic is very quiet", "Check it before you record")
+        self.assertEqual(widget.verdict_title.text(), "Mic is very quiet")
+        self.assertEqual(widget.verdict_subtitle.text(), "Check it before you record")
 
 
 if __name__ == "__main__":

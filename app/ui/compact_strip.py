@@ -12,16 +12,39 @@ from app.utils.icons import colored_pixmap
 
 logger = logging.getLogger(__name__)
 
+# Meter trough/fill per spec: trough `#23252f`, fill `ok` — distinct from the
+# global QSS QProgressBar rule (accent fill), which is for the transcribing
+# progress bar, not these level meters.
+_METER_STYLE = """
+    QProgressBar { background-color: #23252f; border: none; border-radius: 3px; }
+    QProgressBar::chunk { background-color: #a6e3a1; border-radius: 3px; }
+"""
 
-def resolve_compact_strip_state(recording_state, muted, transcription_busy, done):
-    """Map recorder/mute/transcription state to one of CompactStrip's six
-    states: armed | recording | paused | muted | transcribing | done.
+# Per-state edge color, shared by the full frame's inline setStyleSheet calls
+# in set_state() and the pill frame's stylesheet in _sync_pill_for_state().
+_STATE_EDGE_COLORS = {
+    "idle": "rgba(63,66,77,0.9)",
+    "armed": "rgba(145,132,217,0.30)",
+    "recording": "rgba(243,139,168,0.35)",
+    "paused": "rgba(249,226,175,0.45)",
+    "muted": "rgba(243,139,168,0.35)",
+    "transcribing": "rgba(145,132,217,0.30)",
+    "done": "rgba(166,227,161,0.35)",
+}
+
+
+def resolve_compact_strip_state(recording_state, muted, transcription_busy, done, meeting_active=False):
+    """Map recorder/mute/transcription/meeting state to one of CompactStrip's
+    seven states: idle | armed | recording | paused | muted | transcribing | done.
 
     Mirrors activity_indicator.resolve_activity_state's precedence
     (recording/paused always wins over transcribing) and extends it with
     the mute and idle-terminal states CompactStrip also needs. `done` is a
     caller-tracked flag: True once the current recording's transcription
     has finished and hasn't yet been superseded by a new recording.
+    `meeting_active` distinguishes Idle (nothing detected, plain resting
+    state) from Armed (a call is currently detected) per the design spec —
+    Idle must not look like a degraded or waiting state.
     """
     if recording_state == RecordingState.RECORDING:
         return "muted" if muted else "recording"
@@ -31,7 +54,7 @@ def resolve_compact_strip_state(recording_state, muted, transcription_busy, done
         return "transcribing"
     if done:
         return "done"
-    return "armed"
+    return "armed" if meeting_active else "idle"
 
 
 class CompactStrip(QWidget):
@@ -49,10 +72,12 @@ class CompactStrip(QWidget):
     open_transcript_requested = pyqtSignal()
     position_changed = pyqtSignal(int, int)
     full_ui_requested = pyqtSignal()
-    
+    variant_changed = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.drag_start_pos = None
+        self._variant = "full"
         self._setup_ui()
         
     def _setup_ui(self):
@@ -92,7 +117,7 @@ class CompactStrip(QWidget):
         self.mark_layout = QVBoxLayout()
         self.mark_layout.setSpacing(2)
         self.mark_icon = QLabel()
-        self.mark_icon.setFixedSize(16, 16)
+        self.mark_icon.setFixedSize(14, 14)
         self._mark_opacity_effect = QGraphicsOpacityEffect(self.mark_icon)
         self._mark_opacity_effect.setOpacity(1.0)
         self.mark_icon.setGraphicsEffect(self._mark_opacity_effect)
@@ -106,7 +131,7 @@ class CompactStrip(QWidget):
         self.mark_layout.addWidget(self.mark_icon, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.drag_hint = QLabel()
-        self.drag_hint.setPixmap(colored_pixmap("dots-six-vertical", "#595d6c", 10))
+        self.drag_hint.setPixmap(colored_pixmap("dots-six-vertical", "#3f424d", 10))
         self.drag_hint.setFixedSize(10, 10)
         self.mark_layout.addWidget(self.drag_hint, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -145,6 +170,8 @@ class CompactStrip(QWidget):
         self.mic_icon_label.setFixedSize(11, 11)
         self.mic_meter = QProgressBar()
         self.mic_meter.setFixedSize(78, 6)
+        self.mic_meter.setTextVisible(False)
+        self.mic_meter.setStyleSheet(_METER_STYLE)
         mic_row.addWidget(self.mic_icon_label)
         mic_row.addWidget(self.mic_meter)
 
@@ -155,6 +182,8 @@ class CompactStrip(QWidget):
         self.sys_icon_label.setFixedSize(11, 11)
         self.sys_meter = QProgressBar()
         self.sys_meter.setFixedSize(78, 6)
+        self.sys_meter.setTextVisible(False)
+        self.sys_meter.setStyleSheet(_METER_STYLE)
         sys_row.addWidget(self.sys_icon_label)
         sys_row.addWidget(self.sys_meter)
 
@@ -189,16 +218,22 @@ class CompactStrip(QWidget):
         self.btn_pause.hide()
 
         self.btn_primary = QPushButton("Record")
-        self.btn_primary.setObjectName("primaryAction")
+        self.btn_primary.setObjectName("recordAction")
         self.btn_primary.setIconSize(QSize(12, 12))
         self.btn_primary.setFixedHeight(36)
-        self._set_icon(self.btn_primary, "record-fill", "#9184d9")
+        self._set_icon(self.btn_primary, "record", "#f38ba8")
 
         self.btn_secondary = QPushButton("Cancel")
         self.btn_secondary.setIconSize(QSize(12, 12))
         self.btn_secondary.setFixedHeight(36)
         self.btn_secondary.setStyleSheet("padding: 0 10px;")
         self.btn_secondary.hide()
+
+        self.btn_collapse = QPushButton()
+        self.btn_collapse.setFixedSize(30, 36)
+        self.btn_collapse.setIconSize(QSize(14, 14))
+        self.btn_collapse.setToolTip("Collapse to pill")
+        self._set_icon(self.btn_collapse, "minus", "#75798c")
 
         self.btn_expand = QPushButton()
         self.btn_expand.setFixedSize(30, 36)
@@ -210,21 +245,89 @@ class CompactStrip(QWidget):
         self.actions_layout.addWidget(self.btn_pause)
         self.actions_layout.addWidget(self.btn_secondary)
         self.actions_layout.addWidget(self.btn_primary)
+        self.actions_layout.addWidget(self.btn_collapse)
         self.actions_layout.addWidget(self.btn_expand)
-        
+
         frame_layout.addLayout(self.actions_layout)
-        
+
         self.main_layout.addWidget(self.frame)
-        
+        self._setup_pill_frame()
+        self.main_layout.addWidget(self.pill_frame)
+        self.pill_frame.hide()
+
         # Connect signals
         self.btn_expand.clicked.connect(self.expand_requested.emit)
+        self.btn_collapse.clicked.connect(lambda: self.set_variant("pill"))
         self.btn_primary.clicked.connect(self._on_primary_clicked)
         self.btn_secondary.clicked.connect(self._on_secondary_clicked)
         self.btn_mute.clicked.connect(self.mute_requested.emit)
         self.btn_pause.clicked.connect(self.pause_requested.emit)
-        
+
         # Default state
-        self.current_state = "armed"
+        self.current_state = "idle"
+
+    def _setup_pill_frame(self):
+        """232x44 minimal variant for screen-sharing: pulsing mark, timer,
+        two compact meter bars, pause/stop icon buttons. Drops name/source
+        per the Compact Bar design spec — a second frame swapped in by
+        set_variant() rather than a second widget class, since it shares
+        the mark/timer/meter state that set_state()/update_timer()/
+        update_meters() already drive on the full frame."""
+        self.pill_frame = QFrame(self)
+        self.pill_frame.setObjectName("compactPillFrame")
+        pill_layout = QHBoxLayout(self.pill_frame)
+        pill_layout.setContentsMargins(10, 0, 8, 0)
+        pill_layout.setSpacing(8)
+
+        self.pill_mark_icon = QLabel()
+        self.pill_mark_icon.setFixedSize(11, 11)
+        self._pill_mark_opacity_effect = QGraphicsOpacityEffect(self.pill_mark_icon)
+        self._pill_mark_opacity_effect.setOpacity(1.0)
+        self.pill_mark_icon.setGraphicsEffect(self._pill_mark_opacity_effect)
+        self._pill_mark_pulse_anim = QPropertyAnimation(self._pill_mark_opacity_effect, b"opacity", self)
+        self._pill_mark_pulse_anim.setDuration(1600)
+        self._pill_mark_pulse_anim.setKeyValueAt(0.0, 1.0)
+        self._pill_mark_pulse_anim.setKeyValueAt(0.5, 0.35)
+        self._pill_mark_pulse_anim.setKeyValueAt(1.0, 1.0)
+        self._pill_mark_pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._pill_mark_pulse_anim.setLoopCount(-1)
+        pill_layout.addWidget(self.pill_mark_icon)
+
+        self.pill_timer = QLabel("00:00:00")
+        self.pill_timer.setStyleSheet(
+            "font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600;"
+        )
+        pill_layout.addWidget(self.pill_timer)
+
+        pill_meters = QVBoxLayout()
+        pill_meters.setSpacing(3)
+        self.pill_mic_meter = QProgressBar()
+        self.pill_mic_meter.setFixedSize(30, 4)
+        self.pill_mic_meter.setTextVisible(False)
+        self.pill_mic_meter.setStyleSheet(_METER_STYLE)
+        self.pill_sys_meter = QProgressBar()
+        self.pill_sys_meter.setFixedSize(30, 4)
+        self.pill_sys_meter.setTextVisible(False)
+        self.pill_sys_meter.setStyleSheet(_METER_STYLE)
+        pill_meters.addWidget(self.pill_mic_meter)
+        pill_meters.addWidget(self.pill_sys_meter)
+        pill_layout.addLayout(pill_meters)
+
+        pill_layout.addStretch(1)
+
+        self.pill_btn_pause = QPushButton()
+        self.pill_btn_pause.setFixedSize(28, 28)
+        self.pill_btn_pause.setIconSize(QSize(14, 14))
+        self._set_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+        self.pill_btn_pause.clicked.connect(self.pause_requested.emit)
+        pill_layout.addWidget(self.pill_btn_pause)
+
+        self.pill_btn_stop = QPushButton()
+        self.pill_btn_stop.setFixedSize(28, 28)
+        self.pill_btn_stop.setIconSize(QSize(14, 14))
+        self._set_icon(self.pill_btn_stop, "stop-fill", "#f38ba8")
+        self.pill_btn_stop.clicked.connect(self.stop_requested.emit)
+        pill_layout.addWidget(self.pill_btn_stop)
         
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -244,14 +347,37 @@ class CompactStrip(QWidget):
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_pos = None
-            self.full_ui_requested.emit()
+            if self._variant == "pill":
+                self.set_variant("full")
+            else:
+                self.full_ui_requested.emit()
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
 
+    def set_variant(self, variant: str):
+        """variant: "full" (700x76) or "pill" (232x44) — the Compact Bar
+        spec is explicit that the pill is "the same class ... with a
+        different fixed size ... not a second widget", so this swaps which
+        internal frame is visible rather than constructing a second
+        CompactStrip. Emits variant_changed so MainWindow can persist the
+        choice; does nothing if already in that variant."""
+        if variant not in ("full", "pill") or variant == self._variant:
+            return
+        self._variant = variant
+        if variant == "pill":
+            self.frame.hide()
+            self.pill_frame.show()
+            self.setFixedSize(232, 44)
+        else:
+            self.pill_frame.hide()
+            self.frame.show()
+            self.setFixedSize(700, 76)
+        self.variant_changed.emit(variant)
+
 
     def _on_primary_clicked(self):
-        if self.current_state in ("armed", "transcribing", "done"):
+        if self.current_state in ("idle", "armed", "transcribing", "done"):
             self.record_requested.emit()
         elif self.current_state in ("recording", "muted", "paused"):
             self.stop_requested.emit()
@@ -269,15 +395,41 @@ class CompactStrip(QWidget):
         States: armed, recording, paused, muted, transcribing, done
         """
         self.current_state = state
-        
-        if state == "armed":
-            self.frame.setStyleSheet(self._frame_style("rgba(145,132,217,0.30)"))
-            self._set_mark_icon("phone-incoming", "#9184d9")
+
+        if state == "idle":
+            # The resting state: nothing is wrong, nothing is pending — a
+            # plain neutral hairline with a live Record button. The mark
+            # is `record` regular weight (outline, "available"), not the
+            # filled dot recording uses ("running").
+            self.frame.setStyleSheet(self._frame_style("rgba(63,66,77,0.9)"))
+            self._set_mark_icon("record", "#75798c", size=13)
             self._set_mark_pulsing(False)
+            self.title_label.setText("Ready to record")
+            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #cfd3e5;")
             self.btn_primary.setText("Record")
-            self.btn_primary.setObjectName("primaryAction")
+            self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record-fill", "#9184d9")
+            self._set_icon(self.btn_primary, "record", "#f38ba8")
+            self.btn_secondary.hide()
+            self.btn_mute.hide()
+            self.btn_pause.hide()
+            self.timer_label.hide()
+            self.mic_meter.hide()
+            self.mic_icon_label.hide()
+            self.sys_meter.hide()
+            self.sys_icon_label.hide()
+
+        elif state == "armed":
+            self.frame.setStyleSheet(self._frame_style("rgba(145,132,217,0.30)"))
+            self._set_mark_icon("phone-incoming", "#9184d9", size=13)
+            self._set_mark_pulsing(False)
+            if self.title_label.text() == "Ready to record":
+                self.title_label.setText("Recording Name")
+            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
+            self.btn_primary.setText("Record")
+            self.btn_primary.setObjectName("recordAction")
+            self.btn_primary.setStyleSheet("padding: 0 10px;")
+            self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.hide()
             self.btn_mute.hide()
             self.btn_pause.hide()
@@ -289,8 +441,11 @@ class CompactStrip(QWidget):
 
         elif state == "recording":
             self.frame.setStyleSheet(self._frame_style("rgba(243,139,168,0.35)"))
-            self._set_mark_icon("record-fill", "#f38ba8")
+            self._set_mark_icon("record-fill", "#f38ba8", size=11)
             self._set_mark_pulsing(True)
+            if self.title_label.text() == "Ready to record":
+                self.title_label.setText("Recording Name")
+            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
             self.btn_primary.setText("Stop")
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
             self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
@@ -308,7 +463,7 @@ class CompactStrip(QWidget):
 
         elif state == "paused":
             self.frame.setStyleSheet(self._frame_style("rgba(249,226,175,0.45)"))
-            self._set_mark_icon("pause-fill", "#f9e2af")
+            self._set_mark_icon("pause-fill", "#f9e2af", size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Stop")
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
@@ -327,7 +482,7 @@ class CompactStrip(QWidget):
             # itself flipping to a filled mic-slash icon below, plus the
             # timer staying normal-colored rather than following the mark.
             self.frame.setStyleSheet(self._frame_style("rgba(243,139,168,0.35)"))
-            self._set_mark_icon("record-fill", "#f38ba8")
+            self._set_mark_icon("record-fill", "#f38ba8", size=11)
             self._set_mark_pulsing(True)
             self.btn_primary.setText("Stop")
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
@@ -346,12 +501,12 @@ class CompactStrip(QWidget):
 
         elif state == "transcribing":
             self.frame.setStyleSheet(self._frame_style("rgba(145,132,217,0.30)"))
-            self._set_mark_icon("waveform", "#9184d9")
+            self._set_mark_icon("waveform", "#9184d9", size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
-            self.btn_primary.setObjectName("primaryAction")
+            self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record-fill", "#9184d9")
+            self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.setText("Cancel")
             self._set_icon(self.btn_secondary, "x", "#e9e9ed")
             self.btn_secondary.show()
@@ -365,12 +520,12 @@ class CompactStrip(QWidget):
 
         elif state == "done":
             self.frame.setStyleSheet(self._frame_style("rgba(166,227,161,0.35)"))
-            self._set_mark_icon("check-circle", "#a6e3a1")
+            self._set_mark_icon("check-circle", "#a6e3a1", size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
-            self.btn_primary.setObjectName("primaryAction")
+            self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record-fill", "#9184d9")
+            self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.setText("Open transcript")
             self._set_icon(self.btn_secondary, "arrow-square-out", "#e9e9ed")
             self.btn_secondary.show()
@@ -380,33 +535,81 @@ class CompactStrip(QWidget):
 
         self.btn_primary.style().unpolish(self.btn_primary)
         self.btn_primary.style().polish(self.btn_primary)
+        self._sync_pill_for_state(state)
+
+    def _sync_pill_for_state(self, state):
+        """Keep the pill's mark/timer/meters/buttons current even while it
+        isn't the visible variant, so collapsing to it never shows stale
+        content from whatever state was active last time it was shown."""
+        edge_color = _STATE_EDGE_COLORS.get(state, _STATE_EDGE_COLORS["idle"])
+        self.pill_frame.setStyleSheet(self._frame_style(edge_color, "compactPillFrame", 22))
+        self.pill_timer.setText(self.timer_label.text())
+
+        if state in ("recording", "muted", "paused"):
+            self.pill_timer.show()
+            self.pill_btn_stop.show()
+            self.pill_btn_pause.show()
+            if state == "paused":
+                self.pill_timer.setStyleSheet(
+                    "font-family: 'Consolas', monospace; font-size: 15px; "
+                    "font-weight: 600; color: #f9e2af;"
+                )
+                self._set_icon(self.pill_btn_pause, "play-fill", "#e9e9ed")
+            else:
+                self.pill_timer.setStyleSheet(
+                    "font-family: 'Consolas', monospace; font-size: 15px; "
+                    "font-weight: 600; color: #e9e9ed;"
+                )
+                self._set_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+        else:
+            self.pill_timer.hide()
+            self.pill_btn_pause.hide()
+            self.pill_btn_stop.hide()
+
+        if state == "recording":
+            self.pill_mic_meter.show()
+            self.pill_sys_meter.show()
+        elif state == "muted":
+            self.pill_mic_meter.hide()
+            self.pill_sys_meter.show()
+        else:
+            self.pill_mic_meter.hide()
+            self.pill_sys_meter.hide()
 
     def _set_icon(self, button, icon_name, color):
         button.setIcon(QIcon(colored_pixmap(icon_name, color, 16)))
 
-    def _set_mark_icon(self, icon_name, color):
-        self.mark_icon.setPixmap(colored_pixmap(icon_name, color, 16))
+    def _set_mark_icon(self, icon_name, color, size=13):
+        self.mark_icon.setPixmap(colored_pixmap(icon_name, color, size))
+        self.pill_mark_icon.setPixmap(colored_pixmap(icon_name, color, 11))
 
     def _set_mark_pulsing(self, pulsing):
         if pulsing:
             if self._mark_pulse_anim.state() != QPropertyAnimation.State.Running:
                 self._mark_pulse_anim.start()
+            if self._pill_mark_pulse_anim.state() != QPropertyAnimation.State.Running:
+                self._pill_mark_pulse_anim.start()
         else:
             self._mark_pulse_anim.stop()
             self._mark_opacity_effect.setOpacity(1.0)
-            
-    def _frame_style(self, border_color):
+            self._pill_mark_pulse_anim.stop()
+            self._pill_mark_opacity_effect.setOpacity(1.0)
+
+    def _frame_style(self, border_color, object_name="compactStripFrame", radius=14):
         return f"""
-            QFrame#compactStripFrame {{
+            QFrame#{object_name} {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1d2c, stop:1 #14161f);
                 border: 1px solid {border_color};
-                border-radius: 14px;
+                border-radius: {radius}px;
             }}
         """
 
     def update_timer(self, time_str: str):
         self.timer_label.setText(time_str)
-        
+        self.pill_timer.setText(time_str)
+
     def update_meters(self, mic_val: int, sys_val: int):
         self.mic_meter.setValue(mic_val)
         self.sys_meter.setValue(sys_val)
+        self.pill_mic_meter.setValue(mic_val)
+        self.pill_sys_meter.setValue(sys_val)

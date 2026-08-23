@@ -57,15 +57,23 @@ class TestResolveCompactStripState(unittest.TestCase):
             "done",
         )
 
-    def test_armed_is_the_default_idle_state(self):
+    def test_idle_is_the_default_idle_state(self):
         self.assertEqual(
             resolve_compact_strip_state(RecordingState.IDLE, False, False, False),
-            "armed",
+            "idle",
         )
 
     def test_stopping_falls_through_like_idle(self):
         self.assertEqual(
             resolve_compact_strip_state(RecordingState.STOPPING, False, False, False),
+            "idle",
+        )
+
+    def test_armed_when_meeting_active(self):
+        self.assertEqual(
+            resolve_compact_strip_state(
+                RecordingState.IDLE, False, False, False, meeting_active=True
+            ),
             "armed",
         )
 
@@ -209,6 +217,104 @@ class TestCompactStripSecondaryButton(unittest.TestCase):
         strip.open_transcript_requested.connect(lambda: received.append(True))
         strip._on_secondary_clicked()
         self.assertEqual(received, [])
+
+
+class TestCompactStripVariant(unittest.TestCase):
+    """Pill variant (item 4/5 of the compact-mode UI work): same CompactStrip
+    class per the Compact Bar design spec ("the pill variant is the same
+    class ... not a second widget"), toggled by a manual collapse button and
+    restored by double-clicking the pill (distinct from double-clicking the
+    full strip, which goes all the way to the main window)."""
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def test_starts_in_full_variant(self):
+        strip = CompactStrip()
+        self.assertEqual(strip._variant, "full")
+        self.assertFalse(strip.frame.isHidden())
+        self.assertTrue(strip.pill_frame.isHidden())
+        self.assertEqual((strip.width(), strip.height()), (700, 76))
+
+    def test_collapse_button_switches_to_pill(self):
+        strip = CompactStrip()
+        strip.btn_collapse.click()
+        self.assertEqual(strip._variant, "pill")
+        self.assertTrue(strip.frame.isHidden())
+        self.assertFalse(strip.pill_frame.isHidden())
+        self.assertEqual((strip.width(), strip.height()), (232, 44))
+
+    def test_set_variant_emits_variant_changed(self):
+        strip = CompactStrip()
+        received = []
+        strip.variant_changed.connect(received.append)
+        strip.set_variant("pill")
+        self.assertEqual(received, ["pill"])
+
+    def test_set_variant_same_value_is_a_noop(self):
+        strip = CompactStrip()
+        received = []
+        strip.variant_changed.connect(received.append)
+        strip.set_variant("full")  # already full
+        self.assertEqual(received, [])
+
+    def test_double_click_on_pill_restores_full_instead_of_expanding(self):
+        strip = CompactStrip()
+        strip.set_variant("pill")
+        full_ui_received = []
+        strip.full_ui_requested.connect(lambda: full_ui_received.append(True))
+
+        from PyQt6.QtCore import QPointF, Qt as QtNS
+        from PyQt6.QtGui import QMouseEvent
+
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonDblClick, QPointF(10, 10), QPointF(10, 10),
+            QtNS.MouseButton.LeftButton, QtNS.MouseButton.LeftButton, QtNS.KeyboardModifier.NoModifier,
+        )
+        strip.mouseDoubleClickEvent(event)
+        self.assertEqual(strip._variant, "full")
+        self.assertEqual(full_ui_received, [])
+
+    def test_double_click_on_full_strip_still_requests_full_ui(self):
+        strip = CompactStrip()
+        received = []
+        strip.full_ui_requested.connect(lambda: received.append(True))
+
+        from PyQt6.QtCore import QPointF, Qt as QtNS
+        from PyQt6.QtGui import QMouseEvent
+
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonDblClick, QPointF(10, 10), QPointF(10, 10),
+            QtNS.MouseButton.LeftButton, QtNS.MouseButton.LeftButton, QtNS.KeyboardModifier.NoModifier,
+        )
+        strip.mouseDoubleClickEvent(event)
+        self.assertEqual(received, [True])
+        self.assertEqual(strip._variant, "full")
+
+    def test_pill_mirrors_timer_and_meters(self):
+        strip = CompactStrip()
+        strip.set_state("recording")
+        strip.update_timer("00:01:23")
+        strip.update_meters(42, 58)
+        self.assertEqual(strip.pill_timer.text(), "00:01:23")
+        self.assertEqual(strip.pill_mic_meter.value(), 42)
+        self.assertEqual(strip.pill_sys_meter.value(), 58)
+        self.assertFalse(strip.pill_timer.isHidden())
+        self.assertFalse(strip.pill_btn_pause.isHidden())
+        self.assertFalse(strip.pill_btn_stop.isHidden())
+
+    def test_pill_hides_timer_and_buttons_when_idle(self):
+        strip = CompactStrip()
+        strip.set_state("idle")
+        self.assertTrue(strip.pill_timer.isHidden())
+        self.assertTrue(strip.pill_btn_pause.isHidden())
+        self.assertTrue(strip.pill_btn_stop.isHidden())
+
+    def test_pill_hides_mic_meter_only_when_muted(self):
+        strip = CompactStrip()
+        strip.set_state("muted")
+        self.assertTrue(strip.pill_mic_meter.isHidden())
+        self.assertFalse(strip.pill_sys_meter.isHidden())
 
 
 class TestCompactStripPositionSignal(unittest.TestCase):

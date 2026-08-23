@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea,
 )
 
+from app.ui.vertical_resize_grip import VerticalResizeGrip
+
 
 class ActionItemWidget(QWidget):
     toggled = pyqtSignal(int, bool)
@@ -57,12 +59,17 @@ class ActionItemsPanel(QWidget):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
+        self._scroll.setFixedHeight(180)
         self._scroll.setVisible(False)
         self._container = QWidget()
         self._items_layout = QVBoxLayout(self._container)
         self._items_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
+
+        self._resize_grip = VerticalResizeGrip(self._scroll, min_height=90, max_height=640)
+        self._resize_grip.setVisible(False)
+        layout.addWidget(self._resize_grip)
 
         btn_row = QHBoxLayout()
         self._gen_btn = QPushButton("Extract Action Items")
@@ -86,6 +93,7 @@ class ActionItemsPanel(QWidget):
 
         self._items_layout.addStretch()
         self._scroll.setVisible(True)
+        self._resize_grip.setVisible(True)
         self._gen_btn.setText("Regenerate")
         self._gen_btn.setVisible(True)
         self._status.setVisible(False)
@@ -98,6 +106,7 @@ class ActionItemsPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._scroll.setVisible(False)
+        self._resize_grip.setVisible(False)
         self._gen_btn.setVisible(False)
         self._status.setText("No action items extracted yet.")
         self._status.setVisible(True)
@@ -113,12 +122,14 @@ class ActionItemsPanel(QWidget):
         self._status.setVisible(True)
         self._gen_btn.setVisible(False)
         self._scroll.setVisible(False)
+        self._resize_grip.setVisible(False)
 
     def set_error(self, message="Action item extraction failed."):
         """Restore from the loading state after a failed extraction."""
         if self._items:
             # Previous items still exist — bring them back.
             self._scroll.setVisible(True)
+            self._resize_grip.setVisible(True)
             self._status.setVisible(False)
             self._gen_btn.setText("Regenerate")
         else:

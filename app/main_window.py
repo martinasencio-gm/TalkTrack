@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from datetime import datetime
@@ -15,11 +16,13 @@ from PyQt6.QtWidgets import (
     QLabel, QSplitter, QFrame, QMenu, QMessageBox, QApplication, QInputDialog, QStatusBar
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QThread
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon, QKeySequence
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
 from app.utils import batch_queue, session_io, preflight_status
+from app.utils.mic_level_tracker import MicLevelTracker
+from app.utils.icons import colored_pixmap
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
@@ -121,8 +124,8 @@ class MainWindow(QMainWindow):
         self._batch_monitor_timer.start()
 
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
-        self.setMinimumSize(1000, 700)
-        self.resize(1260, 800)
+        self.setMinimumSize(1180, 720)
+        self.resize(1360, 860)
 
         self._setup_menu()
         self._setup_ui()
@@ -166,6 +169,8 @@ class MainWindow(QMainWindow):
         self.compact_strip.cancel_requested.connect(self._cancel_transcription)
         self.compact_strip.position_changed.connect(self._on_compact_strip_moved)
         self.compact_strip.full_ui_requested.connect(self._switch_to_full_ui)
+        self.compact_strip.variant_changed.connect(self._on_compact_strip_variant_changed)
+        self.compact_strip.set_variant(self.config.get("ui", "strip_variant") or "full")
         self._update_compact_strip_state()
         if self.config.get("ui", "compact_strip_visible"):
             self.compact_strip_action.setChecked(True)
@@ -178,80 +183,134 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&File")
 
-        settings_action = QAction("&Settings...", self)
-        settings_action.triggered.connect(self._open_settings)
-        file_menu.addAction(settings_action)
+        import_action = QAction("&Import Recording...", self)
+        import_action.setShortcut(QKeySequence("Ctrl+O"))
+        import_action.triggered.connect(lambda: self.recordings_list._on_import_clicked())
+        file_menu.addAction(import_action)
 
-        manage_tags_action = QAction("Manage &Tags...", self)
-        manage_tags_action.triggered.connect(self._open_manage_tags_dialog)
-        file_menu.addAction(manage_tags_action)
+        export_action = QAction("&Export Transcript...", self)
+        export_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_action.triggered.connect(lambda: self.transcript_viewer._export("txt"))
+        file_menu.addAction(export_action)
 
         file_menu.addSeparator()
 
-        open_recordings_action = QAction("&Open Recordings Folder", self)
+        open_recordings_action = QAction("Open Recordings Folder", self)
         open_recordings_action.triggered.connect(self._open_recordings_folder)
         file_menu.addAction(open_recordings_action)
 
-        open_batch_logs_action = QAction("Open Batch &Logs Folder", self)
+        open_batch_logs_action = QAction("Open Batch Logs Folder", self)
         open_batch_logs_action.triggered.connect(self._open_batch_logs_folder)
         file_menu.addAction(open_batch_logs_action)
 
-        batch_action = QAction("Run &Batch Transcription...", self)
-        batch_action.triggered.connect(self._open_batch_run_dialog)
-        file_menu.addAction(batch_action)
+        file_menu.addSeparator()
+
+        self.compact_strip_action = QAction("Show Compact Strip", self)
+        self.compact_strip_action.setCheckable(True)
+        self.compact_strip_action.toggled.connect(self._on_compact_strip_toggled)
+        file_menu.addAction(self.compact_strip_action)
+
+        file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # View menu
-        view_menu = menubar.addMenu("&View")
+        # Record menu
+        record_menu = menubar.addMenu("&Record")
 
-        self.compact_strip_action = QAction("Show Compact &Strip", self)
-        self.compact_strip_action.setCheckable(True)
-        self.compact_strip_action.toggled.connect(self._on_compact_strip_toggled)
-        view_menu.addAction(self.compact_strip_action)
+        toggle_record_action = QAction("Start/Stop Recording", self)
+        toggle_record_action.setShortcut(QKeySequence("Ctrl+R"))
+        toggle_record_action.triggered.connect(self._toggle_recording_from_menu)
+        record_menu.addAction(toggle_record_action)
 
-        # Help menu
-        help_menu = menubar.addMenu("&Help")
+        toggle_pause_action = QAction("Pause/Resume", self)
+        toggle_pause_action.setShortcut(QKeySequence("Ctrl+P"))
+        toggle_pause_action.triggered.connect(self._toggle_pause)
+        record_menu.addAction(toggle_pause_action)
+
+        toggle_mute_action = QAction("Mute Microphone", self)
+        toggle_mute_action.setShortcut(QKeySequence("Ctrl+M"))
+        toggle_mute_action.triggered.connect(self._toggle_mute)
+        record_menu.addAction(toggle_mute_action)
+
+        record_menu.addSeparator()
+
+        sources_action = QAction("&Audio Sources...", self)
+        sources_action.setShortcut(QKeySequence("Ctrl+."))
+        sources_action.triggered.connect(self._open_source_selector)
+        record_menu.addAction(sources_action)
+
+        # Transcribe menu
+        transcribe_menu = menubar.addMenu("&Transcribe")
+
+        transcribe_selected_action = QAction("Transcribe &Selected", self)
+        transcribe_selected_action.setShortcut(QKeySequence("Ctrl+T"))
+        transcribe_selected_action.triggered.connect(lambda: self.recordings_list.transcribe_selected())
+        transcribe_menu.addAction(transcribe_selected_action)
+
+        diarize_action = QAction("&Identify Speakers", self)
+        diarize_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        diarize_action.triggered.connect(self._on_diarize_requested)
+        transcribe_menu.addAction(diarize_action)
+
+        batch_action = QAction("Run &Batch Transcription...", self)
+        batch_action.triggered.connect(self._open_batch_run_dialog)
+        transcribe_menu.addAction(batch_action)
+
+        transcribe_menu.addSeparator()
+
+        manage_tags_action = QAction("Manage &Tags...", self)
+        manage_tags_action.triggered.connect(self._open_manage_tags_dialog)
+        transcribe_menu.addAction(manage_tags_action)
+
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+
+        settings_action = QAction("&Settings...", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._open_settings)
+        tools_menu.addAction(settings_action)
 
         status_action = QAction("&System Status...", self)
         status_action.triggered.connect(self._show_system_status)
-        help_menu.addAction(status_action)
+        tools_menu.addAction(status_action)
 
-        diarization_setup_action = QAction("&Diarization Setup...", self)
-        diarization_setup_action.triggered.connect(self._show_diarization_setup)
-        help_menu.addAction(diarization_setup_action)
-
-        shortcut_action = QAction("Add to Start &Menu...", self)
-        shortcut_action.triggered.connect(self._install_start_menu_shortcut)
-        help_menu.addAction(shortcut_action)
-
-        help_menu.addSeparator()
+        tools_menu.addSeparator()
 
         log_action = QAction("Open &Log File", self)
         log_action.triggered.connect(self._open_log_file)
-        help_menu.addAction(log_action)
+        tools_menu.addAction(log_action)
 
         batch_log_action = QAction("Open &Batch Log", self)
         batch_log_action.triggered.connect(self._open_batch_log_file)
-        help_menu.addAction(batch_log_action)
+        tools_menu.addAction(batch_log_action)
 
         report_action = QAction("&Report a Bug...", self)
         report_action.triggered.connect(self._report_bug)
-        help_menu.addAction(report_action)
+        tools_menu.addAction(report_action)
 
-        help_menu.addSeparator()
+        tools_menu.addSeparator()
 
         support_action = QAction("Support TalkTrack", self)
         support_action.triggered.connect(lambda: webbrowser.open(BMAC_URL))
-        help_menu.addAction(support_action)
+        tools_menu.addAction(support_action)
 
-        help_menu.addSeparator()
+        tools_menu.addSeparator()
 
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        tools_menu.addAction(about_action)
+
+    def _toggle_recording_from_menu(self):
+        """Ctrl+R: start when idle, stop when recording/paused. The compact
+        strip and recording controls buttons already swap their own icon;
+        this is the single entry point so the accelerator doesn't need to
+        know which button is currently shown."""
+        if self.recorder.state in (RecordingState.RECORDING, RecordingState.PAUSED):
+            self._stop_recording()
+        elif self.recorder.state == RecordingState.IDLE:
+            self._start_recording()
 
     def _import_stranded_transcript_exports(self):
         """Move exports stranded in the old separate transcripts/ folder
@@ -342,20 +401,35 @@ class MainWindow(QMainWindow):
         
         self.splitter.addWidget(self.inspector)
 
-        # Set default sizes
-        self.splitter.setSizes([260, 600, 322])
+        # Set default sizes — library and inspector fixed-ish, transcript
+        # absorbs resize slack (per the capture-bar design spec).
+        self.splitter.setSizes([262, 776, 322])
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
+        self.splitter.setCollapsible(2, True)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
         main_layout.addWidget(self.splitter, 1)
 
         # Background monitors
+        self._mic_level_tracker = MicLevelTracker()
         self.mic_monitor = MicMonitor(
             sample_rate=self.config.get("audio", "sample_rate"),
-            level_callback=lambda l, p: None,
+            level_callback=self._on_idle_mic_chunk,
         )
         self.mic_monitor_2 = MicMonitor(
             sample_rate=self.config.get("audio", "sample_rate"),
-            level_callback=lambda l, p: None,
+            level_callback=lambda chunk: None,
         )
         self.system_monitor = None
+        # Polls the "quiet mic" reading into the pre-flight verdict while
+        # idle — the level itself streams in off-thread via mic_monitor
+        # (see _on_idle_mic_chunk); this timer is what's allowed to touch
+        # Qt widgets with it.
+        self._preflight_poll_timer = QTimer(self)
+        self._preflight_poll_timer.timeout.connect(self._poll_preflight_level)
+        self._preflight_poll_timer.start(1000)
         
         # Instantiate these so the rest of MainWindow doesn't crash
         from app.ui.source_selector import SourceSelector
@@ -384,6 +458,7 @@ class MainWindow(QMainWindow):
         self.statusbar.addWidget(self.status_label)
 
         self.batch_indicator = QPushButton()
+        self.batch_indicator.setIcon(QIcon(colored_pixmap("cpu", "#cba6f7", 12)))
         self.batch_indicator.setObjectName("batchIndicatorBtn")
         self.batch_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.batch_indicator.setStyleSheet(
@@ -487,6 +562,14 @@ class MainWindow(QMainWindow):
         self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
+        # Deferred (not called synchronously here): opens a real audio device,
+        # so firing it during __init__ made every test that constructs a bare
+        # MainWindow() start a live sounddevice capture thread that outlived
+        # the test and was never stopped. singleShot follows the same
+        # avoid-firing-during-construction idiom as _check_startup_status /
+        # _maybe_offer_start_menu_shortcut below — no test processes events
+        # for this long, so it never fires in the test suite.
+        QTimer.singleShot(500, self._start_idle_mic_level_monitor)
         self._update_preflight()
 
     def _start_recording(self):
@@ -670,7 +753,58 @@ class MainWindow(QMainWindow):
     def _on_mic_device_changed(self, device_index):
         """Mic dropdown changed. If the monitor is running, move it to the new device."""
         if self.mic_monitor.is_active:
+            self._mic_level_tracker.reset()
             self.mic_monitor.start(device_index)
+
+    def _on_idle_mic_chunk(self, chunk):
+        """MicMonitor's level_callback while idle — runs on the audio
+        callback thread, not the UI thread. Only touches the tracker's
+        plain list (no Qt calls here); _poll_preflight_level reads it back
+        from a QTimer on the UI thread."""
+        self._mic_level_tracker.ingest(chunk)
+
+    def _start_idle_mic_level_monitor(self):
+        """Keep MicMonitor running whenever idle and a mic is selected, so
+        the pre-flight bar can flag a too-quiet mic before the user hits
+        Record — not just missing/mismatched device selection.
+
+        Skipped under the offscreen platform (every test sets
+        QT_QPA_PLATFORM=offscreen; real runs never do): opening a real
+        sounddevice input stream as a side effect of constructing a window
+        is fine for the live app but not for the many tests that build a
+        real MainWindow() without ever closing it — that left a live audio
+        callback thread running unstopped for the rest of the suite and
+        crashed the process (native access violation racing torch's DLL
+        loading later in the run). Deferring the call via singleShot at the
+        call sites reduces exposure but doesn't remove it, since the bound
+        singleShot keeps even a test's MainWindow alive until it fires — the
+        guard below is the actual fix."""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        if self.recorder.state != RecordingState.IDLE:
+            return
+        mic = self.source_selector.get_selected_mic()
+        if mic is None:
+            self._stop_idle_mic_level_monitor()
+            return
+        if self.mic_monitor.is_active and self.mic_monitor.device_index == mic:
+            return
+        self._mic_level_tracker.reset()
+        self.mic_monitor.start(mic)
+
+    def _stop_idle_mic_level_monitor(self):
+        self.mic_monitor.stop()
+        self._mic_level_tracker.reset()
+
+    def _poll_preflight_level(self):
+        """1s tick: only recomputes the verdict while idle — while recording
+        the pre-flight bar isn't shown, and mic_monitor doesn't own the
+        device anyway."""
+        if getattr(self, "_closing", False):
+            return
+        if self.recorder.state != RecordingState.IDLE:
+            return
+        self._update_preflight()
 
     def _on_gain_changed(self, gain):
         """Slider moved - apply live gain to capture or test monitor, debounce config write."""
@@ -869,6 +1003,7 @@ class MainWindow(QMainWindow):
             self.tray.set_state(state, int(self.recorder.get_elapsed_time()))
 
         if state == RecordingState.RECORDING:
+            self._stop_idle_mic_level_monitor()
             self._compact_strip_done = False
             self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
@@ -903,6 +1038,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
             self._active_detected_meeting_name = None
+            # See the singleShot in _connect_signals for why this is deferred
+            # rather than called synchronously.
+            QTimer.singleShot(0, self._start_idle_mic_level_monitor)
 
         self._update_activity_visibility()
 
@@ -1290,14 +1428,14 @@ class MainWindow(QMainWindow):
             primary = self._running_batch_processes[0]
             count = len(self._running_batch_processes)
             if count == 1:
-                text = f"⚡ Batch Active (PID {primary.pid})"
+                text = f"Batch Active (PID {primary.pid})"
                 tooltip = (
                     f"Batch transcription running ({primary.process_type_label}, "
                     f"PID {primary.pid}, {primary.formatted_duration} elapsed).\n"
                     "Click to view details or end process."
                 )
             else:
-                text = f"⚡ Batch Active ({count} jobs)"
+                text = f"Batch Active ({count} jobs)"
                 tooltip = (
                     f"{count} batch transcription processes running.\n"
                     "Click to view details or end process."
@@ -1583,20 +1721,23 @@ class MainWindow(QMainWindow):
         """Recompute the capture bar's pre-flight verdict from real state.
 
         Triggered on device change, mismatch recompute, capture-mode change,
-        and model/settings change (see docs/superpowers/specs for the
-        capture-bar redesign) — the three checks and the verdict block were
-        previously hardcoded placeholders.
+        model/settings change, and once a second while idle (see
+        docs/superpowers/specs for the capture-bar redesign) — the checks
+        and the verdict block were previously hardcoded placeholders.
         """
         has_mic = self.source_selector.get_selected_mic() is not None
-        mic_status, mic_text = preflight_status.compute_mic_check(
-            has_mic, self.source_selector.mic_mismatch
+        mic_name = self.source_selector.get_selected_mic_name() or "No microphone"
+        mic_peak_db = self._mic_level_tracker.peak_db_over_window()
+        mic_check = preflight_status.compute_mic_check(
+            has_mic, self.source_selector.mic_mismatch,
+            mic_peak_db=mic_peak_db, mic_name=mic_name,
         )
 
         if self.source_selector.is_per_app_mode():
             has_source = bool(self.source_selector.get_selected_app_pids())
         else:
             has_source = self.source_selector.get_selected_loopback() is not None
-        call_status, call_text = preflight_status.compute_call_check(
+        call_check = preflight_status.compute_call_check(
             has_source,
             self.source_selector.is_conferencing_blocked(),
             self.source_selector.output_mismatch,
@@ -1604,18 +1745,19 @@ class MainWindow(QMainWindow):
 
         diarization_enabled = self.transcript_viewer.diarization_enabled()
         hf_token_present = bool(self.config.get("diarization", "hf_token"))
-        model_status, model_text = preflight_status.compute_transcription_check(
+        model_check = preflight_status.compute_transcription_check(
             diarization_enabled, hf_token_present
         )
 
         verdict, title, subtitle = preflight_status.compute_verdict(
-            mic_status, call_status, model_status
-        )
-
-        self.recording_controls.preflight.update_checks(
-            mic_status, mic_text, call_status, call_text, model_status, model_text
+            mic_check, call_check, model_check
         )
         self.recording_controls.preflight.set_verdict(verdict, title, subtitle)
+
+        call_name = self.source_selector.get_selected_source_name() or "No source"
+        self.recording_controls.set_capturing(
+            mic_name, call_name, mic_state=mic_check[0], call_state=call_check[0]
+        )
 
     def _on_diarize_requested(self):
         """Run diarization on the transcript already on screen."""
@@ -2273,8 +2415,7 @@ class MainWindow(QMainWindow):
                 "Add TalkTrack to Start Menu",
                 "Add a TalkTrack shortcut to your Start Menu?\n\n"
                 "This gives the correct taskbar icon. Once it's running you can "
-                "right-click the taskbar icon and choose Pin to taskbar.\n\n"
-                "You can also do this later from Help > Add to Start Menu.",
+                "right-click the taskbar icon and choose Pin to taskbar.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             # Record the choice either way so we don't ask again.
@@ -2305,43 +2446,6 @@ class MainWindow(QMainWindow):
     def _report_bug(self):
         from main import build_bug_report_url
         webbrowser.open(build_bug_report_url())
-
-    def _install_start_menu_shortcut(self):
-        """Create a Start Menu shortcut for proper taskbar icon."""
-        try:
-            from app.utils.start_menu import needs_shortcut, create_shortcut, shortcut_path
-            app_dir = Path(__file__).parent.parent
-
-            if not needs_shortcut(app_dir):
-                QMessageBox.information(
-                    self, "Start Menu Shortcut",
-                    f"Shortcut already exists:\n{shortcut_path()}"
-                )
-                return
-
-            reply = QMessageBox.question(
-                self,
-                "Add to Start Menu",
-                "This will create a TalkTrack shortcut in your Start Menu.\n\n"
-                f"Location:\n{shortcut_path()}\n\n"
-                "This also helps Windows show the correct taskbar icon.\n\n"
-                "Continue?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-            create_shortcut(app_dir)
-            QMessageBox.information(
-                self, "Start Menu Shortcut",
-                "Shortcut created! TalkTrack is now in the Start Menu.\n\n"
-                "The taskbar icon should update next time you launch the app."
-            )
-        except Exception as e:
-            QMessageBox.warning(
-                self, "Start Menu Shortcut",
-                f"Could not create shortcut:\n{e}"
-            )
 
     def _show_about(self):
         dialog = AboutDialog(self)
@@ -2824,6 +2928,8 @@ class MainWindow(QMainWindow):
             self._flush_gain_to_config()
         if self._meeting_poll_timer.isActive():
             self._meeting_poll_timer.stop()
+        if self._preflight_poll_timer.isActive():
+            self._preflight_poll_timer.stop()
         self._com_poller.stop()
         self._activity_widget.close()
         if hasattr(self, "meeting_toast"):
@@ -2844,8 +2950,21 @@ class MainWindow(QMainWindow):
 
     def _update_activity_visibility(self):
         self._update_compact_strip_state()
+        busy = self._transcription_busy()
+        job_name = None
+        elapsed = None
+        if busy:
+            session = getattr(self._transcription_worker, "session", None)
+            if session:
+                from app.ui.recording_header import _display_name_from_metadata
+                job_name = _display_name_from_metadata(session)
+            start_time = getattr(self.transcript_viewer, "_progress_start_time", None)
+            if start_time is not None:
+                elapsed = time.monotonic() - start_time
         self.recording_controls.set_transcribing(
-            self._transcription_busy(), self._current_transcription_percent
+            busy, self._current_transcription_percent,
+            name=job_name, elapsed_seconds=elapsed,
+            queued=len(self._pending_transcriptions),
         )
         self.recordings_list.set_transcribing(transcribing_directories(
             [self._transcription_worker, self._diarization_worker,
@@ -2905,10 +3024,16 @@ class MainWindow(QMainWindow):
     def _on_compact_strip_moved(self, x, y):
         self.config.set("ui", "compact_strip_position", [x, y])
 
+    def _on_compact_strip_variant_changed(self, variant):
+        self.config.set("ui", "strip_variant", variant)
+
     def _update_compact_strip_state(self):
+        from app.integrations.meeting_detector import IDLE as _MEETING_IDLE
+        meeting_active = getattr(self, "_meeting_detector", None) is not None \
+            and self._meeting_detector.state != _MEETING_IDLE
         state = resolve_compact_strip_state(
             self.recorder.state, self._mic_muted, self._transcription_busy(),
-            self._compact_strip_done,
+            self._compact_strip_done, meeting_active=meeting_active,
         )
         self.compact_strip.set_state(state)
 

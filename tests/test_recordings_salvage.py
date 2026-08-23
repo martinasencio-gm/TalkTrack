@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
@@ -62,6 +63,49 @@ class TestSalvageOrphanedRecordings(unittest.TestCase):
         salvaged = salvage_orphaned_recordings(self.root, min_age_seconds=600)
         self.assertEqual(salvaged, [])
         self.assertFalse((d / "metadata.json").exists())
+
+    def test_cloud_placeholder_audio_skipped_not_opened(self):
+        """A OneDrive Files-On-Demand placeholder must never be handed to
+        soundfile: opening one blocks on a synchronous cloud fetch with no
+        timeout, which stalled MainWindow construction for 8 minutes on one
+        un-hydrated file in production. `system` is the un-hydrated file
+        here and `combined` doesn't exist, so this also proves the "skip a
+        cloud candidate, fall through to the next" path, not just "give up
+        entirely"."""
+        from app.ui.recordings_list import salvage_orphaned_recordings
+        d = self._make_dir("recording_20260823_082835",
+                            wavs=["mic_audio.wav", "system_audio.wav"],
+                            age_seconds=3600)
+
+        def fake_is_cloud_placeholder(path):
+            return Path(path).name == "system_audio.wav"
+
+        with patch("app.ui.recordings_list._is_cloud_placeholder",
+                   side_effect=fake_is_cloud_placeholder), \
+             patch("soundfile.info", wraps=sf.info) as mock_info:
+            salvaged = salvage_orphaned_recordings(self.root, min_age_seconds=600)
+
+        self.assertEqual(salvaged, [str(d)])
+        for call in mock_info.call_args_list:
+            self.assertNotIn("system_audio.wav", str(call))
+        meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
+        self.assertAlmostEqual(meta["duration"], 1.0, places=1)  # read mic_audio.wav instead
+
+    def test_all_candidates_cloud_placeholder_duration_zero(self):
+        """Every audio file un-hydrated: salvage must still complete (no
+        blocking open attempted anywhere) and record the recording with a
+        0.0 duration rather than hang."""
+        from app.ui.recordings_list import salvage_orphaned_recordings
+        d = self._make_dir("recording_d", wavs=["mic_audio.wav"], age_seconds=3600)
+
+        with patch("app.ui.recordings_list._is_cloud_placeholder", return_value=True), \
+             patch("soundfile.info", wraps=sf.info) as mock_info:
+            salvaged = salvage_orphaned_recordings(self.root, min_age_seconds=600)
+
+        self.assertEqual(salvaged, [str(d)])
+        mock_info.assert_not_called()
+        meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["duration"], 0.0)
 
     def test_empty_orphan_left_alone(self):
         from app.ui.recordings_list import salvage_orphaned_recordings

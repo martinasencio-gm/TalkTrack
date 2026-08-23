@@ -197,6 +197,14 @@ class SettingsDialog(QDialog):
         )
         recording_form.addRow(self.minimize_to_tray_cb)
 
+        self.launch_compact_cb = QCheckBox("Launch in compact mode")
+        self.launch_compact_cb.setToolTip(
+            "Start TalkTrack showing only the floating compact strip\n"
+            "instead of the full window. Double-click the strip anytime\n"
+            "to open the full window."
+        )
+        recording_form.addRow(self.launch_compact_cb)
+
         general_layout.addWidget(recording_group)
         general_layout.addStretch()
 
@@ -514,6 +522,7 @@ class SettingsDialog(QDialog):
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
         self.minimize_to_tray_cb.setChecked(self.config.get("general", "minimize_to_tray"))
+        self.launch_compact_cb.setChecked(self.config.get("general", "launch_in_compact_mode"))
 
         # Audio
         sr = self.config.get("audio", "sample_rate")
@@ -650,6 +659,7 @@ class SettingsDialog(QDialog):
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())
         self.config.set("general", "minimize_to_tray", self.minimize_to_tray_cb.isChecked())
+        self.config.set("general", "launch_in_compact_mode", self.launch_compact_cb.isChecked())
 
         self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())
         self.config.set("audio", "channels", self.channels_combo.currentData())

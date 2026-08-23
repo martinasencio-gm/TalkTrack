@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 
+from app.utils.icons import colored_pixmap
+
 
 def _minutes_phrase(seconds):
     """"2 minutes", "1 minute", or None when it does not round to a minute."""
@@ -63,7 +65,8 @@ class MeetingBanner(QWidget):
         self._layout.setContentsMargins(14, 8, 14, 8)
         self._layout.setSpacing(10)
 
-        self._icon = QLabel("🎙️")
+        self._icon = QLabel()
+        self._icon.setPixmap(colored_pixmap("phone-incoming", "#9184d9", 16))
         self._icon.setObjectName("meetingBannerIcon")
         self._layout.addWidget(self._icon)
 
@@ -98,7 +101,7 @@ class MeetingBanner(QWidget):
             self._button_row.addWidget(button)
 
     def show_start(self, meeting_name, elapsed_seconds):
-        self._icon.setText("🎙️")
+        self._icon.setPixmap(colored_pixmap("phone-incoming", "#9184d9", 16))
         self._frame.setProperty("mode", "start")
         self._frame.style().unpolish(self._frame)
         self._frame.style().polish(self._frame)
@@ -110,7 +113,7 @@ class MeetingBanner(QWidget):
         self.show()
 
     def show_end(self, meeting_name, recorded_seconds):
-        self._icon.setText("⏹️")
+        self._icon.setPixmap(colored_pixmap("stop", "#f9e2af", 16))
         self._frame.setProperty("mode", "end")
         self._frame.style().unpolish(self._frame)
         self._frame.style().polish(self._frame)

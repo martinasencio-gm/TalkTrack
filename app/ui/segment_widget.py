@@ -1,4 +1,5 @@
 """Individual transcript segment row widget."""
+import html
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMenu, QSizePolicy
 )
@@ -109,7 +110,7 @@ class SegmentWidget(QWidget):
 
     def _setup_ui(self):
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 13, 16, 13)
+        self.main_layout.setContentsMargins(17, 13, 17, 13)
         self.main_layout.setSpacing(12)
         
         # Avatar
@@ -157,8 +158,9 @@ class SegmentWidget(QWidget):
         self.right_col.addLayout(self.meta_row)
         
         # Line 2: Text
-        self.text_label = QLabel(self._segment.text)
-        self.text_label.setStyleSheet("color: #e4e7f5; font-size: 14px; line-height: 1.6;")
+        self.text_label = QLabel()
+        self.text_label.setStyleSheet("color: #e4e7f5; font-size: 14px;")
+        self._set_body_text(self._segment.text)
         self.text_label.setWordWrap(True)
         self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self.text_label.mouseDoubleClickEvent = self._on_text_double_clicked
@@ -225,13 +227,21 @@ class SegmentWidget(QWidget):
         self.text_edit.setFocus()
         self.text_edit.selectAll()
 
+    def _set_body_text(self, text):
+        """QSS ignores `line-height` on QLabel — Qt's rich-text engine
+        honors it as inline CSS, so the transcript body text (14px/1.6
+        per the design spec) is set as an HTML fragment instead of plain
+        text."""
+        escaped = html.escape(text).replace("\n", "<br>")
+        self.text_label.setText(f'<span style="line-height:160%;">{escaped}</span>')
+
     def _finish_edit(self):
         if not self._editing: return
         self._editing = False
         new_text = self.text_edit.text().strip()
         if new_text and new_text != self._history.current():
             self._history.push(new_text)
-            self.text_label.setText(new_text)
+            self._set_body_text(new_text)
             self.text_edited.emit(self._index, new_text)
         self.text_edit.hide()
         self.text_label.show()
@@ -245,13 +255,13 @@ class SegmentWidget(QWidget):
     def undo(self):
         if self._history.can_undo():
             text = self._history.undo()
-            self.text_label.setText(text)
+            self._set_body_text(text)
             self.text_edited.emit(self._index, text)
 
     def redo(self):
         if self._history.can_redo():
             text = self._history.redo()
-            self.text_label.setText(text)
+            self._set_body_text(text)
             self.text_edited.emit(self._index, text)
 
     def _show_context_menu(self, pos):
@@ -280,7 +290,7 @@ class SegmentWidget(QWidget):
     def _revert_to_original(self):
         original = self._history.original()
         self._history = EditHistory(original)
-        self.text_label.setText(original)
+        self._set_body_text(original)
         self.text_reverted.emit(self._index)
 
     def highlight_match(self, start, end):

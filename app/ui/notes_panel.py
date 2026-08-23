@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from app.ui.vertical_resize_grip import VerticalResizeGrip
+
 
 class NotesPanel(QWidget):
     """Panel for taking notes during a call/recording."""
@@ -38,13 +40,16 @@ class NotesPanel(QWidget):
 
         layout.addLayout(header)
 
-        # Notes editor
+        # Notes editor — fixed height so the grip below has something to
+        # adjust; user-resizable rather than growing to fill the section.
         self.editor = QTextEdit()
         self.editor.setPlaceholderText(
             "Type your call notes here...\n\n"
             "Use the Timestamp button to mark important moments."
         )
+        self.editor.setFixedHeight(160)
         layout.addWidget(self.editor)
+        layout.addWidget(VerticalResizeGrip(self.editor, min_height=80, max_height=640))
 
         self._recording_start = None
 

@@ -1,7 +1,8 @@
 """Tests that MainWindow._update_preflight actually feeds real state into
-the capture bar's PreflightWidget. Before this, update_checks()/set_verdict()
-had zero callers anywhere in the app — the verdict always showed hardcoded
-"Ready" placeholders regardless of device/mismatch/token state.
+the capture bar's PreflightWidget and "CAPTURING" sources block. Before this,
+set_verdict()/set_capturing() had zero callers anywhere in the app — the
+verdict always showed hardcoded "Ready" placeholders regardless of
+device/mismatch/token state.
 """
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,6 +15,7 @@ from PyQt6.QtWidgets import QApplication
 from app.ui.recording_controls import RecordingControls
 from app.ui.transcript_viewer import TranscriptViewer
 from app.utils.preflight_status import READY, WARNING, BLOCKED
+from app.utils.mic_level_tracker import MicLevelTracker
 
 _app = None
 
@@ -31,6 +33,8 @@ class _StubSourceSelector:
 
     def __init__(self):
         self.mic = 1
+        self.mic_name = "fifine SC3"
+        self.source_name = "All system audio"
         self.per_app = True
         self.app_pids = [100]
         self.loopback = 10
@@ -40,6 +44,12 @@ class _StubSourceSelector:
 
     def get_selected_mic(self):
         return self.mic
+
+    def get_selected_mic_name(self):
+        return self.mic_name
+
+    def get_selected_source_name(self):
+        return self.source_name
 
     def is_per_app_mode(self):
         return self.per_app
@@ -76,6 +86,7 @@ class TestUpdatePreflight(unittest.TestCase):
         window.transcript_viewer = TranscriptViewer()
         window.source_selector = _StubSourceSelector()
         window.config = _StubConfig(hf_token=hf_token)
+        window._mic_level_tracker = MicLevelTracker()
         return window
 
     def test_all_clear_is_ready_verdict(self):
@@ -83,17 +94,23 @@ class TestUpdatePreflight(unittest.TestCase):
         window._update_preflight()
 
         preflight = window.recording_controls.preflight
-        self.assertEqual(preflight.voice_val.text(), "Ready")
-        self.assertEqual(preflight.call_val.text(), "Ready")
-        self.assertEqual(preflight.transcription_val.text(), "Ready")
         self.assertIn("Ready", preflight.verdict_title.text())
+        self.assertEqual(
+            window.recording_controls.capturing_mic_name.text(), "fifine SC3"
+        )
+        self.assertEqual(
+            window.recording_controls.capturing_call_name.text(), "All system audio"
+        )
 
     def test_no_mic_selected_blocks(self):
         window = self._make_window()
         window.source_selector.mic = None
         window._update_preflight()
 
-        self.assertIn("No microphone", window.recording_controls.preflight.voice_val.text())
+        self.assertIn(
+            "No microphone",
+            window.recording_controls.preflight.verdict_title.text(),
+        )
 
     def test_conferencing_app_blocks_the_call_check(self):
         window = self._make_window()
@@ -102,7 +119,7 @@ class TestUpdatePreflight(unittest.TestCase):
 
         self.assertIn(
             "blocks per-app capture",
-            window.recording_controls.preflight.call_val.text(),
+            window.recording_controls.preflight.verdict_title.text(),
         )
 
     def test_mic_mismatch_surfaces_the_app_name(self):
@@ -110,9 +127,12 @@ class TestUpdatePreflight(unittest.TestCase):
         window.source_selector.mic_mismatch = {"app": "Microsoft Teams", "device": "Jabra"}
         window._update_preflight()
 
-        self.assertIn("Microsoft Teams", window.recording_controls.preflight.voice_val.text())
+        self.assertIn(
+            "Microsoft Teams",
+            window.recording_controls.preflight.verdict_title.text(),
+        )
 
-    def test_diarization_enabled_without_token_warns_transcription_check(self):
+    def test_diarization_enabled_without_token_warns(self):
         window = self._make_window(hf_token="")
         window.transcript_viewer.set_diarization_available(True)
         window.transcript_viewer.set_diarization_enabled(True)
@@ -120,8 +140,44 @@ class TestUpdatePreflight(unittest.TestCase):
 
         self.assertIn(
             "HuggingFace",
-            window.recording_controls.preflight.transcription_val.text(),
+            window.recording_controls.preflight.verdict_title.text(),
         )
+
+    def test_no_source_selected_shows_no_source_in_capturing_block(self):
+        window = self._make_window()
+        window.source_selector.source_name = None
+        window._update_preflight()
+
+        self.assertEqual(
+            window.recording_controls.capturing_call_name.text(), "No source"
+        )
+
+    def test_quiet_mic_warns_the_verdict(self):
+        window = self._make_window()
+        fake_now = [0.0]
+        window._mic_level_tracker = MicLevelTracker(clock=lambda: fake_now[0])
+        import numpy as np
+        quiet_chunk = np.full(160, 0.001, dtype=np.float32)  # well under -40 dB
+        window._mic_level_tracker.ingest(quiet_chunk)
+        fake_now[0] += 2.0  # past the tracker's min-sample window
+        window._mic_level_tracker.ingest(quiet_chunk)
+
+        window._update_preflight()
+
+        self.assertEqual(
+            window.recording_controls.preflight.verdict_title.text(),
+            "Mic is very quiet",
+        )
+        self.assertIn(
+            "fifine SC3", window.recording_controls.preflight.verdict_subtitle.text()
+        )
+
+    def test_fresh_tracker_with_no_samples_does_not_warn(self):
+        """No samples yet (app just opened) must read as ready, not quiet."""
+        window = self._make_window()
+        window._update_preflight()
+
+        self.assertIn("Ready", window.recording_controls.preflight.verdict_title.text())
 
     def test_sources_button_opens_the_dialog(self):
         from app.main_window import MainWindow
@@ -136,6 +192,13 @@ class TestUpdatePreflight(unittest.TestCase):
         )
         window._open_source_selector()
         self.assertEqual(opened, ["show", "raise", "activate"])
+
+    def test_capturing_block_click_opens_the_dialog(self):
+        window_controls = RecordingControls()
+        clicks = []
+        window_controls.sources_clicked.connect(lambda: clicks.append(1))
+        window_controls.capturing_block.clicked.emit()
+        self.assertEqual(clicks, [1])
 
 
 if __name__ == "__main__":

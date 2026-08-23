@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 
 from app.batch.logging_setup import open_batch_log
 from app.batch.process_monitor import BatchProcessInfo, terminate_batch_process
+from app.utils.icons import colored_pixmap
 
 
 class BatchProcessInfoDialog(QDialog):
@@ -61,16 +62,24 @@ class BatchProcessInfoDialog(QDialog):
         count = len(self.processes)
         title_text = "<b>Batch Transcription Running</b>" if count <= 1 else f"<b>{count} Batch Jobs Running</b>"
         self._title_label = QLabel(title_text)
-        self._title_label.setStyleSheet("font-size: 14px; color: #cdd6f4;")
+        self._title_label.setStyleSheet("font-size: 14px; color: #e9e9ed;")
         title_row.addWidget(self._title_label)
         title_row.addStretch()
 
-        status_pill = QLabel("● Active")
+        status_pill = QWidget()
         status_pill.setStyleSheet(
-            "color: #a6e3a1; font-weight: bold; font-size: 11px;"
             "background-color: rgba(166, 227, 161, 0.15);"
-            "border-radius: 6px; padding: 2px 8px;"
+            "border-radius: 6px;"
         )
+        status_pill_layout = QHBoxLayout(status_pill)
+        status_pill_layout.setContentsMargins(8, 2, 8, 2)
+        status_pill_layout.setSpacing(4)
+        status_icon = QLabel()
+        status_icon.setPixmap(colored_pixmap("check-circle-fill", "#a6e3a1", 11))
+        status_text = QLabel("Active")
+        status_text.setStyleSheet("color: #a6e3a1; font-weight: 600; font-size: 11px;")
+        status_pill_layout.addWidget(status_icon)
+        status_pill_layout.addWidget(status_text)
         title_row.addWidget(status_pill)
         header_layout.addLayout(title_row)
 

@@ -56,8 +56,8 @@ class NotificationRegion(QWidget):
             }
         """)
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 0, 16, 0)
-        self.main_layout.setSpacing(12)
+        self.main_layout.setContentsMargins(17, 0, 17, 0)
+        self.main_layout.setSpacing(11)
         
         self.icon_label = QLabel()
         self.icon_label.setPixmap(colored_pixmap("info", "#9184d9", _NOTIF_ICON_SIZE))

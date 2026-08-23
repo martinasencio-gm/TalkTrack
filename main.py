@@ -281,7 +281,10 @@ def main():
     guard.show_requested.connect(window._restore_from_tray)
     if icon_path.exists():
         window.setWindowIcon(QIcon(str(icon_path)))
-    window.show()
+    if window.config.get("general", "launch_in_compact_mode"):
+        window._switch_to_compact_bar()
+    else:
+        window.show()
     splash.finish(window)
 
     # Force taskbar icon via Win32 API (needed for Microsoft Store Python)

@@ -113,6 +113,13 @@ class TestMainWindowCompactStrip(unittest.TestCase):
         window._toggle_mute()
         self.assertEqual(window.compact_strip.current_state, "muted")
 
+    def test_variant_change_persists_to_config(self):
+        window = self._make_window()
+        window.compact_strip.set_variant("pill")
+        self.assertEqual(window.config.get("ui", "strip_variant"), "pill")
+        window.compact_strip.set_variant("full")
+        self.assertEqual(window.config.get("ui", "strip_variant"), "full")
+
     def test_transcription_finished_marks_done_until_next_recording(self):
         from app.recording.recorder import RecordingState
         from app.transcription.transcriber import TranscriptResult
@@ -126,6 +133,57 @@ class TestMainWindowCompactStrip(unittest.TestCase):
         window.recorder._set_state(RecordingState.RECORDING)
         self.assertFalse(window._compact_strip_done)
         self.assertEqual(window.compact_strip.current_state, "recording")
+
+
+class TestMainWindowRestoresSavedStripVariant(unittest.TestCase):
+    """Construction reads ui.strip_variant so a pill left collapsed from a
+    prior session doesn't silently reset to the full strip on relaunch."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from app.utils import config as config_module
+
+        _get_app()
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp_path = Path(self._tmp.name)
+        self._patchers = [
+            patch.object(config_module, "CONFIG_DIR", tmp_path),
+            patch.object(config_module, "CONFIG_FILE", tmp_path / "settings.json"),
+        ]
+        for p in self._patchers:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patchers:
+            p.stop()
+        self._tmp.cleanup()
+
+    def _make_window(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+
+        def _close():
+            window._really_quit = True
+            if hasattr(window, "_meeting_signals_timer"):
+                window._meeting_signals_timer.stop()
+            if hasattr(window, "_com_session_poller") and window._com_session_poller:
+                window._com_session_poller.stop()
+            window.close()
+        self.addCleanup(_close)
+        return window
+
+    def test_pill_variant_saved_from_a_prior_session_is_restored(self):
+        from app.utils.config import Config
+        seed_config = Config()
+        seed_config.set("ui", "strip_variant", "pill")
+
+        window = self._make_window()
+        self.assertEqual(window.compact_strip._variant, "pill")
+
+    def test_default_variant_is_full(self):
+        window = self._make_window()
+        self.assertEqual(window.compact_strip._variant, "full")
 
 
 if __name__ == "__main__":

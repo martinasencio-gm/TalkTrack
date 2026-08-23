@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
     QApplication, QLineEdit,
 )
 
+from app.ui.vertical_resize_grip import VerticalResizeGrip
+
 
 class SummaryPanel(QWidget):
     regenerate_requested = pyqtSignal()
@@ -25,8 +27,13 @@ class SummaryPanel(QWidget):
         self._text = QTextEdit()
         self._text.setObjectName("summaryTextEdit")
         self._text.setReadOnly(False)
+        self._text.setFixedHeight(220)
         self._text.setVisible(False)
         layout.addWidget(self._text)
+
+        self._resize_grip = VerticalResizeGrip(self._text, min_height=100, max_height=640)
+        self._resize_grip.setVisible(False)
+        layout.addWidget(self._resize_grip)
 
         # Instruction input for regeneration
         self._instruction_input = QLineEdit()
@@ -54,6 +61,7 @@ class SummaryPanel(QWidget):
     def set_summary(self, text):
         self._text.setMarkdown(text)
         self._text.setVisible(True)
+        self._resize_grip.setVisible(True)
         self._copy_btn.setVisible(True)
         self._gen_btn.setText("Regenerate")
         self._gen_btn.setVisible(True)
@@ -64,6 +72,7 @@ class SummaryPanel(QWidget):
         """Reset to initial empty state."""
         self._text.clear()
         self._text.setVisible(False)
+        self._resize_grip.setVisible(False)
         self._copy_btn.setVisible(False)
         self._gen_btn.setVisible(False)
         self._instruction_input.clear()
@@ -83,12 +92,14 @@ class SummaryPanel(QWidget):
         self._gen_btn.setVisible(False)
         self._instruction_input.setVisible(False)
         self._text.setVisible(False)
+        self._resize_grip.setVisible(False)
 
     def set_error(self, message="Summary generation failed."):
         """Restore from the loading state after a failed generation."""
         if self._text.toPlainText():
             # A previous summary exists — bring it back.
             self._text.setVisible(True)
+            self._resize_grip.setVisible(True)
             self._copy_btn.setVisible(True)
             self._instruction_input.setVisible(True)
             self._status.setVisible(False)

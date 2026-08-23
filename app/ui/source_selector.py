@@ -17,6 +17,8 @@ from app.utils.device_mismatch import compute_device_mismatches
 from app.utils.platform_info import is_windows_11
 from app.utils.icons import colored_pixmap
 from app.ui.collapsible_section import CollapsibleSection
+from app.ui.preflight import PreflightWidget
+from app.utils import preflight_status
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +43,65 @@ CONFERENCING_APPS = {
 _LABEL_WIDTH = 70
 
 
-def _group_heading(text):
-    """Small caps-style divider naming what the rows below it capture."""
-    label = QLabel(text)
-    label.setObjectName("groupHeading")
-    return label
+def _group_heading(text, icon_name=None):
+    """Small caps-style divider naming what the rows below it capture.
+
+    An optional leading icon reinforces which half of the dialog ("your
+    voice" vs "the call") the rows underneath belong to.
+    """
+    if icon_name is None:
+        label = QLabel(text)
+        label.setObjectName("groupHeading")
+        return label
+
+    row_widget = QWidget()
+    row = QHBoxLayout(row_widget)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    icon_label = QLabel()
+    icon_label.setPixmap(colored_pixmap(icon_name, "#9184d9", 13))
+    row.addWidget(icon_label)
+    text_label = QLabel(text)
+    text_label.setObjectName("groupHeading")
+    row.addWidget(text_label)
+    row.addStretch(1)
+    return row_widget
+
+
+class _ModeCard(QFrame):
+    """Clickable card pairing a capture-mode radio with its consequence
+    text. The whole card (not just the radio hit-target) selects the mode,
+    per the Sources-dialog redesign spec."""
+
+    def __init__(self, radio, description, recommended=False, parent=None):
+        super().__init__(parent)
+        self.setObjectName("sourceModeCard")
+        self._radio = radio
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(11, 8, 11, 8)
+        layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+        top_row.addWidget(radio)
+        top_row.addStretch(1)
+        if recommended:
+            tag = QLabel("Recommended")
+            tag.setObjectName("modeCardRecommended")
+            top_row.addWidget(tag)
+        layout.addLayout(top_row)
+
+        desc_label = QLabel(description)
+        desc_label.setObjectName("modeCardDescription")
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._radio.setChecked(True)
+        super().mousePressEvent(event)
 
 
 def _fullest_device_name(name, all_devices):
@@ -139,7 +195,39 @@ class SourceSelector(QDialog):
         content = layout
         self.setWindowTitle(self._BASE_TITLE)
 
-        content.addWidget(_group_heading("YOUR VOICE"))
+        # Header: icon + title + one-line explanation of what this dialog
+        # controls, so it reads as a destination rather than a bare list of
+        # dropdowns (Screen 3 of the Sources-dialog redesign).
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 11)
+        header_layout.setSpacing(11)
+        header_icon = QLabel()
+        header_icon.setPixmap(colored_pixmap("waveform", "#9184d9", 20))
+        header_layout.addWidget(header_icon)
+        header_text = QVBoxLayout()
+        header_text.setSpacing(2)
+        header_title = QLabel(self._BASE_TITLE)
+        header_title.setObjectName("sourcesHeaderTitle")
+        header_subtitle = QLabel("What TalkTrack records when you press Record")
+        header_subtitle.setObjectName("sourcesHeaderSubtitle")
+        header_text.addWidget(header_title)
+        header_text.addWidget(header_subtitle)
+        header_layout.addLayout(header_text, 1)
+        content.addWidget(header)
+
+        # Shown instead of enabling all the controls below while a
+        # recording is in progress (set_enabled(False)) so the dialog
+        # explains itself rather than just going gray.
+        self._recording_lock_notice = QLabel(
+            "Sources are locked while recording — stop or pause to change them."
+        )
+        self._recording_lock_notice.setObjectName("sourcesLockNotice")
+        self._recording_lock_notice.setWordWrap(True)
+        self._recording_lock_notice.setVisible(False)
+        content.addWidget(self._recording_lock_notice)
+
+        content.addWidget(_group_heading("YOUR VOICE", "microphone"))
 
         # Microphone selector
         mic_row = QHBoxLayout()
@@ -181,7 +269,7 @@ class SourceSelector(QDialog):
         mic_count = self._config.get("audio", "mic_count") if self._config else 1
         self._mic2_row_widget.setVisible(mic_count >= 2)
 
-        content.addWidget(_group_heading("THE CALL"))
+        content.addWidget(_group_heading("THE CALL", "phone-incoming"))
 
         # System audio section
         if self._win11:
@@ -197,12 +285,23 @@ class SourceSelector(QDialog):
         self._capture_warning.setVisible(False)
         content.addWidget(self._capture_warning)
 
+        # Footer verdict: reuses the same PreflightWidget + pure truth-table
+        # functions that drive the main capture bar, so "ready to record"
+        # never disagrees between the two surfaces.
+        footer = QFrame()
+        footer.setObjectName("sourcesFooter")
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(11, 11, 11, 11)
+        self._verdict = PreflightWidget()
+        footer_layout.addWidget(self._verdict)
+        content.addWidget(footer)
 
-
-        # Keep the title in sync with selection state.
+        # Keep the title and footer verdict in sync with selection state.
         self.loopback_combo.currentIndexChanged.connect(self._update_section_title)
         self.loopback_combo.currentIndexChanged.connect(self._save_loopback_selection)
         self.loopback_combo.currentIndexChanged.connect(lambda: self.check_device_mismatches())
+        self.mic_combo.currentIndexChanged.connect(self._update_verdict)
+        self.mismatch_changed.connect(self._update_verdict)
         if self.app_list is not None:
             self.app_list.itemChanged.connect(self._update_section_title)
             # Checking/unchecking an app can flip is_conferencing_blocked();
@@ -240,16 +339,24 @@ class SourceSelector(QDialog):
         self.radio_per_app.setChecked(True)
         self.mode_group.idToggled.connect(self._on_mode_changed)
 
-        # Radios on a single row so they don't push the app list down.
-        # Labelled because "Selected apps / All system audio" alone reads as
-        # a global mode switch rather than a choice about what to capture.
+        # Mode cards replace bare radios: each names the consequence of
+        # picking it, so the choice isn't a coin flip between two labels
+        # (Screen 3 of the Sources-dialog redesign).
         mode_row = QHBoxLayout()
-        mode_row.setSpacing(6)
-        mode_label = QLabel("Capture:")
-        mode_label.setFixedWidth(_LABEL_WIDTH)
-        mode_row.addWidget(mode_label)
-        mode_row.addWidget(self.radio_per_app, 1)
-        mode_row.addWidget(self.radio_legacy, 1)
+        mode_row.setSpacing(8)
+        per_app_card = _ModeCard(
+            self.radio_per_app,
+            "One or more apps only. Conferencing apps block this and "
+            "record silent.",
+        )
+        legacy_card = _ModeCard(
+            self.radio_legacy,
+            "Everything your speakers play. Works with Teams, Zoom and "
+            "WebEx.",
+            recommended=True,
+        )
+        mode_row.addWidget(per_app_card, 1)
+        mode_row.addWidget(legacy_card, 1)
         parent_layout.addLayout(mode_row)
 
         # App list (checkable). Scrollbar shows automatically when the list
@@ -261,27 +368,13 @@ class SourceSelector(QDialog):
         self.app_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         parent_layout.addWidget(self.app_list, 1)
 
-        # Warning shown when a conferencing app is checked in per-app mode.
-        # Those apps set AUDCLNT_STREAMFLAGS_EXCLUDE_FROM_PROCESS_LOOPBACK_
-        # CAPTURE on their call stream, so per-app loopback gets silence.
-        # Legacy mode (device-level WASAPI tap) bypasses the opt-out.
-        self.conferencing_warning = QWidget()
-        self.conferencing_warning.setObjectName("conferencingWarning")
-        warning_row = QHBoxLayout(self.conferencing_warning)
-        warning_row.setContentsMargins(0, 0, 0, 0)
-        warning_row.setSpacing(6)
-        warning_icon = QLabel()
-        warning_icon.setPixmap(colored_pixmap("warning", "#f9e2af", 14))
-        warning_icon.setAlignment(Qt.AlignmentFlag.AlignTop)
-        warning_row.addWidget(warning_icon)
-        warning_text = QLabel(
-            "Teams / Zoom / WebEx block per-app recording. "
-            "Switch to \"All system audio\" to capture calls."
-        )
-        warning_text.setWordWrap(True)
-        warning_row.addWidget(warning_text, 1)
-        self.conferencing_warning.setVisible(False)
-        parent_layout.addWidget(self.conferencing_warning)
+        # Conferencing apps (Teams/Zoom/WebEx/etc.) set AUDCLNT_STREAMFLAGS_
+        # EXCLUDE_FROM_PROCESS_LOOPBACK_CAPTURE on their call stream, so
+        # per-app loopback gets silence. Rather than a banner that only
+        # appears after the user has already checked one, each such row in
+        # the list above is rendered disabled with the reason appended to
+        # its own label (see _refresh_app_list) — legacy mode (device-level
+        # WASAPI tap) bypasses the opt-out and is unaffected.
 
         # Output picker, shown instead of the app list in "All system audio"
         # mode. Carries its own label row so it doesn't appear as a bare
@@ -330,7 +423,7 @@ class SourceSelector(QDialog):
     def _update_section_title(self):
         """Update the header text to summarize current capture mode / sources."""
         self.setWindowTitle(f"{self._BASE_TITLE} {self._selected_sources_text()}")
-        self._update_conferencing_warning()
+        self._update_verdict()
 
     def is_conferencing_blocked(self):
         """True if a checked app in per-app mode opts out of process-loopback
@@ -343,18 +436,34 @@ class SourceSelector(QDialog):
             item = self.app_list.item(i)
             if item.checkState() != Qt.CheckState.Checked:
                 continue
-            # Strip the trailing "  (N processes)" / "  (not in call)"
-            # suffix added at list-render time so the match keys on name only.
+            # Strip the trailing "  (N processes)" / "  (not in call)" /
+            # blocked-reason suffix added at list-render time so the match
+            # keys on name only.
             label = item.text().split("  ")[0]
             if label in CONFERENCING_APPS:
                 return True
         return False
 
-    def _update_conferencing_warning(self):
-        """Show warning if a conferencing app is checked in per-app mode."""
-        if not hasattr(self, "conferencing_warning"):
+    def _update_verdict(self):
+        """Recompute the footer verdict from the same truth-table functions
+        that drive the main capture bar's pre-flight badge."""
+        if not hasattr(self, "_verdict"):
             return
-        self.conferencing_warning.setVisible(self.is_conferencing_blocked())
+        has_mic = self.get_selected_mic() is not None
+        mic_check = preflight_status.compute_mic_check(has_mic, self.mic_mismatch)
+
+        if self.is_per_app_mode():
+            has_source = bool(self.get_selected_app_pids())
+        else:
+            has_source = self.get_selected_loopback() is not None
+        call_check = preflight_status.compute_call_check(
+            has_source, self.is_conferencing_blocked(), self.output_mismatch
+        )
+
+        verdict, title, subtitle = preflight_status.compute_verdict(
+            mic_check, call_check, (preflight_status.READY, "", "")
+        )
+        self._verdict.set_verdict(verdict, title, subtitle)
 
     def _start_auto_refresh(self):
         if self._auto_refresh_timer is None:
@@ -419,13 +528,27 @@ class SourceSelector(QDialog):
         any_checked_active = False
 
         for app in apps:
+            blocked = app["name"] in CONFERENCING_APPS
             if app.get("active", False):
                 label = f"{app['name']}  ({len(app['pids'])} process{'es' if len(app['pids']) > 1 else ''})"
             else:
                 label = f"{app['name']}  (not in call)"
+            if blocked:
+                label += "  · blocks per-app capture"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, app["pids"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            if blocked:
+                # Disabled rather than merely warned-about: prevents new
+                # silent-recording selections outright. A row already
+                # checked from a saved config stays checked (still grayed)
+                # so is_conferencing_blocked() keeps surfacing it via the
+                # footer verdict until the user picks "All system audio".
+                item.setToolTip(
+                    f"{app['name']} blocks per-app capture during calls. "
+                    "Switch to \"All system audio\" to record it."
+                )
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             if app["name"] in checked_names:
                 item.setCheckState(Qt.CheckState.Checked)
                 if app.get("active", False):
@@ -734,6 +857,8 @@ class SourceSelector(QDialog):
         if self.mode_group:
             self.radio_per_app.setEnabled(enabled)
             self.radio_legacy.setEnabled(enabled)
+        if hasattr(self, "_recording_lock_notice"):
+            self._recording_lock_notice.setVisible(not enabled)
 
     def mark_capture_failures(self, failures):
         """Show/hide the ⚠ indicator when per-app activation fails for some PIDs.
@@ -774,6 +899,28 @@ class SourceSelector(QDialog):
         )
         self._capture_warning.setToolTip("\n".join(lines))
         self._capture_warning.setVisible(True)
+
+    def get_selected_mic_name(self):
+        """Display name of the selected mic, for the capture bar's
+        "CAPTURING" sources block. Public wrapper around the mismatch
+        check's own lookup."""
+        return self._selected_mic_name()
+
+    def get_selected_source_name(self):
+        """Display name for the call/system-audio side of the "CAPTURING"
+        sources block: checked app names in per-app mode (a capture-mode
+        label rather than the raw endpoint name in legacy mode — the mode
+        is what matters there, not which device happens to be selected)."""
+        if self.is_per_app_mode():
+            if self.app_list is None:
+                return None
+            names = [
+                self.app_list.item(i).text()
+                for i in range(self.app_list.count())
+                if self.app_list.item(i).checkState() == Qt.CheckState.Checked
+            ]
+            return " + ".join(names) if names else None
+        return "All system audio" if self._selected_output_name() else None
 
     def _selected_mic_name(self):
         idx = self.mic_combo.currentData()

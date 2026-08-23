@@ -72,6 +72,7 @@ DEFAULT_CONFIG = {
         "silence_auto_stop": True,
         "silence_duration": 120,
         "minimize_to_tray": False,
+        "launch_in_compact_mode": False,
         "show_tray_hint": True,
         "start_menu_offer_done": False,
         "prompt_tags_after_recording": True,
@@ -98,6 +99,7 @@ DEFAULT_CONFIG = {
         "activity_widget_position": None,
         "compact_strip_visible": False,
         "compact_strip_position": None,
+        "strip_variant": "full",
     },
     "calendar": {
         "enabled": False,
