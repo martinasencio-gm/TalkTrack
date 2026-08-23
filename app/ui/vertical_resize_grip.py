@@ -6,7 +6,7 @@ a zero-height spacer. This is the textarea-resize-handle pattern instead:
 a fixed-height bar placed directly below the target, translating drag
 distance into the target's fixed height.
 """
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QMouseEvent, QPainter
 from PyQt6.QtWidgets import QWidget
 
@@ -45,7 +45,7 @@ class VerticalResizeGrip(QWidget):
         cy = self.height() // 2
         cx = self.width() // 2
         for dx in (-7, 0, 7):
-            painter.drawEllipse(QPoint(cx + dx, cy), 1.5, 1.5)
+            painter.drawEllipse(QPointF(cx + dx, cy), 1.5, 1.5)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
