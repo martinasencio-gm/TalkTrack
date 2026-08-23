@@ -76,6 +76,7 @@ DEFAULT_CONFIG = {
         "start_menu_offer_done": False,
         "prompt_tags_after_recording": True,
         "auto_tag_by_name": True,
+        "replace_you_with_name": False,
     },
     "meeting_detection": {
         "mode": "suggest",          # "off" | "suggest" | "auto"
@@ -95,6 +96,8 @@ DEFAULT_CONFIG = {
         "audio_sources_collapsed": False,
         "recordings_collapsed": False,
         "activity_widget_position": None,
+        "compact_strip_visible": False,
+        "compact_strip_position": None,
     },
     "calendar": {
         "enabled": False,

@@ -11,16 +11,15 @@ import sounddevice as sd
 logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTabWidget, QMenuBar, QStatusBar, QMessageBox, QLabel, QInputDialog,
-    QFrame, QPushButton
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLabel, QSplitter, QFrame, QMenu, QMessageBox, QApplication, QInputDialog, QStatusBar
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QThread
 from PyQt6.QtGui import QAction
 
 from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
-from app.utils import batch_queue, session_io
+from app.utils import batch_queue, session_io, preflight_status
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
@@ -36,11 +35,15 @@ from app.ui.source_selector import SourceSelector
 from app.ui.transcript_viewer import TranscriptViewer
 from app.ui.notes_panel import NotesPanel
 from app.ui.recordings_list import RecordingsList
+from app.ui.inspector import InspectorWidget
+from app.ui.notification_region import NotificationRegion
 from app.ui.collapsible_section import CollapsibleSection
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.tray_icon import TrayIcon
 from app.ui.activity_indicator import ActivityIndicator, resolve_activity_state
+from app.ui.compact_strip import CompactStrip, resolve_compact_strip_state
+from app.ui.level_meter import compute_rms_db, db_to_fraction
 from app.ui.recording_header import RecordingHeader, match_event_by_subject
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
@@ -152,6 +155,21 @@ class MainWindow(QMainWindow):
         self._activity_widget.restore_requested.connect(self._restore_from_tray)
         self._activity_widget.position_changed.connect(self._on_activity_widget_moved)
 
+        self._compact_strip_done = False
+        self.compact_strip = CompactStrip()
+        self.compact_strip.expand_requested.connect(self._restore_from_tray)
+        self.compact_strip.open_transcript_requested.connect(self._restore_from_tray)
+        self.compact_strip.record_requested.connect(self._start_recording)
+        self.compact_strip.stop_requested.connect(self._stop_recording)
+        self.compact_strip.pause_requested.connect(self._toggle_pause)
+        self.compact_strip.resume_requested.connect(self._toggle_pause)
+        self.compact_strip.cancel_requested.connect(self._cancel_transcription)
+        self.compact_strip.position_changed.connect(self._on_compact_strip_moved)
+        self.compact_strip.full_ui_requested.connect(self._switch_to_full_ui)
+        self._update_compact_strip_state()
+        if self.config.get("ui", "compact_strip_visible"):
+            self.compact_strip_action.setChecked(True)
+
         QTimer.singleShot(500, self._check_startup_status)
 
     def _setup_menu(self):
@@ -185,6 +203,14 @@ class MainWindow(QMainWindow):
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        self.compact_strip_action = QAction("Show Compact &Strip", self)
+        self.compact_strip_action.setCheckable(True)
+        self.compact_strip_action.toggled.connect(self._on_compact_strip_toggled)
+        view_menu.addAction(self.compact_strip_action)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -256,194 +282,100 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Main splitter: left (controls) | right (tabs)
-        splitter = CollapsibleSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(12)
-
-        # Left panel: controls at top, sources collapsible, recordings below
-        left_panel = QWidget()
-        left_panel.setObjectName("leftPanel")
-        left_panel.setFixedWidth(400)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(8, 8, 8, 8)
-
-        # Recording controls (buttons row + timer/meters row)
+        # Top: Capture Bar
         self.recording_controls = RecordingControls()
-        left_layout.addWidget(self.recording_controls)
+        main_layout.addWidget(self.recording_controls)
 
-        # Meters + waveform share a bordered region so recording state can
-        # accent the whole capture area at once (see _on_state_changed) —
-        # otherwise the only sign a recording is live is a small blinking dot.
-        self.capture_region = QFrame()
-        self.capture_region.setObjectName("captureRegion")
-        capture_layout = QVBoxLayout(self.capture_region)
-        capture_layout.setContentsMargins(4, 4, 4, 4)
-        capture_layout.setSpacing(4)
+        # Top: Notification Region
+        self.notification_region = NotificationRegion()
+        main_layout.addWidget(self.notification_region)
 
-        self.meters_panel = MetersPanel()
-        self.meters_panel.setObjectName("metersPanel")
-        self.meters_panel.set_gain(self.config.get("audio", "mic_gain"))
-        self.meters_panel.gain_changed.connect(self._on_gain_changed)
-        capture_layout.addWidget(self.meters_panel)
+        # Three-column splitter
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(1)
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
 
-        # Idle-time level monitors. Off by default every launch — user
-        # enables them via the Test Mic button in recording_controls.
-        # The system monitor uses WASAPI loopback regardless of capture mode
-        # (per-app capture is heavier and not worth spinning up for preview).
-        self.mic_monitor = MicMonitor(
-            sample_rate=self.config.get("audio", "sample_rate"),
-            level_callback=self.meters_panel.update_mic_level,
-        )
-        # Second monitor for dual-mic mode. Both feed the same meter
-        # callback so the UI behaves like recording: whichever mic produced
-        # the most recent chunk drives the bar (no true sum — matches
-        # DualAudioCapture's shared _mic_level_callback semantics).
-        self.mic_monitor_2 = MicMonitor(
-            sample_rate=self.config.get("audio", "sample_rate"),
-            level_callback=self.meters_panel.update_mic_level,
-        )
-        self.system_monitor = None  # LoopbackStream, created per-test
-
-        # Waveform display (hidden until recording starts)
-        self.waveform = WaveformDisplay(
-            seconds=5,
-            sample_rate=self.config.get("audio", "sample_rate"),
-        )
-        capture_layout.addWidget(self.waveform)
-
-        left_layout.addWidget(self.capture_region)
-
-        # Audio sources (collapsible). Stretch is toggled dynamically below.
-        self.source_selector = SourceSelector(config=self.config, com_poller=self._com_poller)
-        left_layout.addWidget(self.source_selector)
-
-        # Recordings list wrapped in a CollapsibleSection
+        # Column A: Library
+        self.library_panel = QWidget()
+        library_layout = QVBoxLayout(self.library_panel)
+        library_layout.setContentsMargins(0, 0, 0, 0)
         recordings_dir = self.config.get("output", "directory")
         self.recordings_list = RecordingsList(recordings_dir)
-        self._recordings_section = CollapsibleSection("Recordings", accent="#cba6f7")
-        self._recordings_section.content_layout().addWidget(self.recordings_list)
-        self._recordings_section.set_expanded(
-            not self.config.get("ui", "recordings_collapsed")
-        )
-        left_layout.addWidget(self._recordings_section, 1)
+        library_layout.addWidget(self.recordings_list)
+        self.splitter.addWidget(self.library_panel)
 
-        # Trailing spacer absorbs space only when both sections are collapsed —
-        # otherwise the expanded section claims its stretch factor uncontested.
-        left_layout.addStretch(0)
-        self._left_layout = left_layout
-        self._left_spacer_index = left_layout.count() - 1
-
-        self.source_selector._section.toggled.connect(self._update_left_panel_stretch)
-        self._recordings_section.toggled.connect(self._update_left_panel_stretch)
-        self._recordings_section.toggled.connect(
-            lambda expanded: self.config.set("ui", "recordings_collapsed", not expanded)
-        )
-        self._update_left_panel_stretch()
-
-        splitter.addWidget(left_panel)
-
-        # Right panel: tabs for transcript and notes
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(8, 8, 8, 8)
-
-        # Recording header (above tabs)
+        # Column B: Transcript
+        self.transcript_panel = QWidget()
+        transcript_layout = QVBoxLayout(self.transcript_panel)
+        transcript_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.recording_header = RecordingHeader()
-        right_layout.addWidget(self.recording_header)
+        transcript_layout.addWidget(self.recording_header)
 
-        self.tag_prompt_banner = TagPromptBanner()
-        self.tag_prompt_banner.tags_updated.connect(self._on_banner_tags_updated)
-        self.tag_prompt_banner.dismissed.connect(self._on_banner_tags_dismissed)
-        right_layout.addWidget(self.tag_prompt_banner)
+        # Built here (not by TranscriptViewer) because it lives in the
+        # Inspector's "Speakers" section, not the transcript column.
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        self.speaker_panel = SpeakerNamePanel(config=self.config)
 
-        self.calendar_banner = CalendarSuggestionBanner()
-        self.calendar_banner.tag_requested.connect(self._on_calendar_tag_requested)
-        self.calendar_banner.dismissed.connect(self._on_calendar_dismissed)
-        right_layout.addWidget(self.calendar_banner)
+        self.transcript_viewer = TranscriptViewer(config=self.config, speaker_panel=self.speaker_panel)
+        transcript_layout.addWidget(self.transcript_viewer)
+        self.splitter.addWidget(self.transcript_panel)
 
-        self.meeting_banner = MeetingBanner()
-        self.meeting_banner.start_accepted.connect(self._on_meeting_start_accepted)
-        self.meeting_banner.start_dismissed.connect(self._on_meeting_start_dismissed)
-        self.meeting_banner.end_chosen.connect(self._on_meeting_end_chosen)
-        right_layout.addWidget(self.meeting_banner)
+        # Column C: Inspector
+        self.inspector = InspectorWidget()
 
-        self.meeting_toast = MeetingNotificationToast()
-        self.meeting_toast.record_accepted.connect(self._on_meeting_start_accepted)
-        self.meeting_toast.dismissed.connect(self._on_meeting_start_dismissed)
-        self.meeting_toast.end_chosen.connect(self._on_meeting_end_chosen)
-
-        self.tabs = QTabWidget()
-
-        # Transcript tab
-        self.transcript_viewer = TranscriptViewer(config=self.config)
-        self.tabs.addTab(self.transcript_viewer, "Transcript")
-
-        # Notes tab
         self.notes_panel = NotesPanel()
-        self.tabs.addTab(self.notes_panel, "Notes")
+        self.inspector.add_notes_panel(self.notes_panel)
 
-        # Summary tab
+        self.inspector.add_speakers_panel(self.speaker_panel)
+
         self.summary_panel = SummaryPanel()
-        self.tabs.addTab(self.summary_panel, "Summary")
-
-        # Action Items tab
         self.action_items_panel = ActionItemsPanel()
-        self.tabs.addTab(self.action_items_panel, "Action Items")
-
-        # Chat tab
+        self.inspector.add_summary_panel(self.summary_panel, self.action_items_panel)
+        
         self.chat_panel = ChatPanel()
-        self.tabs.addTab(self.chat_panel, "Chat")
+        self.inspector.add_chat_panel(self.chat_panel)
+        
+        self.splitter.addWidget(self.inspector)
 
-        right_layout.addWidget(self.tabs)
-        splitter.addWidget(right_panel)
+        # Set default sizes
+        self.splitter.setSizes([260, 600, 322])
+        main_layout.addWidget(self.splitter, 1)
 
-        splitter.setSizes([400, 860])
-        main_layout.addWidget(splitter)
-
-        self._main_splitter = splitter
-        self._left_panel = left_panel
-        margins = main_layout.contentsMargins()
-        self._collapsed_window_width = (
-            left_panel.width() + splitter.handleWidth()
-            + margins.left() + margins.right()
+        # Background monitors
+        self.mic_monitor = MicMonitor(
+            sample_rate=self.config.get("audio", "sample_rate"),
+            level_callback=lambda l, p: None,
         )
-        self._min_window_width = self.minimumWidth()
-        self._expanded_window_width = self.width()
-        splitter.about_to_toggle.connect(self._apply_collapsed_window_size)
-        splitter.collapse_changed.connect(self._on_right_panel_collapse_changed)
-        if self.config.get("ui", "right_panel_collapsed"):
-            splitter.set_collapsed(True)
-
-    def _apply_collapsed_window_size(self, collapsing):
-        if collapsing:
-            self._expanded_window_width = self.width()
-            self.setMinimumWidth(self._collapsed_window_width)
-            self.resize(self._collapsed_window_width, self.height())
-        else:
-            self.setMinimumWidth(self._min_window_width)
-            self.resize(self._expanded_window_width, self.height())
-        # resize() doesn't propagate to child layouts synchronously - the
-        # splitter must already report its new width when toggle_collapse()
-        # reads sizes() right after this signal returns.
-        QApplication.processEvents()
+        self.mic_monitor_2 = MicMonitor(
+            sample_rate=self.config.get("audio", "sample_rate"),
+            level_callback=lambda l, p: None,
+        )
+        self.system_monitor = None
+        
+        # Instantiate these so the rest of MainWindow doesn't crash
+        from app.ui.source_selector import SourceSelector
+        self.source_selector = SourceSelector(config=self.config, com_poller=self._com_poller)
+        self.source_selector.hide()
+        self.tag_prompt_banner = TagPromptBanner()
+        self.tag_prompt_banner.hide()
+        self.calendar_banner = CalendarSuggestionBanner()
+        self.calendar_banner.hide()
+        self.meeting_banner = MeetingBanner()
+        self.meeting_banner.hide()
+        self.meeting_toast = MeetingNotificationToast()
+        self.meeting_toast.hide()
+        self.waveform = WaveformDisplay(seconds=5, sample_rate=16000)
+        self.meters_panel = MetersPanel()
 
     def _on_right_panel_collapse_changed(self, collapsed):
         self.config.set("ui", "right_panel_collapsed", collapsed)
 
-    def _update_left_panel_stretch(self, *_):
-        audio_expanded = self.source_selector._section.is_expanded()
-        rec_expanded = self._recordings_section.is_expanded()
-        self._left_layout.setStretchFactor(
-            self.source_selector, 1 if audio_expanded else 0
-        )
-        self._left_layout.setStretchFactor(
-            self._recordings_section, 1 if rec_expanded else 0
-        )
-        self._left_layout.setStretch(
-            self._left_spacer_index, 0 if (audio_expanded or rec_expanded) else 1
-        )
+
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
@@ -472,12 +404,19 @@ class MainWindow(QMainWindow):
         self.statusbar.addPermanentWidget(self.batch_indicator)
 
     def _connect_signals(self):
+        self.inspector.connect_provider_requested.connect(
+            lambda: self._open_settings(initial_tab="AI Assistant")
+        )
+        self.transcript_viewer.open_last_requested.connect(self._open_last_recording)
+
         # Recording controls
         self.recording_controls.record_clicked.connect(self._start_recording)
         self.recording_controls.pause_clicked.connect(self._toggle_pause)
         self.recording_controls.stop_clicked.connect(self._stop_recording)
         self.recording_controls.mute_clicked.connect(self._toggle_mute)
         self.recording_controls.test_mic_toggled.connect(self._on_test_mic_toggled)
+        self.recording_controls.compact_mode_requested.connect(self._switch_to_compact_bar)
+        self.recording_controls.cancel_clicked.connect(self._cancel_transcription)
 
         # Recorder signals
         self.recorder.state_changed.connect(self._on_state_changed)
@@ -489,8 +428,12 @@ class MainWindow(QMainWindow):
         self.recorder.error_occurred.connect(self._on_error)
         self.recorder.mic_level.connect(self.meters_panel.update_mic_level)
         self.recorder.mic_level.connect(self.waveform.append_audio)
+        self.recorder.mic_level.connect(self.recording_controls.live_meters.update_mic_level)
+        self.recorder.mic_level.connect(self._on_compact_strip_mic_level)
         self.recorder.system_level.connect(self.meters_panel.update_system_level)
         self.recorder.system_level.connect(self.waveform.append_system_audio)
+        self.recorder.system_level.connect(self.recording_controls.live_meters.update_system_level)
+        self.recorder.system_level.connect(self._on_compact_strip_system_level)
 
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._on_viewer_transcribe_requested)
@@ -512,6 +455,12 @@ class MainWindow(QMainWindow):
 
         # Mic device change: restart monitor on new device if it's running
         self.source_selector.mic_changed.connect(self._on_mic_device_changed)
+
+        # Pre-flight verdict: recompute on anything that could change it.
+        self.recording_controls.sources_clicked.connect(self._open_source_selector)
+        self.source_selector.devices_changed.connect(self._update_preflight)
+        self.source_selector.mic_changed.connect(lambda _: self._update_preflight())
+        self.source_selector.mismatch_changed.connect(self._update_preflight)
 
         # Auto-stop when call ends / auto-start when call begins
         self.source_selector.apps_went_inactive.connect(self._on_apps_went_inactive)
@@ -538,6 +487,8 @@ class MainWindow(QMainWindow):
         self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
+        self._update_preflight()
+
     def _start_recording(self):
         self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
@@ -553,20 +504,19 @@ class MainWindow(QMainWindow):
         loopback = self.source_selector.get_selected_loopback()
 
         # Validate: need at least one audio source
+        from app.ui.notification_region import PRIORITY_BLOCKING_ERROR
         if mic is None and mic2 is None and loopback is None and not app_pids:
-            QMessageBox.warning(
-                self, "No Audio Source",
-                "Please select at least one audio source "
-                "(microphone, system audio, or app)."
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text="Please select at least one audio source (microphone, system audio, or app)."
             )
             return
 
         # Validate: per-app mode needs at least one app checked
         if capture_mode == "per_app" and not app_pids:
-            QMessageBox.warning(
-                self, "No Apps Selected",
-                "Select at least one app to capture, "
-                "or switch to 'Capture all system audio' mode."
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text="Select at least one app to capture, or switch to 'Capture all system audio' mode."
             )
             return
 
@@ -622,6 +572,7 @@ class MainWindow(QMainWindow):
         self.recording_controls.set_muted(self._mic_muted)
         self.waveform.set_mic_muted(self._mic_muted)
         self.status_label.setText("Microphone muted" if self._mic_muted else "Recording...")
+        self._update_compact_strip_state()
 
     def _on_test_mic_toggled(self, enabled):
         """User clicked Test Mic. Start or stop mic + system level monitors."""
@@ -708,6 +659,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.debug("System monitor stop error: %s", e)
         self.system_monitor = None
+
+    def _open_source_selector(self):
+        """Sources button on the capture bar. Non-modal — per the redesign,
+        a modal here would steal focus from a call in progress."""
+        self.source_selector.show()
+        self.source_selector.raise_()
+        self.source_selector.activateWindow()
 
     def _on_mic_device_changed(self, device_index):
         """Mic dropdown changed. If the monitor is running, move it to the new device."""
@@ -907,13 +865,11 @@ class MainWindow(QMainWindow):
         self.recording_controls.set_state(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
 
-        self.capture_region.setProperty("recording", state == RecordingState.RECORDING)
-        self.capture_region.style().unpolish(self.capture_region)
-        self.capture_region.style().polish(self.capture_region)
         if hasattr(self, "tray") and self.tray.is_supported():
             self.tray.set_state(state, int(self.recorder.get_elapsed_time()))
 
         if state == RecordingState.RECORDING:
+            self._compact_strip_done = False
             self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
@@ -937,6 +893,7 @@ class MainWindow(QMainWindow):
             self.waveform.stop()
             self.recording_controls.reset_timer()
             self.meters_panel.reset()
+            self.recording_controls.live_meters.reset()
             self._mic_muted = False
             self.waveform.set_mic_muted(False)
             self._current_capture_failures = {}
@@ -954,6 +911,10 @@ class MainWindow(QMainWindow):
             self.tray.set_state(self.recorder.state, int(seconds))
         self._check_silent_capture(seconds)
         self._update_activity_visibility()
+        total = max(0, int(seconds))
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        self.compact_strip.update_timer(f"{h:02d}:{m:02d}:{s:02d}")
 
     def _check_silent_capture(self, seconds):
         """Warn once if per-app capture has produced zero audio.
@@ -1146,9 +1107,6 @@ class MainWindow(QMainWindow):
 
         # Refresh recordings list
         self.recordings_list.refresh()
-
-        # Switch to transcript tab
-        self.tabs.setCurrentWidget(self.transcript_viewer)
 
         # Update recording header
         self.recording_header.set_recording(session)
@@ -1619,6 +1577,45 @@ class MainWindow(QMainWindow):
 
     def _on_diarize_toggled(self, enabled):
         self.config.set("diarization", "enabled", enabled)
+        self._update_preflight()
+
+    def _update_preflight(self):
+        """Recompute the capture bar's pre-flight verdict from real state.
+
+        Triggered on device change, mismatch recompute, capture-mode change,
+        and model/settings change (see docs/superpowers/specs for the
+        capture-bar redesign) — the three checks and the verdict block were
+        previously hardcoded placeholders.
+        """
+        has_mic = self.source_selector.get_selected_mic() is not None
+        mic_status, mic_text = preflight_status.compute_mic_check(
+            has_mic, self.source_selector.mic_mismatch
+        )
+
+        if self.source_selector.is_per_app_mode():
+            has_source = bool(self.source_selector.get_selected_app_pids())
+        else:
+            has_source = self.source_selector.get_selected_loopback() is not None
+        call_status, call_text = preflight_status.compute_call_check(
+            has_source,
+            self.source_selector.is_conferencing_blocked(),
+            self.source_selector.output_mismatch,
+        )
+
+        diarization_enabled = self.transcript_viewer.diarization_enabled()
+        hf_token_present = bool(self.config.get("diarization", "hf_token"))
+        model_status, model_text = preflight_status.compute_transcription_check(
+            diarization_enabled, hf_token_present
+        )
+
+        verdict, title, subtitle = preflight_status.compute_verdict(
+            mic_status, call_status, model_status
+        )
+
+        self.recording_controls.preflight.update_checks(
+            mic_status, mic_text, call_status, call_text, model_status, model_text
+        )
+        self.recording_controls.preflight.set_verdict(verdict, title, subtitle)
 
     def _on_diarize_requested(self):
         """Run diarization on the transcript already on screen."""
@@ -1725,6 +1722,8 @@ class MainWindow(QMainWindow):
 
     def _display_final_transcript(self, result, session=None):
         result.merge_adjacent_same_speaker()
+        self._compact_strip_done = True
+        self._update_compact_strip_state()
 
         if session is None:
             session = self._current_session
@@ -1754,6 +1753,18 @@ class MainWindow(QMainWindow):
                 except (json.JSONDecodeError, OSError):
                     pass
 
+        if self.config.get("general", "replace_you_with_name") and "You" not in speaker_names:
+            if any(getattr(s, "speaker", "") == "You" for s in result.segments):
+                user_name = get_current_user_name(self.config)
+                if user_name and user_name.strip() and user_name.strip().lower() != "you":
+                    speaker_names["You"] = user_name.strip()
+                    if self._current_session:
+                        names_path = Path(self._current_session["directory"]) / "speaker_names.json"
+                        try:
+                            atomic_write_json(names_path, speaker_names, indent=2, ensure_ascii=False)
+                        except OSError:
+                            pass
+
         calendar_event, calendar_attendees = self._load_calendar_event(self._current_session)
 
         self.transcript_viewer.display_transcript(
@@ -1780,6 +1791,7 @@ class MainWindow(QMainWindow):
         self._transcript = result
         self.summary_panel.set_ready()
         self.action_items_panel.set_ready()
+        self.inspector.set_ai_configured(self._ai_provider_configured())
         self._maybe_auto_summarize()
 
         # Update chat panel context
@@ -1787,13 +1799,34 @@ class MainWindow(QMainWindow):
 
         self._process_pending_transcriptions()
 
-    def _on_transcription_error(self, error_msg):
-        self.transcript_viewer.hide_progress()
-        self.status_label.setText("Transcription failed.")
-        if self._is_hidden_to_tray():
-            self._flag_error_notification()
+    def _on_transcription_error(self, error_msg, allow_retry=True):
+        self._transcription_busy = False
+        self.recording_controls.set_state(RecordingState.IDLE)
+        # Check if the active recording in the viewer is the one that failed.
+        # Read the worker's own bound session, not self._current_session — the
+        # user may have switched recordings while the job ran (see
+        # .claude/rules/transcription-pipeline.md "Session binding").
+        from app.ui.notification_region import PRIORITY_BLOCKING_ERROR
+        session = getattr(self._transcription_worker, "session", None)
+        if self._is_current_session(session):
+            # Revert UI block
+            self.transcript_viewer.show_empty_state(True)
+            self.inspector.set_empty_state(True)
+            
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text=f"Transcription Failed: {error_msg}",
+                action_text="Retry" if allow_retry else None,
+                action_callback=self._on_transcribe_selected if allow_retry else None
+            )
         else:
-            QMessageBox.warning(self, "Transcription Error", error_msg)
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text=f"Background transcription failed: {error_msg}",
+                action_text="Retry" if allow_retry else None,
+                action_callback=self._on_transcribe_selected if allow_retry else None
+            )
+        self.recordings_list.refresh_status()
         self._process_pending_transcriptions()
 
     def _on_recording_about_to_delete(self, directory):
@@ -1812,10 +1845,11 @@ class MainWindow(QMainWindow):
         if self._current_session and self._current_session.get("directory") == directory:
             self._current_session = None
             self._transcript = None
-            self.transcript_viewer.clear()
+            self.transcript_viewer.clear(nothing_selected=True)
             self.recording_header.clear()
             self.summary_panel.clear()
             self.action_items_panel.clear()
+            self.inspector.set_empty_state(True)
             self.status_label.setText("Recording deleted.")
 
     def _on_recording_files_changed(self, directory):
@@ -1830,11 +1864,19 @@ class MainWindow(QMainWindow):
         if self._current_session and self._current_session.get("directory") == directory:
             self._current_session = None
             self._transcript = None
-            self.transcript_viewer.clear()
+            self.transcript_viewer.clear(nothing_selected=True)
             self.recording_header.clear()
             self.summary_panel.clear()
             self.action_items_panel.clear()
+            self.inspector.set_empty_state(True)
             self.status_label.setText("Recording updated.")
+
+    def _open_last_recording(self):
+        """The "Open the last one" button in the transcript column's empty
+        state — loads the newest recording, same as double-clicking it."""
+        metadata = self.recordings_list.most_recent_recording()
+        if metadata is not None:
+            self.recordings_list.recording_selected.emit(metadata)
 
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
@@ -1855,6 +1897,7 @@ class MainWindow(QMainWindow):
         self.summary_panel.clear()
         self.action_items_panel.clear()
         self._transcript = None
+        self.inspector.set_empty_state(False)
 
         audio_files = metadata.get("audio_files", {})
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
@@ -1879,6 +1922,11 @@ class MainWindow(QMainWindow):
                     speaker_names = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
+
+        if self.config.get("general", "replace_you_with_name") and "You" not in speaker_names:
+            user_name = get_current_user_name(self.config)
+            if user_name and user_name.strip() and user_name.strip().lower() != "you":
+                speaker_names["You"] = user_name.strip()
 
         # Load a previously saved calendar tag, if any — same lookup used by
         # the just-finished-transcribing path, so browsing to an
@@ -1948,6 +1996,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_transcript') and self._transcript is not None:
             self.summary_panel.set_ready()
             self.action_items_panel.set_ready()
+            self.inspector.set_ai_configured(self._ai_provider_configured())
 
         # Update chat panel context for loaded recording
         self.chat_panel.set_session_dir(metadata["directory"])
@@ -1961,9 +2010,6 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, '_transcript') and self._transcript is not None:
             self._update_chat_context()
-
-        # Switch to transcript tab
-        self.tabs.setCurrentWidget(self.transcript_viewer)
 
     def _on_search_result_selected(self, recording_id, timestamp):
         """Load a recording from a search result."""
@@ -2098,11 +2144,17 @@ class MainWindow(QMainWindow):
                 )
 
     def _on_error(self, error_msg):
-        self.status_label.setText(f"Error: {error_msg}")
+        from app.ui.notification_region import PRIORITY_BLOCKING_ERROR
         if self._is_hidden_to_tray():
             self._flag_error_notification()
         else:
-            QMessageBox.critical(self, "Error", error_msg)
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text=error_msg,
+                action_text="View log",
+                action_callback=self._open_log_file,
+                ttl=0
+            )
 
     def _on_capture_status(self, status):
         """Render initial 'K of N apps capturing' feedback after Record start."""
@@ -2153,8 +2205,8 @@ class MainWindow(QMainWindow):
     def _quit_from_tray(self):
         self.close()
 
-    def _open_settings(self):
-        dialog = SettingsDialog(self.config, self)
+    def _open_settings(self, initial_tab=None):
+        dialog = SettingsDialog(self.config, self, initial_tab=initial_tab)
         if dialog.exec():
             # Update recordings list with potentially new directory
             self.recordings_list.recordings_dir = Path(self.config.get("output", "directory"))
@@ -2166,6 +2218,8 @@ class MainWindow(QMainWindow):
             # The dialog owns the same diarization flag and token the
             # transcript viewer's checkbox mirrors.
             self._sync_diarization_controls()
+            self._update_preflight()
+            self.inspector.set_ai_configured(self._ai_provider_configured())
 
     def _open_recordings_folder(self):
         import os
@@ -2607,6 +2661,9 @@ class MainWindow(QMainWindow):
             return
         self._run_summarize()
 
+    def _ai_provider_configured(self):
+        return self.config.get("ai", "provider") != "none"
+
     def _run_summarize(self):
         from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items
         from app.ai.provider_factory import create_provider
@@ -2786,6 +2843,10 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def _update_activity_visibility(self):
+        self._update_compact_strip_state()
+        self.recording_controls.set_transcribing(
+            self._transcription_busy(), self._current_transcription_percent
+        )
         self.recordings_list.set_transcribing(transcribing_directories(
             [self._transcription_worker, self._diarization_worker,
              self._simple_diarize_worker],
@@ -2808,6 +2869,56 @@ class MainWindow(QMainWindow):
             self._activity_widget.set_activity(busy_state, elapsed, percent)
         elif self._activity_widget.isVisible():
             self._activity_widget.hide()
+
+    def _on_compact_strip_toggled(self, checked):
+        if checked:
+            x, y = self._compact_strip_position()
+            self.compact_strip.move(x, y)
+            self._update_compact_strip_state()
+            self.compact_strip.show()
+        else:
+            self.compact_strip.hide()
+        self.config.set("ui", "compact_strip_visible", checked)
+
+    def _switch_to_compact_bar(self):
+        """Double-click on the capture bar: swap the full window for the
+        floating compact strip. Routed through the same checkable action
+        the View menu uses, so both stay in sync and the choice persists."""
+        self.compact_strip_action.setChecked(True)
+        self.hide()
+
+    def _switch_to_full_ui(self):
+        """Double-click on the compact strip: swap back to the full window."""
+        self.compact_strip_action.setChecked(False)
+        self._restore_from_tray()
+
+    def _compact_strip_position(self):
+        saved = self.config.get("ui", "compact_strip_position")
+        if isinstance(saved, (list, tuple)) and len(saved) == 2:
+            return saved[0], saved[1]
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return 0, 0
+        geo = screen.availableGeometry()
+        return geo.center().x() - 350, geo.top() + 24
+
+    def _on_compact_strip_moved(self, x, y):
+        self.config.set("ui", "compact_strip_position", [x, y])
+
+    def _update_compact_strip_state(self):
+        state = resolve_compact_strip_state(
+            self.recorder.state, self._mic_muted, self._transcription_busy(),
+            self._compact_strip_done,
+        )
+        self.compact_strip.set_state(state)
+
+    def _on_compact_strip_mic_level(self, audio_chunk):
+        pct = int(db_to_fraction(compute_rms_db(audio_chunk)) * 100)
+        self.compact_strip.update_meters(pct, self.compact_strip.sys_meter.value())
+
+    def _on_compact_strip_system_level(self, audio_chunk):
+        pct = int(db_to_fraction(compute_rms_db(audio_chunk)) * 100)
+        self.compact_strip.update_meters(self.compact_strip.mic_meter.value(), pct)
 
     def _activity_widget_position(self):
         saved = self.config.get("ui", "activity_widget_position")

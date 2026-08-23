@@ -7,6 +7,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from app.utils.icons import colored_pixmap
+
+_CALENDAR_ICON_COLOR = "#9397ab"
+_CALENDAR_ICON_SIZE = 12
+
 
 def _display_name_from_metadata(metadata):
     """Extract display name from metadata, falling back to directory name."""
@@ -40,10 +45,10 @@ def _format_transcribe_line(model_size, transcribe_seconds):
 
 
 def _format_calendar_line(calendar_event):
-    """Format a calendar_event.json dict as a display line."""
+    """Format a calendar_event.json dict as a display line (icon shown separately)."""
     subject = calendar_event.get("subject", "")
     attendees = calendar_event.get("attendees", [])
-    line = f"\U0001F4C5 {subject}"
+    line = subject
     if attendees:
         count = len(attendees)
         noun = "attendee" if count == 1 else "attendees"
@@ -145,6 +150,12 @@ class RecordingHeader(QWidget):
 
         # Calendar event line + remap button
         calendar_row = QHBoxLayout()
+        self.calendar_icon = QLabel()
+        self.calendar_icon.setPixmap(
+            colored_pixmap("calendar-blank", _CALENDAR_ICON_COLOR, _CALENDAR_ICON_SIZE)
+        )
+        self.calendar_icon.hide()
+        calendar_row.addWidget(self.calendar_icon)
         self.calendar_label = QLabel("")
         self.calendar_label.setObjectName("recordingCalendarInfo")
         self.calendar_label.hide()
@@ -201,10 +212,12 @@ class RecordingHeader(QWidget):
 
         if calendar_event:
             self.calendar_label.setText(_format_calendar_line(calendar_event))
+            self.calendar_icon.show()
             self.calendar_label.show()
             self.change_calendar_btn.show()
         else:
             self.calendar_label.clear()
+            self.calendar_icon.hide()
             self.calendar_label.hide()
             self.change_calendar_btn.hide()
 

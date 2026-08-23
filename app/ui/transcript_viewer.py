@@ -12,6 +12,10 @@ from PyQt6.QtGui import QShortcut, QKeySequence
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 from app.ui.transcript_search_bar import TranscriptSearchBar
+from app.utils.icons import colored_pixmap
+
+_EMPTY_ICON_COLOR = "#45475a"
+_EMPTY_ICON_SIZE = 34
 
 
 def _format_progress_text(message, elapsed_seconds, percent=None):
@@ -62,8 +66,9 @@ class TranscriptViewer(QWidget):
     speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
     diarize_requested = pyqtSignal()        # run diarization on the loaded transcript
     diarize_toggled = pyqtSignal(bool)      # "Identify speakers" checkbox changed
+    open_last_requested = pyqtSignal()      # "Open the last one" clicked in the empty state
 
-    def __init__(self, config=None, parent=None):
+    def __init__(self, config=None, parent=None, speaker_panel=None):
         super().__init__(parent)
         self._config = config
         self._transcript = None
@@ -84,6 +89,7 @@ class TranscriptViewer(QWidget):
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
+        self._injected_speaker_panel = speaker_panel
         self._setup_ui()
 
     def _setup_ui(self):
@@ -157,11 +163,17 @@ class TranscriptViewer(QWidget):
         self.status_label.hide()
         layout.addWidget(self.status_label)
 
-        # Speaker name panel
-        from app.ui.speaker_name_panel import SpeakerNamePanel
-        self.speaker_panel = SpeakerNamePanel(config=self._config)
-        self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
-        layout.addWidget(self.speaker_panel)
+        # Speaker name panel. Normally injected by MainWindow (it lives in
+        # the Inspector's "Speakers" section, not this column) — building
+        # our own here is a fallback for standalone construction (tests).
+        if self._injected_speaker_panel is not None:
+            self.speaker_panel = self._injected_speaker_panel
+            self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
+        else:
+            from app.ui.speaker_name_panel import SpeakerNamePanel
+            self.speaker_panel = SpeakerNamePanel(config=self._config)
+            self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
+            layout.addWidget(self.speaker_panel)
 
         # Find/replace bar
         self.search_bar = TranscriptSearchBar()
@@ -188,12 +200,8 @@ class TranscriptViewer(QWidget):
         self.scroll_area.setWidget(self._segments_container)
         self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
-        # Placeholder text
-        self._placeholder = QLabel(
-            "Transcript will appear here after recording and transcription..."
-        )
-        self._placeholder.setObjectName("transcriptPlaceholder")
-        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Placeholder — nothing is selected yet on construction.
+        self._placeholder = self._build_placeholder(nothing_selected=True)
         self._segments_layout.insertWidget(0, self._placeholder)
 
         layout.addWidget(self.scroll_area, 1)
@@ -375,6 +383,13 @@ class TranscriptViewer(QWidget):
 
         # Assign colors to speakers
         speakers = sorted(set(s.speaker for s in transcript.segments if s.speaker))
+        if self._config and self._config.get("general", "replace_you_with_name"):
+            if "You" in speakers and "You" not in self._speaker_names:
+                from app.utils.platform_info import get_current_user_name
+                user_name = get_current_user_name(self._config)
+                if user_name and user_name.strip() and user_name.strip().lower() != "you":
+                    self._speaker_names["You"] = user_name.strip()
+
         self._speaker_colors = {}
         for i, speaker in enumerate(speakers):
             self._speaker_colors[speaker] = SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
@@ -429,8 +444,65 @@ class TranscriptViewer(QWidget):
         self.continue_from_cb.setEnabled(has_audio)
         self._update_diarize_button()
 
-    def clear(self):
-        """Clear all transcript data and reset to empty state."""
+    def _build_placeholder(self, nothing_selected):
+        """The transcript column's empty-state widget.
+
+        nothing_selected=True is the "no recording chosen at all" case
+        (startup, or the loaded recording was deleted/cleared) — icon,
+        title, subtitle, and an "Open the last one" shortcut, per the
+        design handoff's NOTIFICATIONS.md. False is the plainer
+        "a recording is selected but has no transcript yet" case, which
+        that spec doesn't separately define.
+        """
+        if not nothing_selected:
+            placeholder = QLabel(
+                "Transcript will appear here after recording and transcription..."
+            )
+            placeholder.setObjectName("transcriptPlaceholder")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return placeholder
+
+        placeholder = QWidget()
+        placeholder.setObjectName("transcriptPlaceholder")
+        layout = QVBoxLayout(placeholder)
+        layout.setContentsMargins(22, 0, 22, 0)
+        layout.setSpacing(14)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        icon = QLabel()
+        icon.setPixmap(colored_pixmap("waveform", _EMPTY_ICON_COLOR, _EMPTY_ICON_SIZE))
+        layout.addWidget(icon)
+
+        title = QLabel("Nothing selected")
+        title.setStyleSheet("font-size: 20px; font-weight: 500;")
+        layout.addWidget(title)
+
+        subtitle = QLabel(
+            "Pick a recording on the left, or press Record when your call "
+            "starts — TalkTrack will name it from your calendar and "
+            "transcribe it when you stop."
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setMaximumWidth(440)
+        subtitle.setStyleSheet("font-size: 14px; color: #6c7086; line-height: 1.6;")
+        layout.addWidget(subtitle)
+
+        open_last_btn = QPushButton("Open the last one")
+        open_last_btn.setObjectName("primaryAction")
+        open_last_btn.clicked.connect(self.open_last_requested.emit)
+        layout.addWidget(open_last_btn)
+
+        return placeholder
+
+    def clear(self, nothing_selected=False):
+        """Clear all transcript data and reset to empty state.
+
+        nothing_selected=True shows the richer "Nothing selected" empty
+        state instead of the plain "still needs transcribing" placeholder
+        — pass it when nothing is loaded at all (startup, or the loaded
+        recording was deleted), not when a recording is selected but
+        simply hasn't been transcribed yet.
+        """
         if self._player:
             self._player.stop()
         self._playing_index = -1
@@ -448,11 +520,7 @@ class TranscriptViewer(QWidget):
                 item.widget().deleteLater()
 
         # Restore placeholder
-        self._placeholder = QLabel(
-            "Transcript will appear here after recording and transcription..."
-        )
-        self._placeholder.setObjectName("transcriptPlaceholder")
-        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder = self._build_placeholder(nothing_selected=nothing_selected)
         self._segments_layout.addWidget(self._placeholder)
         self._segments_layout.addStretch()
 
@@ -467,6 +535,11 @@ class TranscriptViewer(QWidget):
 
         # Clear speaker panel
         self.speaker_panel.set_speakers([], {})
+
+    def show_empty_state(self, is_empty):
+        """Revert to the placeholder state, e.g. after a transcription error."""
+        if is_empty:
+            self.clear()
 
     def get_speaker_count(self):
         """Return number of unique speakers in current transcript."""

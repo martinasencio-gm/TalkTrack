@@ -1,5 +1,20 @@
 """Tests for SpeakerNamePanel logic."""
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import sys
 import unittest
+
+from PyQt6.QtWidgets import QApplication
+
+_app = None
+
+
+def _get_app():
+    global _app
+    if _app is None:
+        _app = QApplication.instance() or QApplication(sys.argv)
+    return _app
 
 
 class TestSpeakerNamePanelLogic(unittest.TestCase):
@@ -105,6 +120,61 @@ class TestSpeakersHoldingName(unittest.TestCase):
             "SPEAKER_02",
         )
         self.assertEqual(result, [])
+
+
+class TestSpeakerNamePanelEmptyState(unittest.TestCase):
+    """set_speakers([]) used to just self.hide() the whole panel, leaving
+    the Inspector's "Speakers" section blank with no explanation (e.g. a
+    transcript with diarization off). It should show a "No speakers
+    identified" message instead.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def test_starts_in_empty_state(self):
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        panel = SpeakerNamePanel()
+        self.assertFalse(panel._empty_row_widget.isHidden())
+        self.assertTrue(panel._toggle_btn.isHidden())
+        self.assertTrue(panel._rows_container.isHidden())
+
+    def test_set_speakers_with_none_shows_empty_message(self):
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        panel = SpeakerNamePanel()
+        panel.set_speakers([], {})
+        self.assertFalse(panel._empty_row_widget.isHidden())
+        self.assertTrue(panel._toggle_btn.isHidden())
+
+    def test_set_speakers_with_some_hides_empty_message(self):
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        from app.transcription.transcriber import TranscriptSegment
+        panel = SpeakerNamePanel()
+        segments = [TranscriptSegment(start=0, end=1, text="a", speaker="SPEAKER_00")]
+        panel.set_speakers(segments, {})
+        self.assertTrue(panel._empty_row_widget.isHidden())
+        self.assertFalse(panel._toggle_btn.isHidden())
+
+    def test_transitioning_back_to_no_speakers_restores_empty_message(self):
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        from app.transcription.transcriber import TranscriptSegment
+        panel = SpeakerNamePanel()
+        segments = [TranscriptSegment(start=0, end=1, text="a", speaker="SPEAKER_00")]
+        panel.set_speakers(segments, {})
+        panel.set_speakers([], {})
+        self.assertFalse(panel._empty_row_widget.isHidden())
+        self.assertTrue(panel._toggle_btn.isHidden())
+
+    def test_widget_itself_stays_visible_in_empty_state(self):
+        # The panel used to hide() itself entirely, which — pre-redesign,
+        # when it sat directly in the transcript column — collapsed its
+        # space. Now it lives inside the Inspector's own CollapsibleSection,
+        # which needs the panel to stay shown so the empty message renders.
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        panel = SpeakerNamePanel()
+        panel.set_speakers([], {})
+        self.assertFalse(panel.isHidden())
 
 
 if __name__ == "__main__":

@@ -13,7 +13,9 @@ from app.utils.audio_devices import (
     get_default_mic, get_default_output,
     device_names_match, find_matching_device_index
 )
+from app.utils.device_mismatch import compute_device_mismatches
 from app.utils.platform_info import is_windows_11
+from app.utils.icons import colored_pixmap
 from app.ui.collapsible_section import CollapsibleSection
 
 logger = logging.getLogger(__name__)
@@ -87,7 +89,9 @@ def format_legacy_suffix(combo_text):
     return f"({text})"
 
 
-class SourceSelector(QWidget):
+from PyQt6.QtWidgets import QDialog
+
+class SourceSelector(QDialog):
     """Audio source selection widget with per-app and system-audio options.
 
     Signals:
@@ -101,6 +105,9 @@ class SourceSelector(QWidget):
     apps_went_inactive = pyqtSignal()
     # Emitted when a checked app becomes active (for auto-record)
     apps_became_active = pyqtSignal()
+    # Emitted whenever check_device_mismatches recomputes mic_mismatch /
+    # output_mismatch, so the preflight verdict can be refreshed.
+    mismatch_changed = pyqtSignal()
 
     _BASE_TITLE = "Audio Sources"
 
@@ -111,8 +118,8 @@ class SourceSelector(QWidget):
         self._mic_devices = []
         self._loopback_devices = []
         self._last_app_devices = {}
-        self._target_mismatch_mic = None
-        self._target_mismatch_output = None
+        self.mic_mismatch = None
+        self.output_mismatch = None
         self._win11 = is_windows_11()
         self._auto_refresh_timer = None
         self._had_active_apps = False
@@ -128,9 +135,9 @@ class SourceSelector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Collapsible audio sources section
-        self._section = CollapsibleSection(self._BASE_TITLE, accent="#89b4fa")
-        content = self._section.content_layout()
+        # Audio sources dialog
+        content = layout
+        self.setWindowTitle(self._BASE_TITLE)
 
         content.addWidget(_group_heading("YOUR VOICE"))
 
@@ -152,22 +159,7 @@ class SourceSelector(QWidget):
         mic_row.addWidget(self.mic_combo, 1)
         content.addLayout(mic_row)
 
-        # Microphone mismatch warning banner
-        self._mic_mismatch_banner = QFrame()
-        self._mic_mismatch_banner.setObjectName("deviceMismatchBanner")
-        mic_mismatch_layout = QHBoxLayout(self._mic_mismatch_banner)
-        mic_mismatch_layout.setContentsMargins(4, 2, 4, 2)
-        mic_mismatch_layout.setSpacing(6)
-        self._mic_mismatch_label = QLabel("")
-        self._mic_mismatch_label.setObjectName("deviceMismatchText")
-        self._mic_mismatch_label.setWordWrap(True)
-        mic_mismatch_layout.addWidget(self._mic_mismatch_label, 1)
-        self._mic_mismatch_btn = QPushButton("Switch Mic")
-        self._mic_mismatch_btn.setObjectName("deviceMismatchSwitchBtn")
-        self._mic_mismatch_btn.clicked.connect(self._on_switch_mic_clicked)
-        mic_mismatch_layout.addWidget(self._mic_mismatch_btn)
-        self._mic_mismatch_banner.setVisible(False)
-        content.addWidget(self._mic_mismatch_banner)
+
 
         # Second microphone selector (hidden by default)
         self._mic2_row_widget = QWidget()
@@ -197,22 +189,7 @@ class SourceSelector(QWidget):
         else:
             self._setup_legacy_ui(content)
 
-        # Output mismatch warning banner
-        self._output_mismatch_banner = QFrame()
-        self._output_mismatch_banner.setObjectName("deviceMismatchBanner")
-        output_mismatch_layout = QHBoxLayout(self._output_mismatch_banner)
-        output_mismatch_layout.setContentsMargins(4, 2, 4, 2)
-        output_mismatch_layout.setSpacing(6)
-        self._output_mismatch_label = QLabel("")
-        self._output_mismatch_label.setObjectName("deviceMismatchText")
-        self._output_mismatch_label.setWordWrap(True)
-        output_mismatch_layout.addWidget(self._output_mismatch_label, 1)
-        self._output_mismatch_btn = QPushButton("Switch Output")
-        self._output_mismatch_btn.setObjectName("deviceMismatchSwitchBtn")
-        self._output_mismatch_btn.clicked.connect(self._on_switch_output_clicked)
-        output_mismatch_layout.addWidget(self._output_mismatch_btn)
-        self._output_mismatch_banner.setVisible(False)
-        content.addWidget(self._output_mismatch_banner)
+
 
         # Warning label for per-app capture failures
         self._capture_warning = QLabel("")
@@ -220,20 +197,20 @@ class SourceSelector(QWidget):
         self._capture_warning.setVisible(False)
         content.addWidget(self._capture_warning)
 
-        layout.addWidget(self._section)
 
-        # Refresh devices when the section is expanded (picks up any mic or
-        # output device the user plugged in while the section was closed).
-        self._section.toggled.connect(self._on_section_toggled)
-        # Keep the collapsed title suffix in sync with selection state.
+
+        # Keep the title in sync with selection state.
         self.loopback_combo.currentIndexChanged.connect(self._update_section_title)
         self.loopback_combo.currentIndexChanged.connect(self._save_loopback_selection)
         self.loopback_combo.currentIndexChanged.connect(lambda: self.check_device_mismatches())
         if self.app_list is not None:
             self.app_list.itemChanged.connect(self._update_section_title)
+            # Checking/unchecking an app can flip is_conferencing_blocked();
+            # mismatch_changed is the general "preflight-relevant state
+            # changed" signal MainWindow listens to.
+            self.app_list.itemChanged.connect(self.mismatch_changed)
 
-        collapsed = self._config.get("ui", "audio_sources_collapsed") if self._config else False
-        self._section.set_expanded(not collapsed)
+
 
     def _setup_legacy_ui(self, parent_layout):
         """Original system audio dropdown (Win10 or fallback)."""
@@ -288,12 +265,21 @@ class SourceSelector(QWidget):
         # Those apps set AUDCLNT_STREAMFLAGS_EXCLUDE_FROM_PROCESS_LOOPBACK_
         # CAPTURE on their call stream, so per-app loopback gets silence.
         # Legacy mode (device-level WASAPI tap) bypasses the opt-out.
-        self.conferencing_warning = QLabel(
-            "⚠ Teams / Zoom / WebEx block per-app recording. "
+        self.conferencing_warning = QWidget()
+        self.conferencing_warning.setObjectName("conferencingWarning")
+        warning_row = QHBoxLayout(self.conferencing_warning)
+        warning_row.setContentsMargins(0, 0, 0, 0)
+        warning_row.setSpacing(6)
+        warning_icon = QLabel()
+        warning_icon.setPixmap(colored_pixmap("warning", "#f9e2af", 14))
+        warning_icon.setAlignment(Qt.AlignmentFlag.AlignTop)
+        warning_row.addWidget(warning_icon)
+        warning_text = QLabel(
+            "Teams / Zoom / WebEx block per-app recording. "
             "Switch to \"All system audio\" to capture calls."
         )
-        self.conferencing_warning.setObjectName("conferencingWarning")
-        self.conferencing_warning.setWordWrap(True)
+        warning_text.setWordWrap(True)
+        warning_row.addWidget(warning_text, 1)
         self.conferencing_warning.setVisible(False)
         parent_layout.addWidget(self.conferencing_warning)
 
@@ -320,13 +306,10 @@ class SourceSelector(QWidget):
             self._loopback_row_widget.setVisible(not is_per_app)
         self._update_section_title()
         self.check_device_mismatches()
+        self.mismatch_changed.emit()
 
     def _on_section_toggled(self, expanded):
-        if expanded:
-            self.refresh_devices()
-        self._update_section_title()
-        if self._config:
-            self._config.set("ui", "audio_sources_collapsed", not expanded)
+        pass
 
     def _selected_sources_text(self):
         """Build the ' (...)' suffix shown when the section is collapsed."""
@@ -346,29 +329,32 @@ class SourceSelector(QWidget):
 
     def _update_section_title(self):
         """Update the header text to summarize current capture mode / sources."""
-        if hasattr(self, "_section"):
-            self._section.set_title(f"{self._BASE_TITLE} {self._selected_sources_text()}")
+        self.setWindowTitle(f"{self._BASE_TITLE} {self._selected_sources_text()}")
         self._update_conferencing_warning()
+
+    def is_conferencing_blocked(self):
+        """True if a checked app in per-app mode opts out of process-loopback
+        capture (see CONFERENCING_APPS) — legacy mode is unaffected."""
+        if self.app_list is None:
+            return False
+        if self.get_capture_mode() != "per_app":
+            return False
+        for i in range(self.app_list.count()):
+            item = self.app_list.item(i)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            # Strip the trailing "  (N processes)" / "  (not in call)"
+            # suffix added at list-render time so the match keys on name only.
+            label = item.text().split("  ")[0]
+            if label in CONFERENCING_APPS:
+                return True
+        return False
 
     def _update_conferencing_warning(self):
         """Show warning if a conferencing app is checked in per-app mode."""
-        if self.app_list is None:
-            return
         if not hasattr(self, "conferencing_warning"):
             return
-        show = False
-        if self.get_capture_mode() == "per_app":
-            for i in range(self.app_list.count()):
-                item = self.app_list.item(i)
-                if item.checkState() != Qt.CheckState.Checked:
-                    continue
-                # Strip the trailing "  (N processes)" / "  (not in call)"
-                # suffix added at list-render time so the match keys on name only.
-                label = item.text().split("  ")[0]
-                if label in CONFERENCING_APPS:
-                    show = True
-                    break
-        self.conferencing_warning.setVisible(show)
+        self.conferencing_warning.setVisible(self.is_conferencing_blocked())
 
     def _start_auto_refresh(self):
         if self._auto_refresh_timer is None:
@@ -789,118 +775,49 @@ class SourceSelector(QWidget):
         self._capture_warning.setToolTip("\n".join(lines))
         self._capture_warning.setVisible(True)
 
-    def check_device_mismatches(self, app_devices=None):
-        """Highlight mismatches between conferencing app devices and TalkTrack selections.
+    def _selected_mic_name(self):
+        idx = self.mic_combo.currentData()
+        if idx is None:
+            return None
+        for dev in self._mic_devices:
+            if dev.get("index") == idx:
+                return dev.get("name")
+        return None
 
-        Args:
-            app_devices: {app_name: {"app": str, "mic": str|None, "output": str|None}}
-                         If None, uses cached _last_app_devices.
+    def _selected_output_name(self):
+        idx = self.loopback_combo.currentData()
+        if idx is None:
+            return None
+        for dev in self._loopback_devices:
+            if dev.get("index") == idx:
+                return dev.get("name")
+        return None
+
+    def check_device_mismatches(self, app_devices=None):
+        """Recompute mic_mismatch / output_mismatch against the active
+        conferencing app's own devices. Folds into the preflight verdict —
+        see app/utils/device_mismatch.py and app/utils/preflight_status.py.
         """
         if app_devices is not None:
             self._last_app_devices = app_devices
-        devices_dict = self._last_app_devices or {}
 
-        if not devices_dict:
-            self._mic_mismatch_banner.setVisible(False)
-            self._output_mismatch_banner.setVisible(False)
-            self._target_mismatch_mic = None
-            self._target_mismatch_output = None
-            return
+        # Device-level (legacy) loopback taps the endpoint post-mix, so an
+        # output mismatch there is real. Per-app capture taps the target
+        # process's own stream directly and doesn't care what endpoint it
+        # renders to.
+        output_check_active = (not self._win11) or (self.get_capture_mode() == "legacy")
 
-        # Only check recognized conferencing / meeting apps.
-        # NEVER fall back to arbitrary background OS processes (like M365Copilot or explorer).
-        target_app = None
-        conferencing_lower = {a.lower() for a in CONFERENCING_APPS}
-        for key, app_info in devices_dict.items():
-            proc_base = app_info.get("process_name", "").lower()
-            if proc_base.endswith(".exe"):
-                proc_base = proc_base[:-4]
-            app_disp = app_info.get("app", key).lower()
-            if (app_disp in conferencing_lower or
-                    proc_base in {"ms-teams", "teams", "zoom", "webex", "ciscocollabhost",
-                                  "slack", "discord", "gotomeeting"}):
-                # Prefer an app that is actually using mic or output
-                if app_info.get("mic") or app_info.get("output"):
-                    target_app = app_info
-                    break
+        result = compute_device_mismatches(
+            current_mic_name=self._selected_mic_name(),
+            current_output_name=self._selected_output_name(),
+            output_check_active=output_check_active,
+            app_devices=self._last_app_devices,
+            conferencing_app_names=CONFERENCING_APPS,
+        )
 
-        if not target_app:
-            self._mic_mismatch_banner.setVisible(False)
-            self._output_mismatch_banner.setVisible(False)
-            self._target_mismatch_mic = None
-            self._target_mismatch_output = None
-            return
-
-        app_name = target_app.get("app", "Meeting app")
-        app_mic = target_app.get("mic")
-        app_output = target_app.get("output")
-
-        # --- Check Microphone Mismatch ---
-        if app_mic:
-            current_mic_name = ""
-            current_mic_idx = self.mic_combo.currentData()
-            if current_mic_idx is not None:
-                for dev in self._mic_devices:
-                    if dev.get("index") == current_mic_idx:
-                        current_mic_name = dev.get("name", "")
-                        break
-
-            if not current_mic_name or not device_names_match(current_mic_name, app_mic):
-                self._target_mismatch_mic = app_mic
-                self._mic_mismatch_label.setText(
-                    f"\u26a0 {app_name} is using \"{app_mic}\" mic"
-                )
-                self._mic_mismatch_banner.setVisible(True)
-            else:
-                self._target_mismatch_mic = None
-                self._mic_mismatch_banner.setVisible(False)
-        else:
-            self._target_mismatch_mic = None
-            self._mic_mismatch_banner.setVisible(False)
-
-        # --- Check Output Mismatch ---
-        loopback_active = (not self._win11) or (self.get_capture_mode() == "legacy")
-        if loopback_active and app_output:
-            current_output_name = ""
-            current_output_idx = self.loopback_combo.currentData()
-            if current_output_idx is not None:
-                for dev in self._loopback_devices:
-                    if dev.get("index") == current_output_idx:
-                        current_output_name = dev.get("name", "")
-                        break
-
-            if not current_output_name or not device_names_match(current_output_name, app_output):
-                self._target_mismatch_output = app_output
-                self._output_mismatch_label.setText(
-                    f"\u26a0 {app_name} is outputting to \"{app_output}\""
-                )
-                self._output_mismatch_banner.setVisible(True)
-            else:
-                self._target_mismatch_output = None
-                self._output_mismatch_banner.setVisible(False)
-        else:
-            self._target_mismatch_output = None
-            self._output_mismatch_banner.setVisible(False)
-
-    def _on_switch_mic_clicked(self):
-        if not self._target_mismatch_mic:
-            return
-        matched_idx = find_matching_device_index(self._target_mismatch_mic, self._mic_devices)
-        if matched_idx is not None:
-            for i in range(self.mic_combo.count()):
-                if self.mic_combo.itemData(i) == matched_idx:
-                    self.mic_combo.setCurrentIndex(i)
-                    break
-        self._mic_mismatch_banner.setVisible(False)
-
-    def _on_switch_output_clicked(self):
-        if not self._target_mismatch_output:
-            return
-        matched_idx = find_matching_device_index(self._target_mismatch_output, self._loopback_devices)
-        if matched_idx is not None:
-            for i in range(self.loopback_combo.count()):
-                if self.loopback_combo.itemData(i) == matched_idx:
-                    self.loopback_combo.setCurrentIndex(i)
-                    break
-        self._output_mismatch_banner.setVisible(False)
+        changed = (result["mic"] != self.mic_mismatch) or (result["output"] != self.output_mismatch)
+        self.mic_mismatch = result["mic"]
+        self.output_mismatch = result["output"]
+        if changed:
+            self.mismatch_changed.emit()
 

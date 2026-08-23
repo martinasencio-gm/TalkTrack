@@ -5,19 +5,21 @@ import stat
 import subprocess
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import shutil
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy
+    QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy,
+    QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QAction, QFontMetrics, QColor
 
 from app.ui.search_bar import SearchBar
 from app.utils import batch_queue, tag_manager
+from app.utils.icons import colored_pixmap
 from app.ui.delete_scope_dialog import (
     DeleteScopeDialog, DELETE_RECORDINGS, DELETE_TRANSCRIPTIONS, DELETE_BOTH
 )
@@ -37,6 +39,13 @@ TRANSCRIPTION_FILENAMES = [
 # delete also catches dual-mic raw temps or a track metadata lost track of.
 _AUDIO_GLOB_PATTERNS = ("*_audio.wav", "*_audio.mp3", "*_raw.wav")
 
+# style.qss's "QListWidget::item { padding: 10px; border-bottom: 1px solid
+# ...; }" is drawn around a setItemWidget row too, but Qt shrinks the
+# embedded widget to fit inside that padding+border rather than growing the
+# item to fit the widget. A row's sizeHint() must add this back or its two
+# text lines get squeezed into less height than they need and overlap.
+_LIST_ITEM_VERTICAL_CHROME = 21  # 10px top + 10px bottom padding + 1px border-bottom
+
 
 def partition_by_queue_state(metadatas):
     """Split recordings into (not yet queued, already queued).
@@ -50,6 +59,28 @@ def partition_by_queue_state(metadatas):
             continue
         (queued if batch_queue.is_queued(metadata) else unqueued).append(metadata)
     return unqueued, queued
+
+
+def format_relative_date(dt, now=None):
+    """"Today, 09:02" / "Yesterday, 14:30" / "19 Aug, 15:20".
+
+    Short and glanceable in a 262px-wide column, unlike the fixed-width
+    absolute timestamp it replaces — which is what forced the elision
+    workarounds on the date label in _build_row_widget.
+    """
+    now = now or datetime.now()
+    if dt.date() == now.date():
+        return f"Today, {dt.strftime('%H:%M')}"
+    if dt.date() == (now.date() - timedelta(days=1)):
+        return f"Yesterday, {dt.strftime('%H:%M')}"
+    return f"{dt.day} {dt.strftime('%b')}, {dt.strftime('%H:%M')}"
+
+
+def has_transcript(metadata):
+    """Checked live against disk, not trusted from metadata — a delete can
+    remove the transcript without updating metadata, and both the row badge
+    and the Untranscribed filter chip need to reflect that immediately."""
+    return (Path(metadata.get("directory", "")) / "transcript.json").exists()
 
 
 class _RecordingRow(QWidget):
@@ -319,6 +350,8 @@ class RecordingsList(QWidget):
         self._search_worker = None
         self._pending_search = None
         self._showing_search_results = False
+        self._filter_query = ""
+        self._active_chip_filter = "all"
         self._transcribing = set()
         self._batch_running = False
         try:
@@ -345,7 +378,7 @@ class RecordingsList(QWidget):
         self.search_bar = SearchBar()
         self.search_bar.search_requested.connect(self._on_search)
         self.search_bar.filter_changed.connect(self._on_filter_changed)
-        self.search_bar.cleared.connect(self.refresh)
+        self.search_bar.cleared.connect(self._on_search_cleared)
         layout.addWidget(self.search_bar)
 
         import_row = QHBoxLayout()
@@ -364,6 +397,32 @@ class RecordingsList(QWidget):
         self.import_btn.clicked.connect(self._on_import_clicked)
         import_row.addWidget(self.import_btn)
         layout.addLayout(import_row)
+
+        # Filter chips: All / Untranscribed / Tagged — single-select, counts
+        # kept live by _update_filter_chip_counts() on every refresh().
+        chip_row = QHBoxLayout()
+        chip_row.setSpacing(6)
+        self.chip_all = QPushButton("All")
+        self.chip_untranscribed = QPushButton("Untranscribed")
+        self.chip_tagged = QPushButton("Tagged")
+        self._filter_chip_group = QButtonGroup(self)
+        self._filter_chip_group.setExclusive(True)
+        for btn, filter_name in (
+            (self.chip_all, "all"),
+            (self.chip_untranscribed, "untranscribed"),
+            (self.chip_tagged, "tagged"),
+        ):
+            btn.setCheckable(True)
+            btn.setObjectName("filterChip")
+            self._filter_chip_group.addButton(btn)
+            btn.toggled.connect(
+                lambda checked, name=filter_name: self._on_chip_toggled(name, checked)
+            )
+            chip_row.addWidget(btn)
+        self.chip_all.setObjectName("filterChipAccent")
+        self.chip_all.setChecked(True)
+        chip_row.addStretch()
+        layout.addLayout(chip_row)
 
         # List
         self.list_widget = QListWidget()
@@ -393,6 +452,13 @@ class RecordingsList(QWidget):
         """Update whether a batch transcription process is currently active."""
         self._batch_running = running
         self._update_batch_btn_visibility()
+
+    def most_recent_recording(self):
+        """Metadata dict for the newest recording, or None if there are
+        none. self._recordings is always the full unfiltered list sorted
+        newest-first by refresh() — a live search only flips
+        _showing_search_results, it never reassigns self._recordings."""
+        return self._recordings[0] if self._recordings else None
 
     def _update_batch_btn_visibility(self):
         if not hasattr(self, "batch_btn"):
@@ -453,10 +519,13 @@ class RecordingsList(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, metadata)
             self.list_widget.addItem(item)
             row_widget = self._build_row_widget(metadata)
-            item.setSizeHint(row_widget.sizeHint())
+            hint = row_widget.sizeHint()
+            item.setSizeHint(QSize(hint.width(), hint.height() + _LIST_ITEM_VERTICAL_CHROME))
             self.list_widget.setItemWidget(item, row_widget)
 
         self._update_batch_btn_visibility()
+        self._update_filter_chip_counts()
+        self._apply_filters()
 
     def _build_row_widget(self, metadata):
         """Build a two-line recording row: bold name over a muted
@@ -476,7 +545,7 @@ class RecordingsList(QWidget):
         started = metadata.get("started_at", "")
         try:
             dt = datetime.fromisoformat(started)
-            date_str = dt.strftime("%Y-%m-%d %H:%M")
+            date_str = format_relative_date(dt)
         except (ValueError, TypeError):
             date_str = started
 
@@ -528,13 +597,14 @@ class RecordingsList(QWidget):
         # to reflect that on the very next refresh() with no cached state.
         audio_files = metadata.get("audio_files", {}) or {}
         has_audio = any(p and Path(p).exists() for p in audio_files.values())
-        has_transcript = (Path(metadata.get("directory", "")) / "transcript.json").exists()
+        row_has_transcript = has_transcript(metadata)
 
         # Generous padding gives each pill its shape and its slack at once.
         # Neither ever shrinks — all shrink pressure lands on the elidable
         # date label beside them, which is the only Ignored-policy item here.
         if has_audio:
-            audio_badge = QLabel("\U0001f3b5")
+            audio_badge = QLabel()
+            audio_badge.setPixmap(colored_pixmap("music-note", "#9397ab", 12))
             audio_badge.setObjectName("recordingBadgeAudio")
             audio_badge.setToolTip("Audio recording available")
             meta_row.addWidget(audio_badge, 0)
@@ -543,12 +613,14 @@ class RecordingsList(QWidget):
         # transcribed recording would otherwise look like nothing was
         # happening, which is exactly the ambiguity this pill removes.
         if metadata.get("directory") in self._transcribing:
-            working_badge = QLabel("\u21bb")
+            working_badge = QLabel()
+            working_badge.setPixmap(colored_pixmap("waveform", "#f9e2af", 12))
             working_badge.setObjectName("recordingBadgeWorking")
             working_badge.setToolTip("Transcription in progress...")
             meta_row.addWidget(working_badge, 0)
-        elif has_transcript:
-            badge = QLabel("\U0001f4dd")
+        elif row_has_transcript:
+            badge = QLabel()
+            badge.setPixmap(colored_pixmap("file-text", "#a6e3a1", 12))
             badge.setObjectName("recordingBadgeTranscribed")
             badge.setToolTip("Transcript available")
             meta_row.addWidget(badge, 0)
@@ -557,7 +629,8 @@ class RecordingsList(QWidget):
         # run is a different state from being worked on right now, and the
         # two pills can appear on the same row after a re-queue.
         if batch_queue.is_queued(metadata):
-            queued_badge = QLabel("\u23f3")
+            queued_badge = QLabel()
+            queued_badge.setPixmap(colored_pixmap("hourglass", "#fab387", 12))
             queued_badge.setObjectName("recordingBadgeQueued")
             queued_badge.setToolTip(
                 "Queued for batch transcription"
@@ -953,18 +1026,70 @@ class RecordingsList(QWidget):
         if self._showing_search_results:
             self.refresh()
 
-        query = text.strip().lower()
+        self._filter_query = text.strip().lower()
+        self._apply_filters()
+
+    def _on_search_cleared(self):
+        self._filter_query = ""
+        self.refresh()
+
+    def _on_chip_toggled(self, filter_name, checked):
+        if not checked:
+            return
+        self._active_chip_filter = filter_name
+        if self._showing_search_results:
+            # Search-result rows carry a different UserRole shape (a hit
+            # dict, not full metadata) — refresh() drops back to the normal
+            # browsing view first, same guard _on_filter_changed uses.
+            self.refresh()
+        else:
+            self._apply_filters()
+
+    def _passes_chip_filter(self, metadata):
+        if self._active_chip_filter == "untranscribed":
+            return not has_transcript(metadata)
+        if self._active_chip_filter == "tagged":
+            return bool(tag_manager.get_recording_tags(metadata))
+        return True
+
+    def _update_filter_chip_counts(self):
+        untranscribed = sum(1 for m in self._recordings if not has_transcript(m))
+        tagged = sum(1 for m in self._recordings if tag_manager.get_recording_tags(m))
+        self.chip_all.setText(f"All {len(self._recordings)}")
+        self.chip_untranscribed.setText(f"Untranscribed {untranscribed}")
+        self.chip_tagged.setText(f"Tagged {tagged}")
+
+    def _apply_filters(self):
+        """Combine the live text filter and the selected chip into one
+        visibility pass over rows already built by refresh() — mirrors the
+        pre-existing text-only filter's hide/show approach rather than
+        rebuilding, so both filters can be active together.
+        """
+        if not hasattr(self, "list_widget"):
+            # chip_all.setChecked(True) in _setup_ui() fires this via the
+            # toggled signal before list_widget is constructed.
+            return
+
         visible_count = 0
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             metadata = item.data(Qt.ItemDataRole.UserRole) or {}
             tags_str = " ".join(tag_manager.get_recording_tags(metadata))
             haystack = f"{metadata.get('name', '')} {metadata.get('started_at', '')} {tags_str}".lower()
-            match = query in haystack
+            match = self._filter_query in haystack and self._passes_chip_filter(metadata)
             item.setHidden(not match)
             visible_count += match
 
-        self._set_empty_message(f'No recordings match "{text.strip()}"' if not visible_count else "")
+        if visible_count:
+            self._set_empty_message("")
+        elif self._filter_query:
+            self._set_empty_message(f'No recordings match "{self._filter_query}"')
+        elif self._active_chip_filter == "untranscribed":
+            self._set_empty_message("No untranscribed recordings")
+        elif self._active_chip_filter == "tagged":
+            self._set_empty_message("No tagged recordings")
+        else:
+            self._set_empty_message("")
 
     def _on_search(self, query, is_semantic):
         # Only the latest query matters; typing while a search runs replaces

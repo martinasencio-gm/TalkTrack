@@ -1,139 +1,211 @@
+import logging
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel
+    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QFrame,
+    QStackedWidget, QProgressBar,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
-
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QIcon
 from app.recording.recorder import RecordingState
+from app.ui.preflight import PreflightWidget
+from app.ui.level_meter import LevelMeter
+from app.utils.icons import colored_pixmap
+
+logger = logging.getLogger(__name__)
+
+_REC_MARK_ICON_SIZE = 18
+_REC_MARK_BADGE_SIZE = 48
 
 
 class RecordingControls(QWidget):
-    """Recording control buttons and timer — compact two-row layout.
+    """
+    Horizontal capture bar spanning the full window.
 
-    Row 1: [● Rec] [⏸ Pause] [■ Stop] [🎤 Mute]
-    Row 2: ● 00:12:34
+    Shares CompactStrip's visual language (colored border per activity
+    state, circular badge icon, title/subtitle typography) so the two
+    surfaces read as one design rather than two unrelated bars — see
+    the "1b Capture Bar" design-handoff mockup, which uses the same
+    state-driven card treatment at full-window width.
     """
 
     record_clicked = pyqtSignal()
     pause_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     mute_clicked = pyqtSignal()
-    # Emitted when the user toggles the Test Mic button. True = enable live
-    # mic monitor (no recording); False = disable. Off by default every launch.
+    sources_clicked = pyqtSignal()
     test_mic_toggled = pyqtSignal(bool)
+    compact_mode_requested = pyqtSignal()
+    cancel_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._setup_ui()
         self._muted = False
-        self._blink_state = True
-        self._blink_timer = QTimer(self)
-        self._blink_timer.timeout.connect(self._toggle_indicator)
+        self._setup_ui()
         self.set_state(RecordingState.IDLE)
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(4)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
 
-        # Row 1: Buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
+        self.stack = QStackedWidget()
 
-        self.record_btn = QPushButton("\u25cf Rec")
-        self.record_btn.setObjectName("recordButton")
+        # 1) Ready Variant (Preflight embedded)
+        self.ready_widget = QFrame()
+        self.ready_widget.setObjectName("captureBarReady")
+        self.ready_widget.setStyleSheet(
+            "QFrame#captureBarReady { border-bottom: 1px solid #292b31; }"
+        )
+        ready_layout = QHBoxLayout(self.ready_widget)
+        ready_layout.setContentsMargins(16, 0, 16, 0)
+
+        self.preflight = PreflightWidget()
+        ready_layout.addWidget(self.preflight, stretch=1)
+
+        self.sources_btn = QPushButton("Sources")
+        self.sources_btn.clicked.connect(self.sources_clicked.emit)
+
+        self.record_btn = QPushButton("Record")
+        self.record_btn.setObjectName("primaryAction")
+        self._set_button_icon(self.record_btn, "record-fill", "#9184d9")
         self.record_btn.clicked.connect(self.record_clicked.emit)
-        btn_row.addWidget(self.record_btn)
 
-        self.pause_btn = QPushButton("\u23f8 Pause")
-        self.pause_btn.setObjectName("pauseButton")
-        self.pause_btn.clicked.connect(self.pause_clicked.emit)
-        btn_row.addWidget(self.pause_btn)
+        ready_layout.addWidget(self.sources_btn)
+        ready_layout.addWidget(self.record_btn)
 
-        self.stop_btn = QPushButton("\u25a0 Stop")
-        self.stop_btn.setObjectName("stopButton")
-        self.stop_btn.clicked.connect(self.stop_clicked.emit)
-        btn_row.addWidget(self.stop_btn)
+        # 2) Recording Variant (also covers Paused)
+        self.rec_widget = QFrame()
+        self.rec_widget.setObjectName("captureBarActive")
+        rec_layout = QHBoxLayout(self.rec_widget)
+        rec_layout.setContentsMargins(20, 0, 16, 0)
+        rec_layout.setSpacing(18)
 
-        self.mute_btn = QPushButton("\U0001f3a4 Mute")
-        self.mute_btn.setObjectName("muteButton")
-        self.mute_btn.setToolTip(
-            "Mute the microphone while keeping system/app audio recording."
-        )
-        self.mute_btn.clicked.connect(self.mute_clicked.emit)
-        btn_row.addWidget(self.mute_btn)
+        self.rec_mark = QLabel()
+        self.rec_mark.setFixedSize(_REC_MARK_BADGE_SIZE, _REC_MARK_BADGE_SIZE)
+        self.rec_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rec_layout.addWidget(self.rec_mark)
 
-        self.test_mic_btn = QPushButton("\U0001f3a7 Test")
-        self.test_mic_btn.setObjectName("testMicButton")
-        self.test_mic_btn.setCheckable(True)
-        self.test_mic_btn.setToolTip(
-            "Open the mic and drive the meters without recording. "
-            "Resets off every launch."
-        )
-        self.test_mic_btn.toggled.connect(self._update_test_mic_style)
-        self.test_mic_btn.toggled.connect(self.test_mic_toggled.emit)
-        btn_row.addWidget(self.test_mic_btn)
-
-        layout.addLayout(btn_row)
-
-        # Row 2: Indicator + timer
-        status_row = QHBoxLayout()
-        status_row.setSpacing(6)
-
-        self.recording_indicator = QLabel("")
-        self.recording_indicator.setObjectName("recordingIndicator")
-        self.recording_indicator.setFixedWidth(14)
-        self.recording_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_row.addWidget(self.recording_indicator)
-
+        timer_layout = QVBoxLayout()
+        timer_layout.setSpacing(1)
+        self.rec_kicker = QLabel("RECORDING")
+        self.rec_kicker.setObjectName("sectionHeader")
         self.timer_label = QLabel("00:00:00")
         self.timer_label.setObjectName("timerLabel")
-        status_row.addWidget(self.timer_label)
+        timer_layout.addWidget(self.rec_kicker)
+        timer_layout.addWidget(self.timer_label)
 
-        status_row.addStretch()
+        rec_layout.addLayout(timer_layout)
 
-        layout.addLayout(status_row)
+        self.live_meters = LevelMeter()
+        rec_layout.addWidget(self.live_meters, stretch=1)
+
+        self.mute_btn = QPushButton("Mute mic")
+        self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
+        self.mute_btn.clicked.connect(self.mute_clicked.emit)
+
+        self.pause_btn = QPushButton("Pause")
+        self._set_button_icon(self.pause_btn, "pause", "#e9e9ed")
+        self.pause_btn.clicked.connect(self.pause_clicked.emit)
+
+        self.stop_btn = QPushButton("Stop && transcribe")
+        self.stop_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8;")
+        self._set_button_icon(self.stop_btn, "stop-fill", "#f38ba8")
+        self.stop_btn.clicked.connect(self.stop_clicked.emit)
+
+        rec_layout.addWidget(self.mute_btn)
+        rec_layout.addWidget(self.pause_btn)
+        rec_layout.addWidget(self.stop_btn)
+
+        self.stack.addWidget(self.ready_widget)
+        self.stack.addWidget(self.rec_widget)
+
+        self.main_layout.addWidget(self.stack)
+
+        # 3) Transcribing strip — coexists with the Ready variant (a
+        # background job can be transcribing while idle, ready to record
+        # the next call), mirroring the mockup's slim accent-tinted row.
+        self.transcribing_strip = QFrame()
+        self.transcribing_strip.setObjectName("captureBarTranscribing")
+        self.transcribing_strip.setStyleSheet(
+            "QFrame#captureBarTranscribing {"
+            " background-color: rgba(145,132,217,0.07);"
+            " border-bottom: 1px solid rgba(145,132,217,0.30);"
+            "}"
+        )
+        ts_layout = QHBoxLayout(self.transcribing_strip)
+        ts_layout.setContentsMargins(20, 6, 16, 6)
+        ts_layout.setSpacing(10)
+
+        self.transcribing_icon = QLabel()
+        self.transcribing_icon.setPixmap(colored_pixmap("waveform", "#9184d9", 15))
+        ts_layout.addWidget(self.transcribing_icon)
+
+        self.transcribing_label = QLabel("Transcribing…")
+        self.transcribing_label.setStyleSheet("font-size: 12.5px; color: #b8b3d9;")
+        ts_layout.addWidget(self.transcribing_label)
+
+        self.transcribing_bar = QProgressBar()
+        self.transcribing_bar.setTextVisible(False)
+        self.transcribing_bar.setRange(0, 100)
+        ts_layout.addWidget(self.transcribing_bar, stretch=1)
+
+        self.transcribing_percent = QLabel("")
+        self.transcribing_percent.setStyleSheet(
+            "font-size: 11.5px; color: #9397ab; font-family: Consolas, monospace;"
+        )
+        ts_layout.addWidget(self.transcribing_percent)
+
+        self.transcribing_cancel_btn = QPushButton("Cancel")
+        self.transcribing_cancel_btn.setStyleSheet("padding: 3px 10px; font-size: 11.5px;")
+        self.transcribing_cancel_btn.clicked.connect(self.cancel_clicked.emit)
+        ts_layout.addWidget(self.transcribing_cancel_btn)
+
+        self.transcribing_strip.hide()
+        self.main_layout.addWidget(self.transcribing_strip)
 
     def set_state(self, state):
         if state == RecordingState.IDLE:
-            self.record_btn.setEnabled(True)
-            self.record_btn.setText("\u25cf Rec")
-            self.pause_btn.setEnabled(False)
-            self.pause_btn.setText("\u23f8 Pause")
-            self.stop_btn.setEnabled(False)
-            self.mute_btn.setEnabled(False)
-            self.set_muted(False)
-            self.test_mic_btn.setEnabled(True)
-            self.recording_indicator.setText("")
-            self._blink_timer.stop()
+            self.stack.setCurrentWidget(self.ready_widget)
+            self.stop_btn.setEnabled(True)
+            self.pause_btn.setEnabled(True)
+            self.mute_btn.setEnabled(True)
         elif state == RecordingState.RECORDING:
-            self.record_btn.setEnabled(False)
-            self.pause_btn.setEnabled(True)
-            self.pause_btn.setText("\u23f8 Pause")
+            self.stack.setCurrentWidget(self.rec_widget)
+            self.pause_btn.setText("Pause")
+            self._set_button_icon(self.pause_btn, "pause", "#e9e9ed")
+            self.rec_kicker.setText("RECORDING")
+            self.rec_kicker.setStyleSheet("color: #f38ba8;")
+            self._set_badge("record-fill", "#f38ba8")
+            self.rec_widget.setStyleSheet(self._card_style("#f38ba8", "rgba(243,139,168,0.07)"))
             self.stop_btn.setEnabled(True)
+            self.pause_btn.setEnabled(True)
             self.mute_btn.setEnabled(True)
-            self.test_mic_btn.setEnabled(False)
-            self._blink_timer.start(500)
         elif state == RecordingState.PAUSED:
-            self.record_btn.setEnabled(False)
-            self.pause_btn.setEnabled(True)
-            self.pause_btn.setText("\u25b6 Resume")
-            self.stop_btn.setEnabled(True)
-            self.mute_btn.setEnabled(True)
-            self.test_mic_btn.setEnabled(False)
-            self.recording_indicator.setText("\u23f8")
-            self._blink_timer.stop()
+            self.stack.setCurrentWidget(self.rec_widget)
+            self.pause_btn.setText("Resume")
+            self._set_button_icon(self.pause_btn, "play-fill", "#f9e2af")
+            self.rec_kicker.setText("PAUSED")
+            self.rec_kicker.setStyleSheet("color: #f9e2af;")
+            self._set_badge("pause-fill", "#f9e2af")
+            self.rec_widget.setStyleSheet(self._card_style("#f9e2af", "rgba(249,226,175,0.07)"))
         elif state in (RecordingState.STOPPING, RecordingState.PROCESSING):
-            # PROCESSING is the finalize worker mixing the tracks. The
-            # controls stay locked: the session isn't saved yet, and
-            # starting a new recording on top of it would overwrite it.
-            self.record_btn.setEnabled(False)
-            self.pause_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)
+            self.pause_btn.setEnabled(False)
             self.mute_btn.setEnabled(False)
-            self.test_mic_btn.setEnabled(False)
-            self.recording_indicator.setText("")
-            self._blink_timer.stop()
+
+    def set_transcribing(self, active, percent=None):
+        """Show/update the slim transcribing strip below the capture bar,
+        mirroring CompactStrip's "transcribing" state so both surfaces
+        agree about background work happening between recordings."""
+        self.transcribing_strip.setVisible(active)
+        if not active:
+            return
+        if percent is None:
+            self.transcribing_bar.setRange(0, 0)  # indeterminate
+            self.transcribing_percent.setText("")
+        else:
+            self.transcribing_bar.setRange(0, 100)
+            self.transcribing_bar.setValue(int(percent))
+            self.transcribing_percent.setText(f"{int(percent)}%")
 
     def update_time(self, seconds):
         h = int(seconds // 3600)
@@ -141,34 +213,44 @@ class RecordingControls(QWidget):
         s = int(seconds % 60)
         self.timer_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-    def _update_test_mic_style(self, checked):
-        self.test_mic_btn.setText("\U0001f3a7 Testing" if checked else "\U0001f3a7 Test")
-        self.test_mic_btn.setProperty("testing", checked)
-        self.test_mic_btn.style().unpolish(self.test_mic_btn)
-        self.test_mic_btn.style().polish(self.test_mic_btn)
-
-    def clear_test_mic(self):
-        """Uncheck the Test Mic button without emitting test_mic_toggled.
-
-        Used when MainWindow has already torn down the monitor (e.g. before
-        starting a recording) and just needs the visual state to match.
-        """
-        self.test_mic_btn.blockSignals(True)
-        self.test_mic_btn.setChecked(False)
-        self.test_mic_btn.blockSignals(False)
-        self._update_test_mic_style(False)
-
     def set_muted(self, muted):
-        """Update the mute button visual state."""
         self._muted = bool(muted)
-        self.mute_btn.setText("\U0001f3a4 Muted" if self._muted else "\U0001f3a4 Mute")
-        self.mute_btn.setProperty("muted", self._muted)
-        self.mute_btn.style().unpolish(self.mute_btn)
-        self.mute_btn.style().polish(self.mute_btn)
-
-    def _toggle_indicator(self):
-        self._blink_state = not self._blink_state
-        self.recording_indicator.setText("\u25cf" if self._blink_state else "")
+        self.mute_btn.setText("Muted" if self._muted else "Mute mic")
+        if self._muted:
+            self.mute_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8;")
+            self._set_button_icon(self.mute_btn, "microphone-slash", "#f38ba8")
+        else:
+            self.mute_btn.setStyleSheet("")
+            self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
 
     def reset_timer(self):
         self.timer_label.setText("00:00:00")
+
+    def clear_test_mic(self):
+        pass # Migrated to preflight / sources dialog
+
+    def _set_badge(self, icon_name, color):
+        radius = _REC_MARK_BADGE_SIZE // 2
+        self.rec_mark.setStyleSheet(
+            f"border: 1px solid {color}; border-radius: {radius}px; background: transparent;"
+        )
+        self.rec_mark.setPixmap(colored_pixmap(icon_name, color, _REC_MARK_ICON_SIZE))
+
+    def _card_style(self, border_color, tint):
+        return (
+            f"QFrame#captureBarActive {{"
+            f" background-color: {tint};"
+            f" border-bottom: 1px solid {border_color};"
+            f"}}"
+        )
+
+    def _set_button_icon(self, button, icon_name, color):
+        button.setIcon(QIcon(colored_pixmap(icon_name, color, 14)))
+        button.setIconSize(QSize(14, 14))
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.compact_mode_requested.emit()
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)

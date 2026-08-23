@@ -1,6 +1,13 @@
 """Reusable collapsible section with a clickable title header."""
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+
+from app.utils.icons import colored_pixmap
+
+_CARET_COLOR = "#9397ab"
+_SECTION_ICON_COLOR = "#9184d9"
+_SECTION_ICON_SIZE = 14
 
 
 class CollapsibleSection(QWidget):
@@ -12,7 +19,7 @@ class CollapsibleSection(QWidget):
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, title, parent=None, accent=None):
+    def __init__(self, title, parent=None, accent=None, icon=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -33,12 +40,23 @@ class CollapsibleSection(QWidget):
         self._header_row.setContentsMargins(6, 2, 6, 2)
         self._header_row.setSpacing(4)
 
+        if icon:
+            self._section_icon = QLabel()
+            self._section_icon.setPixmap(
+                colored_pixmap(icon, _SECTION_ICON_COLOR, _SECTION_ICON_SIZE)
+            )
+            self._header_row.addWidget(self._section_icon)
+
+        self._caret_right = QIcon(colored_pixmap("caret-right", _CARET_COLOR, 12))
+        self._caret_down = QIcon(colored_pixmap("caret-down", _CARET_COLOR, 12))
+
         self._toggle_btn = QToolButton()
         self._toggle_btn.setObjectName("collapsibleToggle")
-        self._toggle_btn.setText(f"\u25b8  {title}")
+        self._toggle_btn.setText(f"  {title}")
+        self._toggle_btn.setIcon(self._caret_right)
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setChecked(False)
-        self._toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._toggle_btn.toggled.connect(self._on_toggled)
         self._header_row.addWidget(self._toggle_btn)
         self._header_row.addStretch()
@@ -67,8 +85,7 @@ class CollapsibleSection(QWidget):
 
     def _on_toggled(self, checked):
         self._content.setVisible(checked)
-        arrow = "\u25be" if checked else "\u25b8"
-        self._toggle_btn.setText(f"{arrow}  {self._title}")
+        self._toggle_btn.setIcon(self._caret_down if checked else self._caret_right)
         if checked:
             self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
         else:
@@ -79,7 +96,6 @@ class CollapsibleSection(QWidget):
         self._toggle_btn.setChecked(expanded)
 
     def set_title(self, title):
-        """Update the displayed title. Re-renders with the current arrow."""
+        """Update the displayed title."""
         self._title = title
-        arrow = "\u25be" if self._toggle_btn.isChecked() else "\u25b8"
-        self._toggle_btn.setText(f"{arrow}  {title}")
+        self._toggle_btn.setText(f"  {title}")

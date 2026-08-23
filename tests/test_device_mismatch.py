@@ -120,11 +120,11 @@ class TestSourceSelectorDeviceMismatch(unittest.TestCase):
             selector.show()
             return selector
 
-    def test_mic_mismatch_banner_and_switch_action(self):
+    def test_mic_mismatch_detected_and_cleared_on_match(self):
         selector = self._make_selector()
         # Initial state: mic index 1 (Realtek) is selected
         self.assertEqual(selector.get_selected_mic(), 1)
-        self.assertFalse(selector._mic_mismatch_banner.isVisible())
+        self.assertIsNone(selector.mic_mismatch)
 
         # Teams is using Jabra mic
         app_devices = {
@@ -136,21 +136,23 @@ class TestSourceSelectorDeviceMismatch(unittest.TestCase):
                 "pids": [100]
             }
         }
+        received = []
+        selector.mismatch_changed.connect(lambda: received.append(True))
         selector.check_device_mismatches(app_devices)
 
-        # Mismatch banner should be shown
-        self.assertTrue(selector._mic_mismatch_banner.isVisible())
-        self.assertIn("Microsoft Teams is using \"Headset Microphone (Jabra Evolve2 65)\" mic",
-                      selector._mic_mismatch_label.text())
+        self.assertEqual(selector.mic_mismatch, {
+            "app": "Microsoft Teams",
+            "device": "Headset Microphone (Jabra Evolve2 65)",
+        })
+        self.assertEqual(received, [True])
 
-        # Click switch button
-        selector._mic_mismatch_btn.click()
-
-        # Should switch mic selection to index 2 (Jabra) and hide banner
+        # Switching to the Jabra mic clears the mismatch
+        selector.mic_combo.setCurrentIndex(2)
         self.assertEqual(selector.get_selected_mic(), 2)
-        self.assertFalse(selector._mic_mismatch_banner.isVisible())
+        selector.check_device_mismatches()
+        self.assertIsNone(selector.mic_mismatch)
 
-    def test_mic_matching_hides_banner(self):
+    def test_mic_matching_is_not_a_mismatch(self):
         selector = self._make_selector()
         # Set selected mic to Jabra
         selector.mic_combo.setCurrentIndex(2)
@@ -167,16 +169,16 @@ class TestSourceSelectorDeviceMismatch(unittest.TestCase):
             }
         }
         selector.check_device_mismatches(app_devices)
-        self.assertFalse(selector._mic_mismatch_banner.isVisible())
+        self.assertIsNone(selector.mic_mismatch)
 
-    def test_output_mismatch_banner_and_switch_in_legacy_mode(self):
+    def test_output_mismatch_detected_in_legacy_mode(self):
         selector = self._make_selector()
         # Switch to legacy mode (All system audio)
         if selector.mode_group:
             selector.radio_legacy.setChecked(True)
 
         self.assertEqual(selector.get_selected_loopback(), 10)
-        self.assertFalse(selector._output_mismatch_banner.isVisible())
+        self.assertIsNone(selector.output_mismatch)
 
         # Zoom is outputting to Jabra headphones
         app_devices = {
@@ -190,17 +192,29 @@ class TestSourceSelectorDeviceMismatch(unittest.TestCase):
         }
         selector.check_device_mismatches(app_devices)
 
-        # Output mismatch banner should be visible
-        self.assertTrue(selector._output_mismatch_banner.isVisible())
-        self.assertIn("Zoom is outputting to \"Headphones (Jabra Evolve2 65)\"",
-                      selector._output_mismatch_label.text())
+        self.assertEqual(selector.output_mismatch, {
+            "app": "Zoom",
+            "device": "Headphones (Jabra Evolve2 65)",
+        })
 
-        # Click switch output button
-        selector._output_mismatch_btn.click()
+    def test_output_mismatch_not_checked_in_per_app_mode(self):
+        """Per-app capture taps the target process's own stream, so what
+        endpoint it renders to doesn't matter — only legacy loopback cares."""
+        selector = self._make_selector()
+        if selector.mode_group:
+            selector.radio_per_app.setChecked(True)
 
-        # Should switch loopback selection to index 11 (Jabra) and hide banner
-        self.assertEqual(selector.get_selected_loopback(), 11)
-        self.assertFalse(selector._output_mismatch_banner.isVisible())
+        app_devices = {
+            "Zoom": {
+                "app": "Zoom",
+                "mic": None,
+                "output": "Headphones (Jabra Evolve2 65)",
+                "process_name": "Zoom.exe",
+                "pids": [200]
+            }
+        }
+        selector.check_device_mismatches(app_devices)
+        self.assertIsNone(selector.output_mismatch)
 
     def test_ignores_non_conferencing_background_apps(self):
         """Background apps like M365Copilot or explorer should NOT trigger mismatch warnings."""
@@ -216,9 +230,8 @@ class TestSourceSelectorDeviceMismatch(unittest.TestCase):
         }
         selector.check_device_mismatches(app_devices)
 
-        # Neither banner should be shown
-        self.assertFalse(selector._mic_mismatch_banner.isVisible())
-        self.assertFalse(selector._output_mismatch_banner.isVisible())
+        self.assertIsNone(selector.mic_mismatch)
+        self.assertIsNone(selector.output_mismatch)
 
 
 if __name__ == "__main__":

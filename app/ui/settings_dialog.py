@@ -23,18 +23,23 @@ def _clean_path(text):
 class SettingsDialog(QDialog):
     """Settings dialog for configuring recording and transcription options."""
 
-    def __init__(self, config, parent=None):
+    def __init__(self, config, parent=None, initial_tab=None):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("Settings")
         self.setMinimumSize(500, 450)
         self._setup_ui()
         self._load_settings()
+        if initial_tab is not None:
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == initial_tab:
+                    self.tabs.setCurrentIndex(i)
+                    break
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        tabs = QTabWidget()
+        tabs = self.tabs = QTabWidget()
 
         # General Tab
         general_tab = QWidget()
@@ -144,6 +149,21 @@ class SettingsDialog(QDialog):
         manage_tags_btn = QPushButton("Manage Tags...")
         manage_tags_btn.clicked.connect(self._open_manage_tags)
         recording_form.addRow("Tags:", manage_tags_btn)
+
+        self.replace_you_cb = QCheckBox("Replace \"You\" with name when diarization is not done")
+        self.replace_you_cb.setToolTip(
+            "When speaker diarization is disabled or in simple mode, replace the\n"
+            "'You' speaker label with your custom name or Windows user name."
+        )
+        recording_form.addRow(self.replace_you_cb)
+
+        self.user_name_edit = QLineEdit()
+        self.user_name_edit.setPlaceholderText("e.g. Martin (leave blank to use Windows display name)")
+        self.user_name_edit.setToolTip(
+            "Your friendly name used in transcripts when replacing 'You'.\n"
+            "If left blank, your Windows user name will be used."
+        )
+        recording_form.addRow("Your Name:", self.user_name_edit)
 
         self.silence_auto_stop_cb = QCheckBox("Auto-stop recording after sustained silence")
         self.silence_auto_stop_cb.setToolTip(
@@ -488,6 +508,8 @@ class SettingsDialog(QDialog):
         self.batch_auto_queue_cb.setChecked(self.config.get("general", "batch_auto_queue"))
         self.prompt_tags_cb.setChecked(self.config.get("general", "prompt_tags_after_recording"))
         self.auto_tag_by_name_cb.setChecked(self.config.get("general", "auto_tag_by_name"))
+        self.replace_you_cb.setChecked(self.config.get("general", "replace_you_with_name"))
+        self.user_name_edit.setText(self.config.get("general", "user_name"))
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
@@ -622,6 +644,8 @@ class SettingsDialog(QDialog):
         self.config.set("general", "batch_auto_queue", self.batch_auto_queue_cb.isChecked())
         self.config.set("general", "prompt_tags_after_recording", self.prompt_tags_cb.isChecked())
         self.config.set("general", "auto_tag_by_name", self.auto_tag_by_name_cb.isChecked())
+        self.config.set("general", "replace_you_with_name", self.replace_you_cb.isChecked())
+        self.config.set("general", "user_name", self.user_name_edit.text().strip())
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())

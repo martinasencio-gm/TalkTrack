@@ -43,6 +43,15 @@ class AboutDialog(QDialog):
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
+        credits = QLabel(
+            "Built with Faster Whisper, pyannote.audio, Catppuccin,\n"
+            "and Phosphor Icons (MIT License)."
+        )
+        credits.setStyleSheet("font-size: 10.5px; color: #7f849c;")
+        credits.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credits.setWordWrap(True)
+        layout.addWidget(credits)
+
         layout.addSpacing(8)
 
         bmac_btn = QPushButton("Buy Me a Coffee")

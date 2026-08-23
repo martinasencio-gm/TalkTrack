@@ -3,6 +3,13 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QTimer
+from PyQt6.QtGui import QIcon
+
+from app.utils.icons import colored_pixmap
+
+_EMPTY_ICON_COLOR = "#45475a"
+_EMPTY_ICON_SIZE = 20
+_CARET_COLOR = "#9397ab"
 
 
 # Speaker colors — must match the list in transcript_viewer.py
@@ -70,7 +77,7 @@ class SpeakerNamePanel(QWidget):
         self._attendees = []
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
         self._setup_ui()
-        self.hide()  # hidden until speakers exist
+        self._show_empty_state()
 
     def _setup_ui(self):
         self._main_layout = QVBoxLayout(self)
@@ -78,9 +85,12 @@ class SpeakerNamePanel(QWidget):
         self._main_layout.setSpacing(4)
 
         # Header row with toggle
+        self._caret_down = QIcon(colored_pixmap("caret-down", _CARET_COLOR, 12))
+        self._caret_right = QIcon(colored_pixmap("caret-right", _CARET_COLOR, 12))
         header_row = QHBoxLayout()
-        self._toggle_btn = QPushButton("\u25bc Speakers")
+        self._toggle_btn = QPushButton(" Speakers")
         self._toggle_btn.setObjectName("speakerPanelToggle")
+        self._toggle_btn.setIcon(self._caret_down)
         self._toggle_btn.setFlat(True)
         self._toggle_btn.clicked.connect(self._toggle_collapsed)
         header_row.addWidget(self._toggle_btn)
@@ -93,6 +103,30 @@ class SpeakerNamePanel(QWidget):
         self._rows_layout.setContentsMargins(8, 0, 0, 0)
         self._rows_layout.setSpacing(4)
         self._main_layout.addWidget(self._rows_container)
+
+        # Shown instead of the header/rows when a transcript is loaded but
+        # no speakers were identified (diarization off, or a single-speaker
+        # recording).
+        self._empty_row_widget = QWidget()
+        empty_layout = QVBoxLayout(self._empty_row_widget)
+        empty_layout.setContentsMargins(0, 4, 0, 4)
+        empty_layout.setSpacing(6)
+
+        self._empty_icon = QLabel()
+        self._empty_icon.setPixmap(
+            colored_pixmap("users-three", _EMPTY_ICON_COLOR, _EMPTY_ICON_SIZE)
+        )
+        empty_layout.addWidget(self._empty_icon)
+
+        self._empty_label = QLabel(
+            "No speakers identified. Run Identify speakers, or record mic "
+            "and system audio separately to get You / Remote."
+        )
+        self._empty_label.setWordWrap(True)
+        self._empty_label.setStyleSheet("color: #6c7086; font-size: 12.5px; line-height: 1.6;")
+        empty_layout.addWidget(self._empty_label)
+
+        self._main_layout.addWidget(self._empty_row_widget)
 
     def set_speakers(self, segments, speaker_names=None, attendees=None):
         """Populate panel from transcript segments and optional existing names.
@@ -109,12 +143,14 @@ class SpeakerNamePanel(QWidget):
         self._attendees = list(attendees) if attendees else []
 
         if not self._speaker_ids:
-            self.hide()
+            self._show_empty_state()
             return
 
         self.show()
-        arrow = "\u25b6" if self._collapsed else "\u25bc"
-        self._toggle_btn.setText(f"{arrow} Speakers ({len(self._speaker_ids)} detected)")
+        self._empty_row_widget.hide()
+        self._toggle_btn.show()
+        self._toggle_btn.setIcon(self._caret_right if self._collapsed else self._caret_down)
+        self._toggle_btn.setText(f" Speakers ({len(self._speaker_ids)} detected)")
         self._rows_container.setVisible(not self._collapsed)
 
         # Clear existing rows
@@ -181,6 +217,12 @@ class SpeakerNamePanel(QWidget):
                 self._name_edits[speaker_id] = name_edit
 
             self._rows_layout.addWidget(row_widget)
+
+    def _show_empty_state(self):
+        self.show()
+        self._toggle_btn.hide()
+        self._rows_container.hide()
+        self._empty_row_widget.show()
 
     def eventFilter(self, obj, event):
         """Show the full attendee list when the line edit is clicked.
@@ -266,8 +308,8 @@ class SpeakerNamePanel(QWidget):
     def _toggle_collapsed(self):
         self._collapsed = not self._collapsed
         self._rows_container.setVisible(not self._collapsed)
-        arrow = "\u25b6" if self._collapsed else "\u25bc"
+        self._toggle_btn.setIcon(self._caret_right if self._collapsed else self._caret_down)
         count = len(self._speaker_ids)
-        self._toggle_btn.setText(f"{arrow} Speakers ({count} detected)")
+        self._toggle_btn.setText(f" Speakers ({count} detected)")
         if self._config:
             self._config.set("ui", "speakers_collapsed", self._collapsed)

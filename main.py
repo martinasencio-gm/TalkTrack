@@ -241,6 +241,19 @@ def main():
     if stylesheet:
         app.setStyleSheet(stylesheet)
 
+    # Load custom fonts. The variable TTF registers under its own family name
+    # ("Inter Variable"), not "Inter" — style.qss's font-family rules list
+    # both so widgets pick it up whichever the running Qt/font combo reports.
+    from PyQt6.QtGui import QFontDatabase
+    font_path = Path(__file__).parent / "resources" / "fonts" / "InterVariable.ttf"
+    if font_path.exists():
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id != -1:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            logger.info("Loaded custom font: %s", ", ".join(families) or "Inter")
+        else:
+            logger.warning("Failed to load custom font: Inter")
+
     # Show splash screen while heavy modules load
     from PyQt6.QtWidgets import QSplashScreen
     from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont

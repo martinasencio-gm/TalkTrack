@@ -118,6 +118,33 @@ class TestRecordingsListRowLayout(unittest.TestCase):
                         f"duration {duration!r} missing or elided at panel width {width}",
                     )
 
+    def test_row_widget_is_not_squeezed_below_its_sizehint(self):
+        """The embedded row widget's rendered height must match what its own
+        layout asked for, not the item's raw sizeHint.
+
+        QListWidget::item's CSS padding + border-bottom is drawn around a
+        setItemWidget row too, and Qt shrinks the widget to fit inside that
+        padding+border rather than growing the item to fit the widget. If the
+        item's sizeHint doesn't add that chrome back in, the row widget is
+        squeezed shorter than its two text lines need, and the name line
+        overlaps the date/duration/badge line beneath it.
+        """
+        app = _get_app()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            widget = self._build_list(tmpdir)
+            widget.resize(400, 450)
+            widget.show()
+            app.processEvents()
+            for i in range(widget.list_widget.count()):
+                item = widget.list_widget.item(i)
+                row = widget.list_widget.itemWidget(item)
+                needed = row.sizeHint().height()
+                self.assertGreaterEqual(
+                    row.height(), needed,
+                    f"row {i} is {row.height()}px tall but its own layout "
+                    f"needs {needed}px — its text lines will overlap",
+                )
+
     def test_no_horizontal_scrollbar_from_long_names(self):
         """A long name must not widen every row into horizontal scrolling.
 

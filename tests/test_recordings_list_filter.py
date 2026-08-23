@@ -102,7 +102,7 @@ class TestRecordingsListFilter(unittest.TestCase):
         widget.refresh()
 
         widget._on_filter_changed("standup")
-        widget.refresh()  # cleared -> RecordingsList.refresh() via SearchBar.cleared
+        widget._on_search_cleared()  # cleared -> resets query, then refresh()
 
         visible = sum(
             1 for i in range(widget.list_widget.count())

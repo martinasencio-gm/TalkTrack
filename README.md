@@ -68,7 +68,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Auto-start recording** — optionally start recording when a selected app joins a call (Settings > General)
 - **Local transcription** — Faster Whisper (OpenAI Whisper), no internet required
 - **Speaker diarization** — two modes:
-  - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels
+  - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels (with an option to automatically replace "You" with your name)
   - *Full* (pyannote.audio): identifies individual speakers with a free HuggingFace token
 - **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
 - **Per-provider AI settings** — API keys and models stored separately per provider, switch without losing config
@@ -307,7 +307,7 @@ Models download automatically on first use and remain cached locally.
 ## Speaker Diarization
 
 ### Simple Mode (No Setup)
-Transcribes microphone and system channels separately and assigns **"You"** and **"Remote"** labels while filtering out acoustic echo and mic bleed. Ideal for 1-on-1 calls.
+Transcribes microphone and system channels separately and assigns **"You"** and **"Remote"** labels while filtering out acoustic echo and mic bleed. Ideal for 1-on-1 calls. You can enable **"Replace \"You\" with name"** in Settings > General to automatically display your friendly name or Windows account name instead of "You".
 
 ### Full Diarization (pyannote.audio)
 Uses the `pyannote.audio 4.0` neural pipeline to cluster individual voices (`SPEAKER_00`, `SPEAKER_01`, etc.) across any number of meeting participants.
@@ -363,6 +363,8 @@ Access configuration via the gear icon or **Edit > Settings**:
 | **Output Format** | `WAV`, `MP3` (requires FFmpeg) | `WAV` |
 | **Capture Mode** | `Selected apps` (Win11) or `All system audio` | Auto-detected |
 | **Diarization** | `Enabled`/`Disabled`, min/max speaker counts | `Disabled` |
+| **Replace "You" with Name** | Use custom name / Windows user name when diarization is off | `Disabled` |
+| **Your Name** | Custom name override for "You" | Windows username |
 | **AI Provider** | `None`, `Claude`, `OpenAI`, `Grok`, `Gemini`, `Mistral`, `Local` | `None` |
 | **Min Recording Length** | Discard recordings shorter than N seconds | `5s` |
 | **Prompt for Tags** | Show quick tagging banner when recording stops | `Enabled` |
@@ -452,4 +454,5 @@ Run the full automated test suite using the virtual environment interpreter:
 - **Speech Recognition:** [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) by SYSTRAN / OpenAI Whisper
 - **Speaker Diarization:** [pyannote.audio](https://github.com/pyannote/pyannote-audio) by Hervé Bredin
 - **Theme Palette:** [Catppuccin Mocha](https://github.com/catppuccin/catppuccin)
+- **Icons:** [Phosphor Icons](https://phosphoricons.com) (MIT License)
 - **License:** Released under the [MIT License](LICENSE).

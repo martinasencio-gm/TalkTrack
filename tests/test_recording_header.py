@@ -35,18 +35,18 @@ class TestRecordingHeaderHelpers(unittest.TestCase):
         from app.ui.recording_header import _format_calendar_line
         event = {"subject": "Q3 Roadmap Sync", "attendees": ["Jane", "John", "Priya"]}
         self.assertEqual(
-            _format_calendar_line(event), "\U0001F4C5 Q3 Roadmap Sync · 3 attendees"
+            _format_calendar_line(event), "Q3 Roadmap Sync · 3 attendees"
         )
 
     def test_format_calendar_line_singular_attendee(self):
         from app.ui.recording_header import _format_calendar_line
         event = {"subject": "1:1", "attendees": ["Jane"]}
-        self.assertEqual(_format_calendar_line(event), "\U0001F4C5 1:1 · 1 attendee")
+        self.assertEqual(_format_calendar_line(event), "1:1 · 1 attendee")
 
     def test_format_calendar_line_no_attendees(self):
         from app.ui.recording_header import _format_calendar_line
         event = {"subject": "Focus Block", "attendees": []}
-        self.assertEqual(_format_calendar_line(event), "\U0001F4C5 Focus Block")
+        self.assertEqual(_format_calendar_line(event), "Focus Block")
 
     def test_format_transcribe_line_with_model(self):
         from app.ui.recording_header import _format_transcribe_line
