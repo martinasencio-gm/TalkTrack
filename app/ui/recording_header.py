@@ -73,7 +73,7 @@ def match_event_by_subject(name, events):
     return None
 
 
-from app.ui.tag_chip import TagChip, TagPickerPopup
+from app.ui.tag_chip import TagChip
 from app.utils import tag_manager
 
 
@@ -86,13 +86,13 @@ class RecordingHeader(QWidget):
     change_calendar_requested = pyqtSignal()  # emitted when user clicks "Change" on the calendar line
     tags_changed = pyqtSignal(list)           # emitted when tags on current recording change
     manage_tags_requested = pyqtSignal()      # open tag manager
+    tag_dialog_requested = pyqtSignal()       # "+ Tag" clicked — open the Tag this recording dialog
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._metadata = None
         self._editing = False
         self._suggested_subjects = []
-        self._tag_picker = None
         self._setup_ui()
         self.hide()  # hidden until a recording is loaded
 
@@ -248,26 +248,7 @@ class RecordingHeader(QWidget):
     def _on_add_tag_clicked(self):
         if not self._metadata or not self._metadata.get("directory"):
             return
-        assigned_tags = tag_manager.get_recording_tags(self._metadata)
-        self._tag_picker = TagPickerPopup(assigned_tags=assigned_tags, parent=self)
-        self._tag_picker.tag_toggled.connect(self._on_tag_toggled)
-        self._tag_picker.manage_tags_requested.connect(self.manage_tags_requested.emit)
-
-        # Position popup below the + Tag button
-        btn_pos = self.add_tag_btn.mapToGlobal(self.add_tag_btn.rect().bottomLeft())
-        self._tag_picker.show_at(btn_pos)
-
-    def _on_tag_toggled(self, tag_name: str, is_assigned: bool):
-        if not self._metadata or not self._metadata.get("directory"):
-            return
-        if is_assigned:
-            updated = tag_manager.add_tag_to_recording(self._metadata["directory"], tag_name)
-        else:
-            updated = tag_manager.remove_tag_from_recording(self._metadata["directory"], tag_name)
-
-        self._metadata["tags"] = updated
-        self._rebuild_tags()
-        self.tags_changed.emit(updated)
+        self.tag_dialog_requested.emit()
 
     def refresh_tags(self):
         """External call to refresh tag chips on the current recording."""

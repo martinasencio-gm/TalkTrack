@@ -67,6 +67,20 @@ class TestRecordingHeaderTags(unittest.TestCase):
         meta_saved = json.loads((self.session_dir / "metadata.json").read_text(encoding="utf-8"))
         self.assertEqual(meta_saved["tags"], ["Follow-up"])
 
+    def test_add_tag_button_requests_the_tag_dialog(self):
+        """The "+ Tag" button opens the same "Tag this recording" dialog as
+        the recordings list's right-click Tag... action (no separate inline
+        popup) — see MainWindow._open_tag_dialog."""
+        header = RecordingHeader()
+        header.set_recording(self.meta)
+
+        requested = []
+        header.tag_dialog_requested.connect(lambda: requested.append(1))
+
+        header._on_add_tag_clicked()
+
+        self.assertEqual(requested, [1])
+
 
 if __name__ == "__main__":
     unittest.main()

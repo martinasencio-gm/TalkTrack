@@ -551,6 +551,7 @@ class MainWindow(QMainWindow):
         self.recording_header.change_calendar_requested.connect(self._on_change_calendar_requested)
         self.recording_header.tags_changed.connect(self._on_header_tags_changed)
         self.recording_header.manage_tags_requested.connect(self._open_manage_tags_dialog)
+        self.recording_header.tag_dialog_requested.connect(self._open_tag_dialog)
         self.recordings_list.manage_tags_requested.connect(self._open_manage_tags_dialog)
         self.recordings_list.recording_tags_changed.connect(self._on_recordings_list_tags_changed)
 
@@ -2725,6 +2726,20 @@ class MainWindow(QMainWindow):
         if self._current_session:
             self._current_session["tags"] = tags
         self.recordings_list.refresh()
+
+    def _open_tag_dialog(self):
+        """The header's "+ Tag" button — opens the same "Tag this recording"
+        dialog as the recordings list's right-click Tag... action, so there
+        is one tagging UI throughout the app rather than a second, lighter
+        popup."""
+        if not self._current_session or not self._current_session.get("directory"):
+            return
+        from app.ui.tag_recording_dialog import TagRecordingDialog
+        recordings_dir = self.config.get("output", "directory")
+        dialog = TagRecordingDialog(self._current_session, recordings_dir, parent=self)
+        dialog.tags_changed.connect(self._on_header_tags_changed)
+        dialog.exec()
+        self.recording_header.refresh_tags()
 
     def _on_banner_tags_updated(self, tags):
         if self._current_session:
