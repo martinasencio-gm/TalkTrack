@@ -145,7 +145,7 @@ class CompactStrip(QWidget):
         self.title_label = QLabel("Recording Name")
         self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600;")
         
-        self.subtitle_label = QLabel("Teams is in a call · mic and system audio ready")
+        self.subtitle_label = QLabel("")
         self.subtitle_label.setStyleSheet("font-size: 11.5px; color: #9397ab;")
         
         self.title_layout.addWidget(self.title_label)
@@ -603,6 +603,12 @@ class CompactStrip(QWidget):
                 border-radius: {radius}px;
             }}
         """
+
+    def set_subtitle(self, text: str):
+        """Reflect the real pre-flight verdict (see preflight_status.compute_verdict)
+        instead of the mockup placeholder this label shipped with — it must
+        never assert a call/device status the app hasn't actually checked."""
+        self.subtitle_label.setText(text)
 
     def update_timer(self, time_str: str):
         self.timer_label.setText(time_str)

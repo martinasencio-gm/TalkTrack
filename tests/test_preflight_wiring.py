@@ -87,6 +87,7 @@ class TestUpdatePreflight(unittest.TestCase):
         window.source_selector = _StubSourceSelector()
         window.config = _StubConfig(hf_token=hf_token)
         window._mic_level_tracker = MicLevelTracker()
+        window.compact_strip = SimpleNamespace(set_subtitle=lambda text: None)
         return window
 
     def test_all_clear_is_ready_verdict(self):

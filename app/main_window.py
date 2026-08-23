@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self.compact_strip.variant_changed.connect(self._on_compact_strip_variant_changed)
         self.compact_strip.set_variant(self.config.get("ui", "strip_variant") or "full")
         self._update_compact_strip_state()
+        self._update_preflight()
         if self.config.get("ui", "compact_strip_visible"):
             self.compact_strip_action.setChecked(True)
 
@@ -1753,6 +1754,9 @@ class MainWindow(QMainWindow):
             mic_check, call_check, model_check
         )
         self.recording_controls.preflight.set_verdict(verdict, title, subtitle)
+        compact_strip = getattr(self, "compact_strip", None)
+        if compact_strip is not None:
+            compact_strip.set_subtitle(subtitle)
 
         call_name = self.source_selector.get_selected_source_name() or "No source"
         self.recording_controls.set_capturing(
