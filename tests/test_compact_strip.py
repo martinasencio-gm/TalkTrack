@@ -310,6 +310,24 @@ class TestCompactStripVariant(unittest.TestCase):
         self.assertTrue(strip.pill_btn_pause.isHidden())
         self.assertTrue(strip.pill_btn_stop.isHidden())
 
+    def test_pill_shows_record_button_when_idle(self):
+        # Idle/armed/transcribing/done previously left the pill with nothing
+        # visible but a small dim icon — no way to tell what was going on or
+        # to start a recording without expanding back to the full bar.
+        strip = CompactStrip()
+        strip.set_state("idle")
+        self.assertFalse(strip.pill_btn_record.isHidden())
+
+        received = []
+        strip.record_requested.connect(lambda: received.append(True))
+        strip.pill_btn_record.click()
+        self.assertEqual(received, [True])
+
+    def test_pill_hides_record_button_while_recording(self):
+        strip = CompactStrip()
+        strip.set_state("recording")
+        self.assertTrue(strip.pill_btn_record.isHidden())
+
     def test_pill_hides_mic_meter_only_when_muted(self):
         strip = CompactStrip()
         strip.set_state("muted")

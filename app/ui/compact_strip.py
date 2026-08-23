@@ -315,6 +315,16 @@ class CompactStrip(QWidget):
 
         pill_layout.addStretch(1)
 
+        # Shown instead of pause/stop outside recording/muted/paused — the
+        # pill otherwise has no way to start a recording without expanding
+        # back to the full bar first.
+        self.pill_btn_record = QPushButton()
+        self.pill_btn_record.setFixedSize(28, 28)
+        self.pill_btn_record.setIconSize(QSize(14, 14))
+        self._set_icon(self.pill_btn_record, "record", "#f38ba8")
+        self.pill_btn_record.clicked.connect(self.record_requested.emit)
+        pill_layout.addWidget(self.pill_btn_record)
+
         self.pill_btn_pause = QPushButton()
         self.pill_btn_pause.setFixedSize(28, 28)
         self.pill_btn_pause.setIconSize(QSize(14, 14))
@@ -547,6 +557,7 @@ class CompactStrip(QWidget):
 
         if state in ("recording", "muted", "paused"):
             self.pill_timer.show()
+            self.pill_btn_record.hide()
             self.pill_btn_stop.show()
             self.pill_btn_pause.show()
             if state == "paused":
@@ -565,6 +576,7 @@ class CompactStrip(QWidget):
             self.pill_timer.hide()
             self.pill_btn_pause.hide()
             self.pill_btn_stop.hide()
+            self.pill_btn_record.show()
 
         if state == "recording":
             self.pill_mic_meter.show()

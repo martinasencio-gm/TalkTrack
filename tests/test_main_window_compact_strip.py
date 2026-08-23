@@ -106,6 +106,19 @@ class TestMainWindowCompactStrip(unittest.TestCase):
             window.compact_strip.open_transcript_requested.emit()
         self.assertEqual(mock_restore.call_count, 2)
 
+    def test_expand_button_closes_the_compact_strip(self):
+        # Previously wired straight to _restore_from_tray, which shows the
+        # main window but never hides the strip or unchecks the menu action
+        # — double-click (via _switch_to_full_ui) did both, so only the
+        # button left the strip stuck open.
+        window = self._make_window()
+        window.compact_strip_action.setChecked(True)
+        self.assertTrue(window.compact_strip.isVisible())
+
+        window.compact_strip.expand_requested.emit()
+        self.assertFalse(window.compact_strip.isVisible())
+        self.assertFalse(window.compact_strip_action.isChecked())
+
     def test_mute_toggle_updates_compact_strip_state(self):
         from app.recording.recorder import RecordingState
         window = self._make_window()

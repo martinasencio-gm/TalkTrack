@@ -160,8 +160,8 @@ class MainWindow(QMainWindow):
 
         self._compact_strip_done = False
         self.compact_strip = CompactStrip()
-        self.compact_strip.expand_requested.connect(self._restore_from_tray)
-        self.compact_strip.open_transcript_requested.connect(self._restore_from_tray)
+        self.compact_strip.expand_requested.connect(self._switch_to_full_ui)
+        self.compact_strip.open_transcript_requested.connect(self._switch_to_full_ui)
         self.compact_strip.record_requested.connect(self._start_recording)
         self.compact_strip.stop_requested.connect(self._stop_recording)
         self.compact_strip.pause_requested.connect(self._toggle_pause)
