@@ -147,6 +147,33 @@ class TestMainWindowCompactStrip(unittest.TestCase):
         self.assertFalse(window._compact_strip_done)
         self.assertEqual(window.compact_strip.current_state, "recording")
 
+    def test_finishing_transcription_clears_a_pending_batch_tag(self):
+        # A recording queued for the overnight batch run but then manually
+        # transcribed shouldn't sit tagged forever (or get re-transcribed by
+        # the next batch run) — see MainWindow._display_final_transcript.
+        import json
+        import tempfile
+        from pathlib import Path
+        from app.transcription.transcriber import TranscriptResult
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        session_dir = Path(tmp) / "rec_1"
+        session_dir.mkdir()
+        metadata = {"directory": str(session_dir), "name": "x",
+                    "batch_pending": True, "batch_attempts": 1}
+        (session_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        window = self._make_window()
+        window._current_session = metadata
+        result = TranscriptResult(segments=[], language="en", duration=0.0)
+        window._display_final_transcript(result, session=metadata)
+
+        saved = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+        self.assertNotIn("batch_pending", saved)
+        self.assertNotIn("batch_attempts", saved)
+
+
 
 class TestMainWindowRestoresSavedStripVariant(unittest.TestCase):
     """Construction reads ui.strip_variant so a pill left collapsed from a

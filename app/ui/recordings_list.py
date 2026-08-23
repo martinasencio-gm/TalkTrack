@@ -892,6 +892,12 @@ class RecordingsList(QWidget):
         the user work out which recordings are in which state.
         """
         unqueued, queued = partition_by_queue_state(metadatas)
+        # A recording actively being transcribed will already have a
+        # transcript by the time any batch run reaches it (and the tag gets
+        # cleared automatically the moment that transcription finishes —
+        # see MainWindow._display_final_transcript), so offering to queue it
+        # now would only ever be a no-op at best.
+        unqueued = [m for m in unqueued if m.get("directory") not in self._transcribing]
         if not unqueued and not queued:
             return
 

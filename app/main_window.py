@@ -1875,6 +1875,13 @@ class MainWindow(QMainWindow):
         if session is None:
             session = self._current_session
 
+        # A recording that just got transcribed here no longer needs a
+        # scheduled batch run — without this, a recording queued before the
+        # user manually transcribed it would sit tagged forever (or get
+        # needlessly re-transcribed by the next batch run).
+        if session and session.get("directory"):
+            batch_queue.clear(session["directory"])
+
         if not self._is_current_session(session):
             # Finished after the user switched recordings: save to the
             # recording's own directory, leave the displayed UI alone.
