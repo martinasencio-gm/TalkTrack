@@ -40,13 +40,26 @@ def _read_text(path):
         return None
 
 
-def load_speaker_names(session):
+def load_speaker_names(session, config=None):
     """The recording's speaker-ID → friendly-name map ({} when unset)."""
     directory = session.get("directory") if session else None
     if not directory:
-        return {}
-    names = _read_json(Path(directory) / "speaker_names.json")
-    return names if isinstance(names, dict) else {}
+        names = {}
+    else:
+        raw = _read_json(Path(directory) / "speaker_names.json")
+        names = raw if isinstance(raw, dict) else {}
+
+    if config:
+        try:
+            if config.get("general", "replace_you_with_name") and "You" not in names:
+                from app.utils.platform_info import get_current_user_name
+                user_name = get_current_user_name(config)
+                if user_name and user_name.strip() and user_name.strip().lower() != "you":
+                    names["You"] = user_name.strip()
+        except Exception:
+            pass
+
+    return names
 
 
 def load_calendar_event(session):
@@ -83,6 +96,9 @@ def write_transcript(session, result, speaker_names=None):
                           indent=2, ensure_ascii=False)
         atomic_write_text(directory / "transcript.txt",
                           result.to_text(speaker_names=names))
+        if names:
+            atomic_write_json(directory / "speaker_names.json",
+                              names, indent=2, ensure_ascii=False)
     except OSError:
         logger.exception("Failed to write transcript for %s", directory)
         return False

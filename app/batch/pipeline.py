@@ -31,6 +31,8 @@ class BatchSettings:
     diarize: bool = False
     min_speakers: int = None
     max_speakers: int = None
+    replace_you_with_name: bool = False
+    user_name: str = ""
 
     @classmethod
     def from_config(cls, config, diarize=None):
@@ -40,6 +42,18 @@ class BatchSettings:
         """
         hf_token = config.get("diarization", "hf_token") or ""
         want = config.get("diarization", "enabled") if diarize is None else diarize
+        replace_you = False
+        user_name = ""
+        try:
+            replace_you = bool(config.get("general", "replace_you_with_name"))
+        except Exception:
+            pass
+        try:
+            from app.utils.platform_info import get_current_user_name
+            user_name = get_current_user_name(config)
+        except Exception:
+            pass
+
         return cls(
             model_size=config.get("transcription", "model_size"),
             language=config.get("transcription", "language"),
@@ -50,6 +64,8 @@ class BatchSettings:
             diarize=bool(want and hf_token),
             min_speakers=config.get("diarization", "min_speakers"),
             max_speakers=config.get("diarization", "max_speakers"),
+            replace_you_with_name=replace_you,
+            user_name=user_name,
         )
 
 
@@ -186,7 +202,15 @@ def run_job(job, settings, workers=None, on_progress=None):
     # to match whichever path produced it.
     result.merge_adjacent_same_speaker()
 
-    if not session_io.write_transcript(job.session, result):
+    speaker_names = None
+    if not diarized and settings.replace_you_with_name:
+        if any(getattr(s, "speaker", "") == "You" for s in result.segments):
+            if settings.user_name and settings.user_name.strip().lower() != "you":
+                speaker_names = session_io.load_speaker_names(job.session)
+                if "You" not in speaker_names:
+                    speaker_names["You"] = settings.user_name.strip()
+
+    if not session_io.write_transcript(job.session, result, speaker_names=speaker_names):
         return JobOutcome(False, "could not write the transcript to disk",
                           segments=len(result.segments),
                           elapsed=time.monotonic() - started)
