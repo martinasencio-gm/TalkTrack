@@ -71,11 +71,11 @@ class TagChip(QFrame):
             if self._selected:
                 bg = f"rgba({QColor(c).red()}, {QColor(c).green()}, {QColor(c).blue()}, 0.35)"
                 border = c
-                text_color = "#ffffff"
+                text_color = "#e9e9ed"
             else:
-                bg = "rgba(49, 50, 68, 0.6)"
-                border = "rgba(69, 71, 90, 0.8)"
-                text_color = "#a6adc8"
+                bg = "transparent"
+                border = "rgba(233,233,237,0.16)"
+                text_color = "#e9e9ed"
         else:
             bg = f"rgba({QColor(c).red()}, {QColor(c).green()}, {QColor(c).blue()}, 0.2)"
             border = f"rgba({QColor(c).red()}, {QColor(c).green()}, {QColor(c).blue()}, 0.6)"
@@ -179,50 +179,42 @@ class TagPickerPopup(QFrame):
 
         self.setStyleSheet("""
             QFrame#tagPickerPopup {
-                background-color: #1e1e2e;
-                border: 1px solid #45475a;
+                background-color: #232532;
+                border: 1px solid #3f424d;
                 border-radius: 8px;
             }
             QLineEdit#tagPickerSearch {
-                background-color: #181825;
-                color: #cdd6f4;
-                border: 1px solid #313244;
-                border-radius: 4px;
-                padding: 4px 8px;
                 font-size: 11px;
-            }
-            QLineEdit#tagPickerSearch:focus {
-                border-color: #89b4fa;
             }
             QScrollArea#tagPickerScroll, QWidget#tagPickerScroll QWidget {
                 background-color: transparent;
             }
             QPushButton#tagPickerCreateBtn {
-                background-color: #313244;
-                color: #89b4fa;
-                border: 1px dashed #89b4fa;
+                background-color: rgba(145,132,217,0.06);
+                color: #9184d9;
+                border: 1px dashed rgba(145,132,217,0.45);
                 border-radius: 4px;
                 padding: 4px 8px;
                 font-size: 11px;
                 text-align: left;
             }
             QPushButton#tagPickerCreateBtn:hover {
-                background-color: #45475a;
+                background-color: rgba(145,132,217,0.12);
             }
             QPushButton#tagPickerManageBtn {
                 background-color: transparent;
-                color: #a6adc8;
+                color: #9397ab;
                 border: none;
                 font-size: 10px;
                 text-align: center;
                 padding: 4px;
             }
             QPushButton#tagPickerManageBtn:hover {
-                color: #cdd6f4;
+                color: #e9e9ed;
                 text-decoration: underline;
             }
             QCheckBox {
-                color: #cdd6f4;
+                color: #e9e9ed;
                 font-size: 11px;
                 spacing: 6px;
             }

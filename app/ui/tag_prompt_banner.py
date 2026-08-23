@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor, QFont, QCursor
 
 from app.ui.tag_chip import TagChip
 from app.utils import tag_manager
+from app.utils.icons import colored_pixmap
 
 
 class TagPromptBanner(QWidget):
@@ -46,8 +47,8 @@ class TagPromptBanner(QWidget):
         header_row = QHBoxLayout()
         header_row.setSpacing(8)
 
-        title_icon = QLabel("🏷️")
-        title_icon.setStyleSheet("font-size: 14px;")
+        title_icon = QLabel()
+        title_icon.setPixmap(colored_pixmap("bookmark-simple", "#9184d9", 14))
         header_row.addWidget(title_icon)
 
         self._title_label = QLabel("Tag this recording:")
@@ -60,7 +61,7 @@ class TagPromptBanner(QWidget):
         header_row.addStretch()
 
         self._done_btn = QPushButton("Done")
-        self._done_btn.setObjectName("tagBannerDoneBtn")
+        self._done_btn.setObjectName("primaryAction")
         self._done_btn.setFixedWidth(70)
         self._done_btn.clicked.connect(self._on_done)
         header_row.addWidget(self._done_btn)
@@ -94,7 +95,6 @@ class TagPromptBanner(QWidget):
         add_row.addWidget(self._new_tag_input, 1)
 
         add_btn = QPushButton("Add")
-        add_btn.setObjectName("tagBannerAddBtn")
         add_btn.setFixedHeight(26)
         add_btn.clicked.connect(self._add_custom_tag)
         add_row.addWidget(add_btn)
@@ -104,46 +104,17 @@ class TagPromptBanner(QWidget):
 
         self.setStyleSheet("""
             QFrame#tagPromptBanner {
-                background-color: #1e1e2e;
-                border: 1px solid #45475a;
+                background-color: #1c1e29;
+                border: 1px solid #292b31;
                 border-radius: 8px;
             }
             QLabel#bannerTitle {
-                color: #cdd6f4;
+                color: #e9e9ed;
                 font-size: 11pt;
             }
             QLineEdit#tagBannerNewInput {
-                background-color: #181825;
-                color: #cdd6f4;
-                border: 1px solid #313244;
-                border-radius: 4px;
+                font-size: 10px;
                 padding: 2px 8px;
-                font-size: 10px;
-            }
-            QLineEdit#tagBannerNewInput:focus {
-                border-color: #89b4fa;
-            }
-            QPushButton#tagBannerDoneBtn {
-                background-color: #89b4fa;
-                color: #1e1e2e;
-                font-weight: bold;
-                border: none;
-                border-radius: 6px;
-                padding: 4px 12px;
-            }
-            QPushButton#tagBannerDoneBtn:hover {
-                background-color: #b4befe;
-            }
-            QPushButton#tagBannerAddBtn {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: 1px solid #45475a;
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 10px;
-            }
-            QPushButton#tagBannerAddBtn:hover {
-                background-color: #45475a;
             }
             QScrollArea, QScrollArea QWidget {
                 background: transparent;
