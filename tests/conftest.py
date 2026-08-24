@@ -14,7 +14,7 @@ def _isolate_config(tmp_path, monkeypatch):
     Without this, any test that constructs a real Config/MainWindow and
     triggers a save (directly, or via closeEvent) writes to the developer's
     actual ~/.talktrack/settings.json — including secrets already stored
-    there (API keys, HF tokens) and settings like minimize_to_tray that
+    there (API keys, HF tokens) and settings like close_to_tray that
     tests should never be able to flip on a real machine.
 
     MainWindow.__init__ schedules two delayed one-time-setup checks via

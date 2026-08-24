@@ -191,7 +191,7 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             try:
                 if not (window.tray.is_supported()):
                     self.skipTest("System tray not available on this runner")
-                window.config.set("general", "minimize_to_tray", True)
+                window.config.set("general", "close_to_tray", True)
                 window.setWindowState(Qt.WindowState.WindowMinimized)
                 event = QEvent(QEvent.Type.WindowStateChange)
                 window.changeEvent(event)

@@ -71,7 +71,9 @@ class CompactStrip(QWidget):
     cancel_requested = pyqtSignal()
     open_transcript_requested = pyqtSignal()
     position_changed = pyqtSignal(int, int)
-    full_ui_requested = pyqtSignal()
+    shrink_requested = pyqtSignal()     # double-click: one step along the
+                                        # full -> compact_bar -> pill -> full
+                                        # chain, which MainWindow owns
     variant_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -81,7 +83,11 @@ class CompactStrip(QWidget):
         self._setup_ui()
         
     def _setup_ui(self):
-        self.setFixedSize(700, 76)
+        # 2px over the frame's own 700x76: the layout below insets the
+        # frame by 1px on every side so its antialiased 14px corner
+        # radius and 1px border have a pixel to land on instead of
+        # being cut off by the window boundary.
+        self.setFixedSize(702, 78)
         
         # Flags: frameless, always on top, tool window
         self.setWindowFlags(
@@ -95,7 +101,7 @@ class CompactStrip(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(1, 1, 1, 1)
         
         self.frame = QFrame(self)
         self.frame.setObjectName("compactStripFrame")
@@ -108,7 +114,10 @@ class CompactStrip(QWidget):
         """)
         
         frame_layout = QHBoxLayout(self.frame)
-        frame_layout.setContentsMargins(18, 0, 16, 0)
+        # Symmetric, and non-zero vertically: at 0 the row's contents
+        # ran into the frame's top and bottom border and through the
+        # inward curve of its 14px corners.
+        frame_layout.setContentsMargins(18, 6, 18, 6)
         frame_layout.setSpacing(15)
         
         # Mark (Left) — per-state Phosphor icon, pulsing while recording/muted
@@ -276,7 +285,7 @@ class CompactStrip(QWidget):
         self.pill_frame = QFrame(self)
         self.pill_frame.setObjectName("compactPillFrame")
         pill_layout = QHBoxLayout(self.pill_frame)
-        pill_layout.setContentsMargins(10, 0, 8, 0)
+        pill_layout.setContentsMargins(10, 4, 10, 4)
         pill_layout.setSpacing(8)
 
         self.pill_mark_icon = QLabel()
@@ -292,6 +301,12 @@ class CompactStrip(QWidget):
         self._pill_mark_pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
         self._pill_mark_pulse_anim.setLoopCount(-1)
         pill_layout.addWidget(self.pill_mark_icon)
+
+        self.pill_status_label = QLabel("Ready")
+        self.pill_status_label.setStyleSheet(
+            "font-size: 13px; font-weight: 600; color: #cfd3e5;"
+        )
+        pill_layout.addWidget(self.pill_status_label)
 
         self.pill_timer = QLabel("00:00:00")
         self.pill_timer.setStyleSheet(
@@ -355,18 +370,24 @@ class CompactStrip(QWidget):
         self.position_changed.emit(self.x(), self.y())
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Double-click always shrinks one step; the strip doesn't decide
+        where that lands. MainWindow walks the chain (window_presentation)
+        so the same gesture means the same thing on the capture bar, the
+        compact bar and the pill."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_pos = None
-            if self._variant == "pill":
-                self.set_variant("full")
-            else:
-                self.full_ui_requested.emit()
+            self.shrink_requested.emit()
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
 
+    def variant(self) -> str:
+        """"full" or "pill" — which size the strip is currently showing."""
+        return self._variant
+
     def set_variant(self, variant: str):
-        """variant: "full" (700x76) or "pill" (232x44) — the Compact Bar
+        """variant: "full" or "pill" — the frames are 700x76 and 280x44,
+        each inside a 1px window margin (see _setup_ui). The Compact Bar
         spec is explicit that the pill is "the same class ... with a
         different fixed size ... not a second widget", so this swaps which
         internal frame is visible rather than constructing a second
@@ -378,11 +399,11 @@ class CompactStrip(QWidget):
         if variant == "pill":
             self.frame.hide()
             self.pill_frame.show()
-            self.setFixedSize(232, 44)
+            self.setFixedSize(282, 46)
         else:
             self.pill_frame.hide()
             self.frame.show()
-            self.setFixedSize(700, 76)
+            self.setFixedSize(702, 78)
         self.variant_changed.emit(variant)
 
 
@@ -554,6 +575,35 @@ class CompactStrip(QWidget):
         edge_color = _STATE_EDGE_COLORS.get(state, _STATE_EDGE_COLORS["idle"])
         self.pill_frame.setStyleSheet(self._frame_style(edge_color, "compactPillFrame", 22))
         self.pill_timer.setText(self.timer_label.text())
+
+        if state == "idle":
+            self.pill_status_label.setText("Ready")
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
+            self.pill_status_label.show()
+        elif state == "armed":
+            self.pill_status_label.setText("Call Active")
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
+            self.pill_status_label.show()
+        elif state == "recording":
+            self.pill_status_label.setText("REC")
+            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
+            self.pill_status_label.show()
+        elif state == "paused":
+            self.pill_status_label.setText("PAUSED")
+            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f9e2af;")
+            self.pill_status_label.show()
+        elif state == "muted":
+            self.pill_status_label.setText("MUTED")
+            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
+            self.pill_status_label.show()
+        elif state == "transcribing":
+            self.pill_status_label.setText("Transcribing…")
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
+            self.pill_status_label.show()
+        elif state == "done":
+            self.pill_status_label.setText("Done")
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #a6e3a1;")
+            self.pill_status_label.show()
 
         if state in ("recording", "muted", "paused"):
             self.pill_timer.show()

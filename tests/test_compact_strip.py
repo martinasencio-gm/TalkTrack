@@ -234,7 +234,9 @@ class TestCompactStripVariant(unittest.TestCase):
         self.assertEqual(strip._variant, "full")
         self.assertFalse(strip.frame.isHidden())
         self.assertTrue(strip.pill_frame.isHidden())
-        self.assertEqual((strip.width(), strip.height()), (700, 76))
+        # 2px over the frame's 700x76 — the window carries a 1px margin
+        # on every side so the frame's rounded border isn't clipped.
+        self.assertEqual((strip.width(), strip.height()), (702, 78))
 
     def test_collapse_button_switches_to_pill(self):
         strip = CompactStrip()
@@ -242,7 +244,20 @@ class TestCompactStripVariant(unittest.TestCase):
         self.assertEqual(strip._variant, "pill")
         self.assertTrue(strip.frame.isHidden())
         self.assertFalse(strip.pill_frame.isHidden())
-        self.assertEqual((strip.width(), strip.height()), (232, 44))
+        self.assertEqual((strip.width(), strip.height()), (282, 46))
+
+    def test_pill_status_label_updates_with_state(self):
+        strip = CompactStrip()
+        strip.set_state("idle")
+        self.assertEqual(strip.pill_status_label.text(), "Ready")
+        strip.set_state("recording")
+        self.assertEqual(strip.pill_status_label.text(), "REC")
+        strip.set_state("paused")
+        self.assertEqual(strip.pill_status_label.text(), "PAUSED")
+        strip.set_state("transcribing")
+        self.assertEqual(strip.pill_status_label.text(), "Transcribing…")
+        strip.set_state("done")
+        self.assertEqual(strip.pill_status_label.text(), "Done")
 
     def test_set_variant_emits_variant_changed(self):
         strip = CompactStrip()
@@ -258,12 +273,7 @@ class TestCompactStripVariant(unittest.TestCase):
         strip.set_variant("full")  # already full
         self.assertEqual(received, [])
 
-    def test_double_click_on_pill_restores_full_instead_of_expanding(self):
-        strip = CompactStrip()
-        strip.set_variant("pill")
-        full_ui_received = []
-        strip.full_ui_requested.connect(lambda: full_ui_received.append(True))
-
+    def _double_click(self, strip):
         from PyQt6.QtCore import QPointF, Qt as QtNS
         from PyQt6.QtGui import QMouseEvent
 
@@ -272,24 +282,36 @@ class TestCompactStripVariant(unittest.TestCase):
             QtNS.MouseButton.LeftButton, QtNS.MouseButton.LeftButton, QtNS.KeyboardModifier.NoModifier,
         )
         strip.mouseDoubleClickEvent(event)
-        self.assertEqual(strip._variant, "full")
-        self.assertEqual(full_ui_received, [])
 
-    def test_double_click_on_full_strip_still_requests_full_ui(self):
+    def test_double_click_asks_to_shrink_without_deciding_where(self):
+        """The strip doesn't own the chain — MainWindow walks it, so the same
+        gesture means "one step" on the capture bar, the strip and the pill.
+        The strip must not change its own variant here."""
         strip = CompactStrip()
         received = []
-        strip.full_ui_requested.connect(lambda: received.append(True))
+        strip.shrink_requested.connect(lambda: received.append(True))
 
-        from PyQt6.QtCore import QPointF, Qt as QtNS
-        from PyQt6.QtGui import QMouseEvent
+        self._double_click(strip)
 
-        event = QMouseEvent(
-            QMouseEvent.Type.MouseButtonDblClick, QPointF(10, 10), QPointF(10, 10),
-            QtNS.MouseButton.LeftButton, QtNS.MouseButton.LeftButton, QtNS.KeyboardModifier.NoModifier,
-        )
-        strip.mouseDoubleClickEvent(event)
         self.assertEqual(received, [True])
-        self.assertEqual(strip._variant, "full")
+        self.assertEqual(strip.variant(), "full")
+
+    def test_double_click_on_the_pill_also_just_asks_to_shrink(self):
+        strip = CompactStrip()
+        strip.set_variant("pill")
+        received = []
+        strip.shrink_requested.connect(lambda: received.append(True))
+
+        self._double_click(strip)
+
+        self.assertEqual(received, [True])
+        self.assertEqual(strip.variant(), "pill")
+
+    def test_variant_accessor_reports_the_current_size(self):
+        strip = CompactStrip()
+        self.assertEqual(strip.variant(), "full")
+        strip.set_variant("pill")
+        self.assertEqual(strip.variant(), "pill")
 
     def test_pill_mirrors_timer_and_meters(self):
         strip = CompactStrip()

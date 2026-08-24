@@ -190,12 +190,26 @@ class SettingsDialog(QDialog):
         )
         recording_form.addRow(self.mic_mute_on_start_cb)
 
-        self.minimize_to_tray_cb = QCheckBox("When minimized, hide to system tray")
-        self.minimize_to_tray_cb.setToolTip(
-            "Keeps TalkTrack out of the taskbar when minimized.\n"
-            "Right-click the tray icon to restore or stop recording."
+        self.double_click_target_combo = QComboBox()
+        self.double_click_target_combo.addItem("Compact bar", "compact_bar")
+        self.double_click_target_combo.addItem("Pill", "pill")
+        self.double_click_target_combo.setToolTip(
+            "Double-clicking the capture bar shrinks the window, and each\n"
+            "further double-click shrinks it again before returning to the\n"
+            "full window. This picks where the first double-click lands:\n"
+            "- Compact bar: full window > compact bar > pill > full window\n"
+            "- Pill: full window > pill > full window\n\n"
+            "The minimize button always minimizes to the taskbar."
         )
-        recording_form.addRow(self.minimize_to_tray_cb)
+        recording_form.addRow("Double-click shrinks to:", self.double_click_target_combo)
+
+        self.close_to_tray_cb = QCheckBox("Hide to system tray when closing the window")
+        self.close_to_tray_cb.setToolTip(
+            "When you close the window and choose to minimize instead of\n"
+            "quitting, hide TalkTrack into the system tray rather than\n"
+            "leaving it minimized in the taskbar."
+        )
+        recording_form.addRow(self.close_to_tray_cb)
 
         self.launch_compact_cb = QCheckBox("Launch in compact mode")
         self.launch_compact_cb.setToolTip(
@@ -521,7 +535,11 @@ class SettingsDialog(QDialog):
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
-        self.minimize_to_tray_cb.setChecked(self.config.get("general", "minimize_to_tray"))
+        idx = self.double_click_target_combo.findData(
+            self.config.get("ui", "double_click_target") or "compact_bar")
+        if idx >= 0:
+            self.double_click_target_combo.setCurrentIndex(idx)
+        self.close_to_tray_cb.setChecked(bool(self.config.get("general", "close_to_tray")))
         self.launch_compact_cb.setChecked(self.config.get("general", "launch_in_compact_mode"))
 
         # Audio
@@ -658,7 +676,9 @@ class SettingsDialog(QDialog):
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())
-        self.config.set("general", "minimize_to_tray", self.minimize_to_tray_cb.isChecked())
+        self.config.set("ui", "double_click_target",
+                        self.double_click_target_combo.currentData() or "compact_bar")
+        self.config.set("general", "close_to_tray", self.close_to_tray_cb.isChecked())
         self.config.set("general", "launch_in_compact_mode", self.launch_compact_cb.isChecked())
 
         self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())

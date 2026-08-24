@@ -46,6 +46,7 @@ from app.ui.status_panel import SystemStatusDialog
 from app.ui.tray_icon import TrayIcon
 from app.ui.activity_indicator import ActivityIndicator, resolve_activity_state
 from app.ui.compact_strip import CompactStrip, resolve_compact_strip_state
+from app.ui.window_presentation import next_presentation
 from app.ui.level_meter import compute_rms_db, db_to_fraction
 from app.ui.recording_header import RecordingHeader, match_event_by_subject
 from app.ui.waveform_display import WaveformDisplay
@@ -150,7 +151,7 @@ class MainWindow(QMainWindow):
         else:
             import logging
             logging.getLogger("talktrack").warning(
-                "System tray not available; minimize-to-tray is disabled."
+                "System tray not available; hide-to-tray on close is disabled."
             )
 
         self._current_transcription_percent = None
@@ -159,6 +160,10 @@ class MainWindow(QMainWindow):
         self._activity_widget.position_changed.connect(self._on_activity_widget_moved)
 
         self._compact_strip_done = False
+        # True while the strip stands in for a minimized window (so restoring
+        # from the taskbar dismisses it); False when it's a free-floating
+        # panel opened alongside the window from View > Show Compact Strip.
+        self._strip_is_minimized_form = False
         self.compact_strip = CompactStrip()
         self.compact_strip.expand_requested.connect(self._switch_to_full_ui)
         self.compact_strip.open_transcript_requested.connect(self._switch_to_full_ui)
@@ -168,7 +173,7 @@ class MainWindow(QMainWindow):
         self.compact_strip.resume_requested.connect(self._toggle_pause)
         self.compact_strip.cancel_requested.connect(self._cancel_transcription)
         self.compact_strip.position_changed.connect(self._on_compact_strip_moved)
-        self.compact_strip.full_ui_requested.connect(self._switch_to_full_ui)
+        self.compact_strip.shrink_requested.connect(self._advance_presentation)
         self.compact_strip.variant_changed.connect(self._on_compact_strip_variant_changed)
         self.compact_strip.set_variant(self.config.get("ui", "strip_variant") or "full")
         self._update_compact_strip_state()
@@ -287,21 +292,32 @@ class MainWindow(QMainWindow):
         batch_log_action.triggered.connect(self._open_batch_log_file)
         tools_menu.addAction(batch_log_action)
 
+        # Help menu
+        help_menu = menubar.addMenu("&Help")
+
+        help_action = QAction("TalkTrack &Help && Docs", self)
+        help_action.triggered.connect(self._open_help)
+        help_menu.addAction(help_action)
+
+        contact_action = QAction("&Contact && Discussions", self)
+        contact_action.triggered.connect(self._open_contact)
+        help_menu.addAction(contact_action)
+
         report_action = QAction("&Report a Bug...", self)
         report_action.triggered.connect(self._report_bug)
-        tools_menu.addAction(report_action)
+        help_menu.addAction(report_action)
 
-        tools_menu.addSeparator()
+        help_menu.addSeparator()
 
-        support_action = QAction("Support TalkTrack", self)
+        support_action = QAction("&Support TalkTrack", self)
         support_action.triggered.connect(lambda: webbrowser.open(BMAC_URL))
-        tools_menu.addAction(support_action)
+        help_menu.addAction(support_action)
 
-        tools_menu.addSeparator()
+        help_menu.addSeparator()
 
-        about_action = QAction("&About", self)
+        about_action = QAction("&About TalkTrack", self)
         about_action.triggered.connect(self._show_about)
-        tools_menu.addAction(about_action)
+        help_menu.addAction(about_action)
 
     def _toggle_recording_from_menu(self):
         """Ctrl+R: start when idle, stop when recording/paused. The compact
@@ -491,7 +507,7 @@ class MainWindow(QMainWindow):
         self.recording_controls.stop_clicked.connect(self._stop_recording)
         self.recording_controls.mute_clicked.connect(self._toggle_mute)
         self.recording_controls.test_mic_toggled.connect(self._on_test_mic_toggled)
-        self.recording_controls.compact_mode_requested.connect(self._switch_to_compact_bar)
+        self.recording_controls.compact_mode_requested.connect(self._advance_presentation)
         self.recording_controls.cancel_clicked.connect(self._cancel_transcription)
 
         # Recorder signals
@@ -2094,6 +2110,8 @@ class MainWindow(QMainWindow):
         loaded_transcribe_seconds = 0.0
         if transcript_path.exists():
             try:
+                self.transcript_viewer.show_loading("Loading transcript...")
+                QApplication.processEvents()
                 with open(transcript_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 from app.transcription.transcriber import TranscriptSegment
@@ -2348,9 +2366,19 @@ class MainWindow(QMainWindow):
         self.recorder.stop_recording()
 
     def _restore_from_tray(self):
-        self.showNormal()
+        if self.isMinimized() or not self.isVisible():
+            self.showNormal()
         self.raise_()
         self.activateWindow()
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            if hwnd:
+                SW_RESTORE = 9
+                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
         self._success_pending = False
         self._error_pending = False
         self.tray.set_overlay(None)
@@ -2454,6 +2482,12 @@ class MainWindow(QMainWindow):
             os.startfile(str(log_path))
         else:
             QMessageBox.information(self, "Log File", "No log file found yet.")
+
+    def _open_help(self):
+        webbrowser.open("https://github.com/martinasencio-gm/TalkTrack#readme")
+
+    def _open_contact(self):
+        webbrowser.open("https://github.com/martinasencio-gm/TalkTrack/discussions")
 
     def _report_bug(self):
         from main import build_bug_report_url
@@ -2889,27 +2923,36 @@ class MainWindow(QMainWindow):
             self._export_transcript()
 
     def _should_hide_to_tray(self):
-        """Whether a minimize right now should fully hide to the tray rather
-        than leave a normal taskbar-minimized window (e.g. so the activity
-        pill has something to replace while busy)."""
+        """Whether the close button's "minimize instead" choice should fully
+        hide to the tray rather than leave a normal taskbar-minimized window.
+
+        The minimize button no longer consults this at all — it always
+        performs an ordinary Windows minimize. The tray is a deliberate
+        close-time destination, and only when nothing is in flight: while
+        recording or transcribing the activity pill needs a minimized (not
+        hidden) window to stand in for.
+        """
         busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
         return (
             busy_state is None
-            and self.config.get("general", "minimize_to_tray")
+            and bool(self.config.get("general", "close_to_tray"))
             and self.tray.is_supported()
         )
 
     def changeEvent(self, event):
+        """Minimize is left alone — it always minimizes to the taskbar.
+
+        The only window-state work here is on the way back up: a compact bar
+        or pill that stands in for a minimized window is dismissed when the
+        user restores from the taskbar, so they land on a clean full UI.
+        A strip opened alongside the window from View > Show Compact Strip
+        isn't a minimized form and stays put.
+        """
         if event.type() == QEvent.Type.WindowStateChange:
-            if self.windowState() & Qt.WindowState.WindowMinimized:
-                if self._should_hide_to_tray():
-                    self.setWindowState(Qt.WindowState.WindowNoState)
-                    self.hide()
-                    if self.config.get("general", "show_tray_hint"):
-                        self.tray.show_hint_balloon()
-                        self.config.set("general", "show_tray_hint", False)
-                    event.accept()
-                    return
+            minimized = bool(self.windowState() & Qt.WindowState.WindowMinimized)
+            if not minimized and self._strip_is_minimized_form:
+                self._strip_is_minimized_form = False
+                self.compact_strip_action.setChecked(False)
             self._update_activity_visibility()
         super().changeEvent(event)
 
@@ -2998,7 +3041,14 @@ class MainWindow(QMainWindow):
             self._pending_transcriptions,
         ))
         busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
-        should_show = busy_state is not None and (self.isMinimized() or self.isHidden())
+        # Compact/pill mode is now a genuinely minimized window, so without
+        # the strip check both floating widgets would stack on screen while
+        # recording — and the strip already renders the busy states itself.
+        should_show = (
+            busy_state is not None
+            and (self.isMinimized() or self.isHidden())
+            and not self.compact_strip.isVisible()
+        )
         if should_show:
             elapsed = (
                 int(self.recorder.get_elapsed_time())
@@ -3023,17 +3073,52 @@ class MainWindow(QMainWindow):
             self.compact_strip.show()
         else:
             self.compact_strip.hide()
+            # Toggled off by hand (View menu) rather than by restoring the
+            # window: the strip has stopped being this window's minimized
+            # stand-in either way.
+            self._strip_is_minimized_form = False
         self.config.set("ui", "compact_strip_visible", checked)
 
-    def _switch_to_compact_bar(self):
-        """Double-click on the capture bar: swap the full window for the
-        floating compact strip. Routed through the same checkable action
-        the View menu uses, so both stay in sync and the choice persists."""
+    def _current_presentation(self):
+        if not self.compact_strip.isVisible() or not self._strip_is_minimized_form:
+            return "full"
+        return "pill" if self.compact_strip.variant() == "pill" else "compact_bar"
+
+    def _advance_presentation(self):
+        """Double-click anywhere in the chain: shrink one step and wrap.
+
+        full -> compact_bar -> pill -> full, with ui.double_click_target
+        choosing which of the two shrunken states a double-click from the
+        full window lands on.
+        """
+        state = next_presentation(
+            self._current_presentation(),
+            self.config.get("ui", "double_click_target"),
+        )
+        if state == "full":
+            self._switch_to_full_ui()
+        else:
+            self._switch_to_compact_bar(variant="pill" if state == "pill" else "full")
+
+    def _switch_to_compact_bar(self, variant="full"):
+        """Swap the full window for the floating compact strip.
+
+        The window is *minimized*, not hidden, so it keeps its taskbar entry
+        — the app can't be lost if the strip ends up off-screen or behind
+        another window. Routed through the same checkable action the View
+        menu uses, so both stay in sync and the choice persists.
+        """
+        self.compact_strip.set_variant(variant)
         self.compact_strip_action.setChecked(True)
-        self.hide()
+        # After setChecked: _on_compact_strip_toggled clears the flag when it
+        # runs for an unchecking, and setting it first would be undone by a
+        # re-entrant toggle.
+        self._strip_is_minimized_form = True
+        self.showMinimized()
 
     def _switch_to_full_ui(self):
-        """Double-click on the compact strip: swap back to the full window."""
+        """Swap back to the full window, dismissing the strip."""
+        self._strip_is_minimized_form = False
         self.compact_strip_action.setChecked(False)
         self._restore_from_tray()
 

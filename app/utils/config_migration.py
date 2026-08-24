@@ -23,3 +23,22 @@ def apply_meeting_detection_migration(saved, merged):
     if "auto_record_threshold" in general:
         merged["meeting_detection"]["threshold_seconds"] = general["auto_record_threshold"]
     return merged
+
+
+def apply_close_to_tray_migration(saved, merged):
+    """Carry the legacy minimize-to-tray choice over to general.close_to_tray.
+
+    The minimize button no longer hides to the tray — it always minimizes to
+    the taskbar — so the two keys that used to route it there
+    (general.minimize_behavior == "tray", and the older general.minimize_to_tray
+    boolean) are gone. A user who had that turned on keeps a tray route; they
+    just reach it from the close button's "minimize instead" choice now.
+    """
+    if not saved:
+        return merged                      # brand-new install: defaults are correct
+    general = saved.get("general") or {}
+    if "close_to_tray" in general:
+        return merged                      # already migrated; respect their choice
+    if general.get("minimize_behavior") == "tray" or general.get("minimize_to_tray") is True:
+        merged["general"]["close_to_tray"] = True
+    return merged

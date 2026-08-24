@@ -91,15 +91,15 @@ class TestCloseEventBranching(unittest.TestCase):
         window._really_quit = True
         window.close()
 
-    def test_minimize_to_tray_shows_hint_balloon_every_time(self):
-        """Regression test: with minimize_to_tray on, showMinimized() hides the
+    def test_close_to_tray_shows_hint_balloon_every_time(self):
+        """Regression test: with close_to_tray on, showMinimized() hides the
         window entirely with no other visible feedback, so the user has no
         way to tell it worked. The balloon must fire on every explicit
         Minimize click, not just once ever (that gate belongs to the
         separate normal-minimize hint in changeEvent)."""
         from app.main_window import MainWindow
         window = MainWindow()
-        window.config.set("general", "minimize_to_tray", True)
+        window.config.set("general", "close_to_tray", True)
         window.config.set("general", "show_tray_hint", False)
         with patch.object(window, "_confirm_exit", return_value="minimize"), \
              patch.object(window, "showMinimized"), \
@@ -110,7 +110,7 @@ class TestCloseEventBranching(unittest.TestCase):
         window._really_quit = True
         window.close()
 
-    def test_minimize_to_tray_does_not_go_through_showMinimized(self):
+    def test_close_to_tray_does_not_go_through_showMinimized(self):
         """Regression test for the root cause: showMinimized() re-enters
         changeEvent synchronously to hide the window, but showMinimized()'s
         own internal "ensure the widget is visible" follow-up runs right
@@ -121,7 +121,7 @@ class TestCloseEventBranching(unittest.TestCase):
         never call showMinimized() at all."""
         from app.main_window import MainWindow
         window = MainWindow()
-        window.config.set("general", "minimize_to_tray", True)
+        window.config.set("general", "close_to_tray", True)
         with patch.object(window, "_confirm_exit", return_value="minimize"), \
              patch.object(window, "showMinimized") as mock_minimize, \
              patch.object(window.tray, "is_supported", return_value=True), \
@@ -135,7 +135,7 @@ class TestCloseEventBranching(unittest.TestCase):
     def test_minimize_without_tray_hiding_does_not_show_balloon(self):
         from app.main_window import MainWindow
         window = MainWindow()
-        window.config.set("general", "minimize_to_tray", False)
+        window.config.set("general", "close_to_tray", False)
         with patch.object(window, "_confirm_exit", return_value="minimize"), \
              patch.object(window, "showMinimized"), \
              patch.object(window.tray, "show_hint_balloon") as mock_balloon:

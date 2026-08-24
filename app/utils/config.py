@@ -6,7 +6,10 @@ from pathlib import Path
 
 from app.utils.app_paths import APP_DATA_DIR
 from app.utils.atomic_io import atomic_write_json
-from app.utils.config_migration import apply_meeting_detection_migration
+from app.utils.config_migration import (
+    apply_close_to_tray_migration,
+    apply_meeting_detection_migration,
+)
 
 
 DEFAULT_CONFIG = {
@@ -71,7 +74,9 @@ DEFAULT_CONFIG = {
         "batch_auto_queue": True,
         "silence_auto_stop": True,
         "silence_duration": 120,
-        "minimize_to_tray": False,
+        # The minimize button always minimizes to the taskbar; the tray is
+        # reached from the close button's "minimize instead" choice.
+        "close_to_tray": False,
         "launch_in_compact_mode": False,
         "show_tray_hint": True,
         "start_menu_offer_done": False,
@@ -100,6 +105,9 @@ DEFAULT_CONFIG = {
         "compact_strip_visible": False,
         "compact_strip_position": None,
         "strip_variant": "full",
+        # Where a double-click on the capture bar lands, as an entry point
+        # into the fixed full -> compact_bar -> pill -> full chain.
+        "double_click_target": "compact_bar",  # "compact_bar" | "pill"
     },
     "calendar": {
         "enabled": False,
@@ -133,6 +141,7 @@ class Config:
         if self._data is None:
             self._data = copy.deepcopy(DEFAULT_CONFIG)
         self._data = apply_meeting_detection_migration(saved, self._data)
+        self._data = apply_close_to_tray_migration(saved, self._data)
         try:
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
         except OSError:

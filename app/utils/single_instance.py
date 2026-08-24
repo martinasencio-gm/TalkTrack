@@ -10,7 +10,7 @@ Two mechanisms working together:
   launch attempt can ask the first instance to bring itself to front,
   instead of just failing with an error the user has to go interpret
   (especially now that an idle instance can be sitting fully hidden in the
-  tray with no taskbar entry — see minimize_to_tray).
+  tray with no taskbar entry — see close_to_tray).
 """
 import logging
 import os
