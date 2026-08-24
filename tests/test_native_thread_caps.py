@@ -69,6 +69,7 @@ class TestDiarizationThreadCap(unittest.TestCase):
             audio_path="/fake/audio.wav",
             transcript_result=MagicMock(),
             hf_token="fake-token",
+            engine="pyannote",
         )
 
         with patch("app.transcription.diarizer._get_pipeline") as mock_get_pipeline, \
@@ -94,6 +95,7 @@ class TestDiarizationThreadCap(unittest.TestCase):
             transcript_result=MagicMock(),
             hf_token="fake-token",
             full_cpu=True,
+            engine="pyannote",
         )
 
         with patch("app.transcription.diarizer._get_pipeline") as mock_get_pipeline, \

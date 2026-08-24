@@ -34,14 +34,15 @@ class SpeakerSegment:
 
 
 class DiarizationWorker(QThread):
-    """Runs speaker diarization in a background thread using pyannote.audio."""
+    """Runs speaker diarization in a background thread using sherpa-onnx or pyannote.audio."""
 
     progress = pyqtSignal(str)
     finished = pyqtSignal(TranscriptResult)
     error = pyqtSignal(str)
 
     def __init__(self, audio_path, transcript_result, hf_token="",
-                 min_speakers=None, max_speakers=None, full_cpu=False):
+                 min_speakers=None, max_speakers=None, full_cpu=False,
+                 engine="sherpa_onnx"):
         super().__init__()
         self.audio_path = audio_path
         self.transcript_result = transcript_result
@@ -49,91 +50,119 @@ class DiarizationWorker(QThread):
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
         self.full_cpu = full_cpu
+        self.engine = engine
 
     def run(self):
         try:
-            self.progress.emit("Loading speaker diarization model...")
-
-            if not self.hf_token:
-                self.error.emit(
-                    "HuggingFace token required for pyannote.audio. "
-                    "Get one at https://huggingface.co/settings/tokens and "
-                    "accept the model terms at "
-                    "https://huggingface.co/pyannote/speaker-diarization-community-1"
-                )
-                return
-
-            pipeline = _get_pipeline(self.hf_token)
-
-            self.progress.emit("Loading audio for diarization...")
-
-            # Pre-load audio via soundfile to avoid torchcodec dependency.
-            # pyannote 4.0 accepts {"waveform": tensor, "sample_rate": int}.
-            import os
-            import soundfile as sf
-            import torch
-
-            # Nearly the full core count when nothing else needs headroom
-            # (one held back so browsing recordings during diarization stays
-            # responsive — this is the heaviest torch workload in the app and
-            # saturating every core visibly stalls the UI thread's own work);
-            # capped to half (min 1) while a recording is actively in
-            # progress, so torch's thread pool doesn't starve the real-time
-            # audio capture callback.
-            cpu_count = os.cpu_count() or 4
-            torch.set_num_threads(
-                max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
-            )
-
-            audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
-            if audio_data.ndim == 1:
-                waveform = torch.from_numpy(audio_data).unsqueeze(0)
+            if self.engine == "sherpa_onnx":
+                self._run_sherpa_onnx()
             else:
-                waveform = torch.from_numpy(audio_data.T)
-            audio_input = {"waveform": waveform, "sample_rate": sample_rate}
-
-            self.progress.emit("Running speaker diarization...")
-
-            diarization_params = {}
-            if self.min_speakers is not None:
-                diarization_params["min_speakers"] = self.min_speakers
-            if self.max_speakers is not None:
-                diarization_params["max_speakers"] = self.max_speakers
-
-            result = pipeline(audio_input, **diarization_params)
-
-            # pyannote 4.0 returns DiarizeOutput; extract the Annotation
-            if hasattr(result, "speaker_diarization"):
-                diarization = result.speaker_diarization
-            else:
-                diarization = result  # fallback for older versions
-
-            # Extract speaker segments
-            speaker_segments = []
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                speaker_segments.append(SpeakerSegment(
-                    start=turn.start,
-                    end=turn.end,
-                    speaker=speaker,
-                ))
-
-            self.progress.emit("Mapping speakers to transcript...")
-
-            # Assign speakers to transcript segments
-            result = self._merge_diarization_with_transcript(
-                self.transcript_result, speaker_segments
-            )
-
-            self.progress.emit("Speaker diarization complete.")
-            self.finished.emit(result)
-
-        except ImportError:
-            self.error.emit(
-                "pyannote.audio is not installed. "
-                "Run: pip install pyannote.audio"
-            )
+                self._run_pyannote()
+        except ImportError as e:
+            self.error.emit(f"Diarization dependency missing: {e}")
         except Exception as e:
             self.error.emit(f"Diarization failed: {e}")
+
+    def _run_sherpa_onnx(self):
+        from app.transcription.sherpa_diarizer import SherpaOnnxDiarizer
+        import os
+
+        self.progress.emit("Loading ONNX diarization models...")
+        cpu_count = os.cpu_count() or 4
+        threads = max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
+
+        diarizer = SherpaOnnxDiarizer(num_threads=threads)
+        self.progress.emit("Running speaker diarization...")
+
+        speaker_segments = diarizer.diarize(
+            self.audio_path,
+            min_speakers=self.min_speakers,
+            max_speakers=self.max_speakers,
+            progress_callback=self.progress.emit,
+        )
+
+        self.progress.emit("Mapping speakers to transcript...")
+        result = self._merge_diarization_with_transcript(
+            self.transcript_result, speaker_segments
+        )
+        self.progress.emit("Speaker diarization complete.")
+        self.finished.emit(result)
+
+    def _run_pyannote(self):
+        self.progress.emit("Loading speaker diarization model...")
+
+        if not self.hf_token:
+            self.error.emit(
+                "HuggingFace token required for pyannote.audio. "
+                "Get one at https://huggingface.co/settings/tokens and "
+                "accept the model terms at "
+                "https://huggingface.co/pyannote/speaker-diarization-community-1"
+            )
+            return
+
+        pipeline = _get_pipeline(self.hf_token)
+
+        self.progress.emit("Loading audio for diarization...")
+
+        # Pre-load audio via soundfile to avoid torchcodec dependency.
+        # pyannote 4.0 accepts {"waveform": tensor, "sample_rate": int}.
+        import os
+        import soundfile as sf
+        import torch
+
+        # Nearly the full core count when nothing else needs headroom
+        # (one held back so browsing recordings during diarization stays
+        # responsive — this is the heaviest torch workload in the app and
+        # saturating every core visibly stalls the UI thread's own work);
+        # capped to half (min 1) while a recording is actively in
+        # progress, so torch's thread pool doesn't starve the real-time
+        # audio capture callback.
+        cpu_count = os.cpu_count() or 4
+        torch.set_num_threads(
+            max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
+        )
+
+        audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
+        if audio_data.ndim == 1:
+            waveform = torch.from_numpy(audio_data).unsqueeze(0)
+        else:
+            waveform = torch.from_numpy(audio_data.T)
+        audio_input = {"waveform": waveform, "sample_rate": sample_rate}
+
+        self.progress.emit("Running speaker diarization...")
+
+        diarization_params = {}
+        if self.min_speakers is not None:
+            diarization_params["min_speakers"] = self.min_speakers
+        if self.max_speakers is not None:
+            diarization_params["max_speakers"] = self.max_speakers
+
+        result = pipeline(audio_input, **diarization_params)
+
+        # pyannote 4.0 returns DiarizeOutput; extract the Annotation
+        if hasattr(result, "speaker_diarization"):
+            diarization = result.speaker_diarization
+        else:
+            diarization = result  # fallback for older versions
+
+        # Extract speaker segments
+        speaker_segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            speaker_segments.append(SpeakerSegment(
+                start=turn.start,
+                end=turn.end,
+                speaker=speaker,
+            ))
+
+        self.progress.emit("Mapping speakers to transcript...")
+
+        # Assign speakers to transcript segments
+        result = self._merge_diarization_with_transcript(
+            self.transcript_result, speaker_segments
+        )
+
+        self.progress.emit("Speaker diarization complete.")
+        self.finished.emit(result)
 
     def _merge_diarization_with_transcript(self, transcript, speaker_segments):
         """Assign speaker labels to transcript segments based on overlap."""

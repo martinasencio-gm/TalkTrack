@@ -68,8 +68,10 @@ def compute_call_check(has_source, conferencing_blocked, output_mismatch):
     return READY, "Ready", "System audio ready"
 
 
-def compute_transcription_check(diarization_enabled, hf_token_present):
+def compute_transcription_check(diarization_enabled, hf_token_present, engine=None):
     """'TRANSCRIPTION' check -> (status, title, subtitle)."""
+    if engine == "sherpa_onnx":
+        return READY, "Ready", "Transcription ready"
     if diarization_enabled and not hf_token_present:
         return (
             WARNING,

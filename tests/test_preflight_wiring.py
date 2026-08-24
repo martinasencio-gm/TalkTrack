@@ -65,12 +65,16 @@ class _StubSourceSelector:
 
 
 class _StubConfig:
-    def __init__(self, hf_token=""):
+    def __init__(self, hf_token="", engine="pyannote"):
         self._hf_token = hf_token
+        self._engine = engine
 
     def get(self, section, key):
-        assert (section, key) == ("diarization", "hf_token")
-        return self._hf_token
+        if (section, key) == ("diarization", "engine"):
+            return self._engine
+        if (section, key) == ("diarization", "hf_token"):
+            return self._hf_token
+        raise KeyError((section, key))
 
 
 class TestUpdatePreflight(unittest.TestCase):

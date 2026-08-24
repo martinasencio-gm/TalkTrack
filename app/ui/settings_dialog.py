@@ -369,19 +369,30 @@ class SettingsDialog(QDialog):
         self.diarization_enabled = QCheckBox("Enable speaker diarization")
         diarization_form.addRow(self.diarization_enabled)
 
+        self.diarization_engine_combo = QComboBox()
+        self.diarization_engine_combo.addItem("Fast ONNX (sherpa-onnx) - Recommended", "sherpa_onnx")
+        self.diarization_engine_combo.addItem("Pyannote.audio (Legacy PyTorch)", "pyannote")
+        self.diarization_engine_combo.currentIndexChanged.connect(self._on_diarization_engine_changed)
+        diarization_form.addRow("Diarization Engine:", self.diarization_engine_combo)
+
+        self.onnx_status_label = QLabel("Status: ONNX models ready (~25 MB)")
+        self.onnx_status_label.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+        diarization_form.addRow("Model Status:", self.onnx_status_label)
+
+        self.hf_token_label = QLabel("HuggingFace Token:")
         self.hf_token_edit = QLineEdit()
         self.hf_token_edit.setPlaceholderText("hf_xxxxxxxxxxxx")
         self.hf_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        diarization_form.addRow("HuggingFace Token:", self.hf_token_edit)
+        diarization_form.addRow(self.hf_token_label, self.hf_token_edit)
 
-        token_help = QLabel(
+        self.token_help = QLabel(
             '<a href="https://huggingface.co/settings/tokens" '
             'style="color: #9184d9;">Get token</a> | '
             '<a href="https://huggingface.co/pyannote/speaker-diarization-community-1" '
             'style="color: #9184d9;">Accept model terms</a>'
         )
-        token_help.setOpenExternalLinks(True)
-        diarization_form.addRow("", token_help)
+        self.token_help.setOpenExternalLinks(True)
+        diarization_form.addRow("", self.token_help)
 
         self.setup_wizard_btn = QPushButton("Setup Wizard...")
         self.setup_wizard_btn.setToolTip("Open the step-by-step diarization setup guide")
@@ -593,6 +604,11 @@ class SettingsDialog(QDialog):
 
         # Diarization
         self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
+        engine = self.config.get("diarization", "engine") or "sherpa_onnx"
+        idx = self.diarization_engine_combo.findData(engine)
+        if idx >= 0:
+            self.diarization_engine_combo.setCurrentIndex(idx)
+        self._on_diarization_engine_changed()
         self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
 
         min_spk = self.config.get("diarization", "min_speakers")
@@ -699,6 +715,7 @@ class SettingsDialog(QDialog):
         self.config.set("transcription", "min_duration", self.min_duration_spin.value())
 
         self.config.set("diarization", "enabled", self.diarization_enabled.isChecked())
+        self.config.set("diarization", "engine", self.diarization_engine_combo.currentData())
         self.config.set("diarization", "hf_token", self.hf_token_edit.text().strip())
 
         min_spk = self.min_speakers_spin.value()
@@ -847,6 +864,24 @@ class SettingsDialog(QDialog):
                 'CUDA requires an NVIDIA graphics card.</span>'
             )
             self.gpu_status_label.setVisible(True)
+
+    def _on_diarization_engine_changed(self, index=0):
+        engine = self.diarization_engine_combo.currentData()
+        is_pyannote = (engine == "pyannote")
+        self.hf_token_label.setVisible(is_pyannote)
+        self.hf_token_edit.setVisible(is_pyannote)
+        self.token_help.setVisible(is_pyannote)
+        self.setup_wizard_btn.setVisible(is_pyannote)
+
+        self.onnx_status_label.setVisible(not is_pyannote)
+        if not is_pyannote:
+            from app.transcription.sherpa_diarizer import are_models_available
+            if are_models_available():
+                self.onnx_status_label.setText("Status: ONNX models ready (~25 MB)")
+                self.onnx_status_label.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+            else:
+                self.onnx_status_label.setText("Status: Models will be downloaded on first use (~25 MB)")
+                self.onnx_status_label.setStyleSheet("color: #f9e2af; font-size: 11px;")
 
     def _check_provider_package(self, provider):
         """Show install status for the selected provider's package."""

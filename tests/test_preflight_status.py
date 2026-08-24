@@ -108,6 +108,12 @@ class TestComputeTranscriptionCheck(unittest.TestCase):
         )
         self.assertEqual(status, READY)
 
+    def test_sherpa_onnx_diarization_enabled_without_token_is_ready(self):
+        status, _, _ = compute_transcription_check(
+            diarization_enabled=True, hf_token_present=False, engine="sherpa_onnx"
+        )
+        self.assertEqual(status, READY)
+
 
 class TestComputeVerdict(unittest.TestCase):
     def _ready(self):

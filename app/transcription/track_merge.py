@@ -121,11 +121,11 @@ def merge_tracks(tracks):
     return sorted(merged, key=lambda s: (s.start, s.end))
 
 
-def dual_track_plan(session, diarization_enabled, hf_token, exists=os.path.exists):
+def dual_track_plan(session, diarization_enabled, hf_token, engine="pyannote", exists=os.path.exists):
     """Return [(speaker, path), ...] for a recording that should be
     transcribed track-by-track, or None to transcribe the mix.
 
-    Declined when pyannote will run: full diarization clusters voices
+    Declined when full diarization will run: full diarization clusters voices
     across the mixed audio and must keep seeing it. Where it would have
     fallen back to SimpleDiarizer, this replaces it — the same You/Remote
     labels, decided by which file a segment came from rather than by
@@ -133,8 +133,9 @@ def dual_track_plan(session, diarization_enabled, hf_token, exists=os.path.exist
     """
     if not session:
         return None
-    if diarization_enabled and hf_token:
-        return None
+    if diarization_enabled:
+        if engine == "sherpa_onnx" or (engine == "pyannote" and bool(hf_token)):
+            return None
     audio_files = session.get("audio_files", {})
     mic = audio_files.get("mic")
     system = audio_files.get("system")

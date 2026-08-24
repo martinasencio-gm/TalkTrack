@@ -177,10 +177,10 @@ class TestDualTrackPlan(unittest.TestCase):
     def _session(self, **files):
         return {"audio_files": files}
 
-    def _plan(self, session, diarization_enabled=False, hf_token="", missing=()):
+    def _plan(self, session, diarization_enabled=False, hf_token="", engine="pyannote", missing=()):
         from app.transcription.track_merge import dual_track_plan
         return dual_track_plan(
-            session, diarization_enabled, hf_token,
+            session, diarization_enabled, hf_token, engine=engine,
             exists=lambda p: p not in missing,
         )
 
@@ -200,6 +200,11 @@ class TestDualTrackPlan(unittest.TestCase):
         # the tracks would take that decision away from it.
         plan = self._plan(self._session(mic="mic.wav", system="sys.wav"),
                           diarization_enabled=True, hf_token="hf_abc")
+        self.assertIsNone(plan)
+
+    def test_declines_when_sherpa_onnx_diarization_will_run(self):
+        plan = self._plan(self._session(mic="mic.wav", system="sys.wav"),
+                          diarization_enabled=True, hf_token="", engine="sherpa_onnx")
         self.assertIsNone(plan)
 
     def test_runs_when_diarization_is_enabled_but_unusable(self):

@@ -273,12 +273,23 @@ class DependencyChecker:
 
     def check_hf_token(self):
         """Check if a HuggingFace token is configured for diarization."""
+        engine = "sherpa_onnx"
         hf_token = ""
         if self.config:
             try:
+                engine = self.config.get("diarization", "engine") or "sherpa_onnx"
                 hf_token = self.config.get("diarization", "hf_token")
             except (KeyError, TypeError):
                 pass
+
+        if engine == "sherpa_onnx":
+            return {
+                "name": "HuggingFace Token",
+                "passed": True,
+                "level": "info",
+                "message": "Not required (using Fast ONNX diarization).",
+                "action": None,
+            }
 
         if hf_token:
             return {
@@ -294,28 +305,56 @@ class DependencyChecker:
                 "passed": False,
                 "level": "warn",
                 "message": "No HuggingFace token configured.",
-                "action": "Set a token in Settings to enable speaker diarization.",
+                "action": "Set a token in Settings to enable pyannote speaker diarization.",
             }
 
     def check_pyannote_models(self):
-        """Check if pyannote speaker diarization models are cached."""
-        cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / "models--pyannote--speaker-diarization-community-1"
-        if cache_dir.exists():
-            return {
-                "name": "Pyannote Models",
-                "passed": True,
-                "level": "warn",
-                "message": "Speaker diarization model is cached.",
-                "action": None,
-            }
+        """Check if speaker diarization models are cached."""
+        engine = "sherpa_onnx"
+        if self.config:
+            try:
+                engine = self.config.get("diarization", "engine") or "sherpa_onnx"
+            except (KeyError, TypeError):
+                pass
+
+        if engine == "sherpa_onnx":
+            from app.transcription.sherpa_diarizer import are_models_available
+            if are_models_available():
+                return {
+                    "name": "Diarization Models",
+                    "passed": True,
+                    "level": "info",
+                    "message": "Fast ONNX diarization models are cached.",
+                    "action": None,
+                }
+            else:
+                return {
+                    "name": "Diarization Models",
+                    "passed": False,
+                    "level": "info",
+                    "message": "Fast ONNX diarization models not yet downloaded (~25 MB).",
+                    "action": "Models will be downloaded automatically on first diarization.",
+                }
         else:
-            return {
-                "name": "Pyannote Models",
-                "passed": False,
-                "level": "warn",
-                "message": "Speaker diarization model not found in cache.",
-                "action": "Models will be downloaded when diarization is first used (requires HF token).",
-            }
+            cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / "models--pyannote--speaker-diarization-community-1"
+            if cache_dir.exists():
+                return {
+                    "name": "Pyannote Models",
+                    "passed": True,
+                    "level": "warn",
+                    "message": "Speaker diarization model is cached.",
+                    "action": None,
+                }
+            else:
+                return {
+                    "name": "Pyannote Models",
+                    "passed": False,
+                    "level": "warn",
+                    "message": "Speaker diarization model not found in cache.",
+                    "action": "Models will be downloaded when diarization is first used (requires HF token).",
+                }
+
+    check_diarization_models = check_pyannote_models
 
     def check_ffmpeg(self):
         """Check if ffmpeg is installed and available on PATH."""

@@ -29,6 +29,7 @@ class BatchSettings:
     device: str = "cpu"
     hf_token: str = ""
     diarize: bool = False
+    engine: str = "sherpa_onnx"
     min_speakers: int = None
     max_speakers: int = None
     replace_you_with_name: bool = False
@@ -36,12 +37,24 @@ class BatchSettings:
 
     @classmethod
     def from_config(cls, config, diarize=None):
-        """Build from a Config. `diarize` overrides the saved setting.
+        engine = None
+        try:
+            engine = config.get("diarization", "engine")
+        except Exception:
+            pass
 
-        Never log or echo the token this reads.
-        """
-        hf_token = config.get("diarization", "hf_token") or ""
-        want = config.get("diarization", "enabled") if diarize is None else diarize
+        hf_token = ""
+        try:
+            hf_token = config.get("diarization", "hf_token") or ""
+        except Exception:
+            pass
+
+        want = False
+        try:
+            want = config.get("diarization", "enabled") if diarize is None else diarize
+        except Exception:
+            want = bool(diarize)
+
         replace_you = False
         user_name = ""
         try:
@@ -54,14 +67,22 @@ class BatchSettings:
         except Exception:
             pass
 
+        if engine == "sherpa_onnx":
+            can_diarize = bool(want)
+        elif engine == "pyannote":
+            can_diarize = bool(want and hf_token)
+        else:
+            # Fallback when engine is not explicitly in config (legacy/mock config)
+            can_diarize = bool(want and hf_token)
+            engine = "pyannote" if hf_token else "sherpa_onnx"
+
         return cls(
             model_size=config.get("transcription", "model_size"),
             language=config.get("transcription", "language"),
             device=config.get("transcription", "device"),
             hf_token=hf_token,
-            # No token means pyannote cannot run at all, so the choice
-            # collapses to False here rather than failing per recording.
-            diarize=bool(want and hf_token),
+            diarize=can_diarize,
+            engine=engine,
             min_speakers=config.get("diarization", "min_speakers"),
             max_speakers=config.get("diarization", "max_speakers"),
             replace_you_with_name=replace_you,
@@ -82,7 +103,7 @@ class JobOutcome:
 
 
 class _Workers:
-    """Indirection so tests can drive the pipeline without loading Whisper."""
+    """Lazy loader for transcription/diarization workers."""
 
     def __init__(self, transcription=None, diarization=None, simple=None):
         self._transcription = transcription
@@ -135,10 +156,12 @@ def run_job(job, settings, workers=None, on_progress=None):
         if on_progress is not None:
             on_progress(message)
 
-    # Pyannote clusters voices across the whole file, so when it is going
+    # Full diarization clusters voices across the whole file, so when it is going
     # to run the mix must stay intact — dual_track_plan already declines
     # in that case, but the argument order matters.
-    tracks = dual_track_plan(job.session, settings.diarize, settings.hf_token)
+    tracks = dual_track_plan(
+        job.session, settings.diarize, settings.hf_token, engine=settings.engine
+    )
 
     worker = workers.transcription(
         job.audio_path,
@@ -174,6 +197,7 @@ def run_job(job, settings, workers=None, on_progress=None):
             min_speakers=settings.min_speakers,
             max_speakers=settings.max_speakers,
             full_cpu=True,
+            engine=settings.engine,
         )
         diarized_result, diarize_error = _drive(diarize_worker, progress)
         if diarized_result is None:

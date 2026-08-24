@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     },
     "diarization": {
         "enabled": True,
+        "engine": "sherpa_onnx",
         "hf_token": "",
         "min_speakers": None,
         "max_speakers": None,
