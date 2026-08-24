@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 from PyQt6.QtWidgets import QApplication
 
@@ -178,6 +179,38 @@ class TestMainWindowWiring(unittest.TestCase):
              patch.object(self.window, "_start_diarization") as start:
             self.window._on_diarize_requested()
         start.assert_called_once_with(transcript, session)
+
+    def test_display_transcript_hides_progress_and_stops_timer(self):
+        self.window.transcript_viewer.show_progress("Running speaker diarization...")
+        self.assertFalse(self.window.transcript_viewer.status_label.isHidden())
+        self.assertTrue(self.window.transcript_viewer._elapsed_timer.isActive())
+
+        self.window.transcript_viewer.display_transcript(_transcript())
+        self.assertTrue(self.window.transcript_viewer.status_label.isHidden())
+        self.assertFalse(self.window.transcript_viewer._elapsed_timer.isActive())
+        self.assertIsNone(self.window.transcript_viewer._progress_start_time)
+
+    def test_clear_hides_progress_and_stops_timer(self):
+        self.window.transcript_viewer.show_progress("Running speaker diarization...")
+        self.assertTrue(self.window.transcript_viewer._elapsed_timer.isActive())
+
+        self.window.transcript_viewer.clear()
+        self.assertTrue(self.window.transcript_viewer.status_label.isHidden())
+        self.assertFalse(self.window.transcript_viewer._elapsed_timer.isActive())
+        self.assertIsNone(self.window.transcript_viewer._progress_start_time)
+
+    def test_display_final_transcript_hides_progress_when_session_is_different(self):
+        self.window.transcript_viewer.show_progress("Running speaker diarization...")
+        self.assertTrue(self.window.transcript_viewer._elapsed_timer.isActive())
+
+        # Final transcript arrives for a background session
+        other_session = {"directory": "/fake/other", "name": "Other Meeting"}
+        with patch.object(self.window, "_write_transcript_for_session"), \
+             patch.object(self.window, "_process_pending_transcriptions"):
+            self.window._display_final_transcript(_transcript(), session=other_session)
+
+        self.assertTrue(self.window.transcript_viewer.status_label.isHidden())
+        self.assertFalse(self.window.transcript_viewer._elapsed_timer.isActive())
 
 
 if __name__ == "__main__":

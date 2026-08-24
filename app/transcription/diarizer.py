@@ -112,7 +112,6 @@ class DiarizationWorker(QThread):
             self.cancelled.emit()
             return
 
-        self.progress.emit("Speaker diarization complete.")
         self.finished.emit(result)
 
     def _run_pyannote(self):
@@ -209,7 +208,6 @@ class DiarizationWorker(QThread):
             self.cancelled.emit()
             return
 
-        self.progress.emit("Speaker diarization complete.")
         self.finished.emit(result)
 
     def _merge_diarization_with_transcript(self, transcript, speaker_segments):

@@ -375,6 +375,7 @@ class TranscriptViewer(QWidget):
 
     def show_loading(self, message="Loading transcript..."):
         """Show a clean loading state while transcript data is being processed."""
+        self.hide_progress()
         self.scroll_area.setUpdatesEnabled(False)
         self._segments_container.setUpdatesEnabled(False)
         try:
@@ -395,6 +396,7 @@ class TranscriptViewer(QWidget):
 
     def display_transcript(self, transcript, speaker_names=None, attendees=None):
         """Render transcript with interactive segment widgets."""
+        self.hide_progress()
         self._transcript = transcript
         if speaker_names is not None:
             self._speaker_names = dict(speaker_names)
@@ -539,6 +541,7 @@ class TranscriptViewer(QWidget):
         recording was deleted), not when a recording is selected but
         simply hasn't been transcribed yet.
         """
+        self.hide_progress()
         if self._player:
             self._player.stop()
         self._playing_index = -1

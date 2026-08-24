@@ -1947,6 +1947,7 @@ class MainWindow(QMainWindow):
         if not self._is_current_session(session):
             # Finished after the user switched recordings: save to the
             # recording's own directory, leave the displayed UI alone.
+            self.transcript_viewer.hide_progress()
             self._write_transcript_for_session(result, session)
             name = session.get("name") or Path(session.get("directory", "")).name
             self.status_label.setText(f"Transcription of '{name}' complete.")
