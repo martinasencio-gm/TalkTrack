@@ -131,6 +131,7 @@ class SherpaOnnxDiarizer:
         min_speakers=None,
         max_speakers=None,
         progress_callback=None,
+        is_cancelled=None,
     ) -> list[SpeakerSegment]:
         # If an exact speaker count is specified
         if (
@@ -157,12 +158,17 @@ class SherpaOnnxDiarizer:
             audio_data = resample_poly(audio_data, up, down).astype(np.float32)
 
         def _callback(processed, total):
+            if is_cancelled and is_cancelled():
+                return 1  # Cancel / stop processing in sherpa-onnx
             if progress_callback and total > 0:
                 percent = int((processed / total) * 100)
                 progress_callback(f"Running speaker diarization ({percent}%)...")
             return 0
 
         res = self.diarizer.process(audio_data, _callback)
+        if is_cancelled and is_cancelled():
+            return []
+
         segments = []
         for seg in res.sort_by_start_time():
             spk_label = f"Speaker {seg.speaker + 1}"

@@ -199,22 +199,46 @@ class RecordingControls(QWidget):
         self.rec_source_block.setToolTip("Click to toggle audio level meters")
         self.rec_source_block.setStyleSheet(
             "QFrame#recSourceBlock {"
-            " border: 1px solid transparent; border-radius: 6px; padding: 2px 6px;"
+            " border: 1px solid #292b31; border-radius: 8px; padding: 4px 10px;"
             "}"
             "QFrame#recSourceBlock:hover {"
             " background-color: rgba(233,233,237,0.06);"
-            " border-color: #292b31;"
+            " border-color: #3b3e4d;"
             "}"
         )
         source_layout = QVBoxLayout(self.rec_source_block)
         source_layout.setContentsMargins(4, 2, 4, 2)
-        source_layout.setSpacing(1)
+        source_layout.setSpacing(2)
+
+        rec_kicker = QLabel("CAPTURING")
+        rec_kicker.setObjectName("sectionHeader")
+        rec_kicker.setStyleSheet("color: #75798c;")
+        source_layout.addWidget(rec_kicker)
+
+        rec_row = QHBoxLayout()
+        rec_row.setSpacing(8)
+        self.rec_mic_icon = QLabel()
+        self.rec_mic_name = QLabel("")
+        self.rec_mic_name.setStyleSheet("font-size: 12.5px; color: #cfd3e5;")
+        rec_plus = QLabel("+")
+        rec_plus.setStyleSheet("color: #4d5063; font-size: 11px;")
+        self.rec_call_icon = QLabel()
+        self.rec_call_name = QLabel("")
+        self.rec_call_name.setStyleSheet("font-size: 12.5px; color: #cfd3e5;")
+        rec_row.addWidget(self.rec_mic_icon)
+        rec_row.addWidget(self.rec_mic_name)
+        rec_row.addWidget(rec_plus)
+        rec_row.addWidget(self.rec_call_icon)
+        rec_row.addWidget(self.rec_call_name)
+        source_layout.addLayout(rec_row)
+
         self.source_line = QLabel("")
-        self.source_line.setStyleSheet("font-size: 12px; color: #cfd3e5;")
-        self.health_line = QLabel("")
-        self.health_line.setStyleSheet("font-size: 11.5px; color: #75798c;")
-        source_layout.addWidget(self.source_line)
+        self.source_line.hide()  # preserved for backwards compatibility
+
+        self.health_line = QLabel("Click to toggle live meters")
+        self.health_line.setStyleSheet("font-size: 11px; color: #75798c;")
         source_layout.addWidget(self.health_line)
+
         self.rec_source_block.clicked.connect(self._toggle_live_meters)
         rec_layout.addWidget(self.rec_source_block)
 
@@ -373,6 +397,14 @@ class RecordingControls(QWidget):
         self.capturing_mic_name.setText(mic_name)
         self.capturing_call_icon.setPixmap(colored_pixmap("speaker-high", call_color, 14))
         self.capturing_call_name.setText(call_name)
+
+        if hasattr(self, "rec_mic_icon"):
+            self.rec_mic_icon.setPixmap(colored_pixmap("microphone", mic_color, 13))
+            self.rec_mic_name.setText(mic_name)
+            self.rec_call_icon.setPixmap(colored_pixmap("speaker-high", call_color, 13))
+            self.rec_call_name.setText(call_name)
+        if hasattr(self, "source_line"):
+            self.source_line.setText(f"{mic_name} + {call_name}")
 
     def set_source_summary(self, source_text, health_text=""):
         """Two-line source/health block next to the level meters — what's

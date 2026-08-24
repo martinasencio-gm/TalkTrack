@@ -51,8 +51,56 @@ class TestSherpaOnnxDiarizer(unittest.TestCase):
             self.assertEqual(segments[0].start, 0.0)
             self.assertEqual(segments[0].end, 1.0)
 
+    def test_diarize_cancelled_returns_empty(self):
+        with patch("app.transcription.sherpa_diarizer.download_models"), \
+             patch("sherpa_onnx.OfflineSpeakerDiarization") as MockDiarization, \
+             patch("soundfile.read") as mock_read:
+
+            mock_read.return_value = (np.zeros(16000, dtype=np.float32), 16000)
+            mock_instance = MagicMock()
+            mock_instance.sample_rate = 16000
+            MockDiarization.return_value = mock_instance
+
+            diarizer = SherpaOnnxDiarizer()
+            segments = diarizer.diarize(
+                "/fake/audio.wav",
+                is_cancelled=lambda: True,
+            )
+            self.assertEqual(segments, [])
+
 
 class TestDiarizationWorkerRouting(unittest.TestCase):
+    def test_worker_cancel_sherpa_onnx_emits_cancelled(self):
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello world")]
+        )
+        worker = DiarizationWorker(
+            audio_path="/fake/audio.wav",
+            transcript_result=transcript,
+            engine="sherpa_onnx",
+        )
+        cancelled_events = []
+        worker.cancelled.connect(lambda: cancelled_events.append(True))
+        worker.cancel()
+        worker.run()
+        self.assertEqual(cancelled_events, [True])
+
+    def test_worker_cancel_pyannote_emits_cancelled(self):
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello world")]
+        )
+        worker = DiarizationWorker(
+            audio_path="/fake/audio.wav",
+            transcript_result=transcript,
+            hf_token="test-token",
+            engine="pyannote",
+        )
+        cancelled_events = []
+        worker.cancelled.connect(lambda: cancelled_events.append(True))
+        worker.cancel()
+        worker.run()
+        self.assertEqual(cancelled_events, [True])
+
     def test_worker_routes_to_sherpa_onnx_by_default(self):
         transcript = TranscriptResult(
             segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello world")]

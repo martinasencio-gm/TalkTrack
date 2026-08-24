@@ -3,7 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PyQt6.QtWidgets import QApplication
 
@@ -199,6 +199,44 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             finally:
                 window._really_quit = True
                 window.close()
+
+    def test_cancel_transcription_cancels_diarization_worker(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            mock_diarizer = MagicMock()
+            mock_diarizer.isRunning.return_value = True
+            mock_diarizer.transcript_result = MagicMock()
+            mock_diarizer.session = {"directory": "/fake/dir"}
+            window._diarization_worker = mock_diarizer
+
+            window._cancel_transcription()
+            mock_diarizer.cancel.assert_called_once()
+
+            # Calling cancelled handler displays base transcript and clears worker
+            with patch.object(window, "_display_final_transcript") as mock_display, \
+                 patch.object(window, "_process_pending_transcriptions") as mock_process:
+                window._on_diarization_cancelled()
+                mock_display.assert_called_once()
+                mock_process.assert_called_once()
+                self.assertIsNone(window._diarization_worker)
+        finally:
+            window._really_quit = True
+            window.close()
+
+    def test_recording_state_populates_capturing_sources(self):
+        from app.main_window import MainWindow
+        from app.recording.recorder import RecordingState
+        window = MainWindow()
+        try:
+            window.source_selector.get_selected_mic_name = lambda: "Test Mic"
+            window.source_selector.get_selected_source_name = lambda: "Test App"
+            window._on_state_changed(RecordingState.RECORDING)
+            self.assertEqual(window.recording_controls.rec_mic_name.text(), "Test Mic")
+            self.assertEqual(window.recording_controls.rec_call_name.text(), "Test App")
+        finally:
+            window._really_quit = True
+            window.close()
 
 
 if __name__ == "__main__":

@@ -39,6 +39,7 @@ class DiarizationWorker(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(TranscriptResult)
     error = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
     def __init__(self, audio_path, transcript_result, hf_token="",
                  min_speakers=None, max_speakers=None, full_cpu=False,
@@ -51,6 +52,11 @@ class DiarizationWorker(QThread):
         self.max_speakers = max_speakers
         self.full_cpu = full_cpu
         self.engine = engine
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request cooperative cancellation of speaker diarization."""
+        self._cancel_requested = True
 
     def run(self):
         try:
@@ -64,6 +70,10 @@ class DiarizationWorker(QThread):
             self.error.emit(f"Diarization failed: {e}")
 
     def _run_sherpa_onnx(self):
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         from app.transcription.sherpa_diarizer import SherpaOnnxDiarizer
         import os
 
@@ -72,23 +82,44 @@ class DiarizationWorker(QThread):
         threads = max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
 
         diarizer = SherpaOnnxDiarizer(num_threads=threads)
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         self.progress.emit("Running speaker diarization...")
+
+        def _cb(msg):
+            if not self._cancel_requested:
+                self.progress.emit(msg)
 
         speaker_segments = diarizer.diarize(
             self.audio_path,
             min_speakers=self.min_speakers,
             max_speakers=self.max_speakers,
-            progress_callback=self.progress.emit,
+            progress_callback=_cb,
+            is_cancelled=lambda: self._cancel_requested,
         )
+
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
 
         self.progress.emit("Mapping speakers to transcript...")
         result = self._merge_diarization_with_transcript(
             self.transcript_result, speaker_segments
         )
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         self.progress.emit("Speaker diarization complete.")
         self.finished.emit(result)
 
     def _run_pyannote(self):
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         self.progress.emit("Loading speaker diarization model...")
 
         if not self.hf_token:
@@ -101,6 +132,9 @@ class DiarizationWorker(QThread):
             return
 
         pipeline = _get_pipeline(self.hf_token)
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
 
         self.progress.emit("Loading audio for diarization...")
 
@@ -129,6 +163,10 @@ class DiarizationWorker(QThread):
             waveform = torch.from_numpy(audio_data.T)
         audio_input = {"waveform": waveform, "sample_rate": sample_rate}
 
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         self.progress.emit("Running speaker diarization...")
 
         diarization_params = {}
@@ -138,6 +176,9 @@ class DiarizationWorker(QThread):
             diarization_params["max_speakers"] = self.max_speakers
 
         result = pipeline(audio_input, **diarization_params)
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
 
         # pyannote 4.0 returns DiarizeOutput; extract the Annotation
         if hasattr(result, "speaker_diarization"):
@@ -154,12 +195,19 @@ class DiarizationWorker(QThread):
                 speaker=speaker,
             ))
 
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
+
         self.progress.emit("Mapping speakers to transcript...")
 
         # Assign speakers to transcript segments
         result = self._merge_diarization_with_transcript(
             self.transcript_result, speaker_segments
         )
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return
 
         self.progress.emit("Speaker diarization complete.")
         self.finished.emit(result)

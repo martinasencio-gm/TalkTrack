@@ -1013,6 +1013,7 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, state):
         self.recording_controls.set_state(state)
+        self._update_preflight()
         self.source_selector.set_enabled(state == RecordingState.IDLE)
 
         if hasattr(self, "tray") and self.tray.is_supported():
@@ -1635,8 +1636,14 @@ class MainWindow(QMainWindow):
         self._update_activity_visibility()
 
     def _cancel_transcription(self):
+        cancelled_any = False
         if self._transcription_worker and self._transcription_worker.isRunning():
             self._transcription_worker.cancel()
+            cancelled_any = True
+        if self._diarization_worker and self._diarization_worker.isRunning():
+            self._diarization_worker.cancel()
+            cancelled_any = True
+        if cancelled_any:
             self.transcript_viewer.show_progress("Cancelling...")
 
     def _on_transcription_cancelled(self):
@@ -1847,10 +1854,24 @@ class MainWindow(QMainWindow):
         self._diarization_worker.progress.connect(self._on_transcription_progress)
         self._diarization_worker.finished.connect(self._on_diarization_finished)
         self._diarization_worker.error.connect(self._on_diarization_error)
+        self._diarization_worker.cancelled.connect(self._on_diarization_cancelled)
         self._diarization_worker.start(QThread.Priority.LowPriority)
 
         self.transcript_viewer.show_progress("Running speaker diarization...")
         self._update_activity_visibility()
+
+    def _on_diarization_cancelled(self):
+        worker = self._diarization_worker
+        self._diarization_worker = None
+        if worker is not None and getattr(worker, "transcript_result", None):
+            self._display_final_transcript(
+                worker.transcript_result,
+                getattr(worker, "session", None),
+            )
+        else:
+            self.transcript_viewer.hide_progress()
+        self.status_label.setText("Diarization cancelled — showing transcript without speakers.")
+        self._process_pending_transcriptions()
 
     def _on_diarization_finished(self, result):
         session = getattr(self._diarization_worker, "session", None)
