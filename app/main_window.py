@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self._batch_worker = None
         self._calendar_lookup_workers = []
         self._calendar_banner_session = None
+        self._calendar_banner_is_post_recording = False
         self._rename_candidate_events = []
         self._diarization_worker = None
         self._simple_diarize_worker = None
@@ -1234,6 +1235,7 @@ class MainWindow(QMainWindow):
         # calendar_event.json / metadata.json.
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
+        self._calendar_banner_is_post_recording = False
 
         self._current_session = session
         self._transcript = None
@@ -1290,15 +1292,15 @@ class MainWindow(QMainWindow):
 
         detected_name = self._detected_session_meeting_name
         self._detected_session_meeting_name = None
-        self._maybe_lookup_calendar(session, detected_name=detected_name)
+        lookup_started = self._maybe_lookup_calendar(session, detected_name=detected_name)
 
         # Auto-tag if matched to previous recording by name
         rec_name = session.get("name") or detected_name
         if rec_name:
             self._maybe_autotag_recording(session, rec_name)
 
-        # Prompt for tagging if enabled
-        if self.config.get("general", "prompt_tags_after_recording"):
+        # If no calendar lookup was started to prompt first, prompt for tags now
+        if not lookup_started and self.config.get("general", "prompt_tags_after_recording"):
             self._open_tag_dialog(session)
 
     def _maybe_queue_for_batch(self, session):
@@ -2049,6 +2051,7 @@ class MainWindow(QMainWindow):
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
+        self._calendar_banner_is_post_recording = False
         # Suggestions belong to the recording they were looked up for; a
         # leftover one must not tag the recording being opened now.
         self._rename_candidate_events = []
@@ -2559,31 +2562,33 @@ class MainWindow(QMainWindow):
     def _maybe_lookup_calendar(self, session, detected_name=None):
         """Kick off an off-thread Outlook calendar lookup for this session,
         if the feature is enabled. Best-effort — no-op on any failure,
-        never surfaces an error to the user (see outlook_calendar.py)."""
+        never surfaces an error to the user (see outlook_calendar.py).
+        Returns True if a background lookup worker was started, False otherwise."""
         if not self.config.get("calendar", "enabled"):
             self._maybe_tag_detected_meeting(session, detected_name)
-            return
+            return False
         if session is None:
-            return
+            return False
         if session.get("calendar_prompt_dismissed"):
-            return
+            return False
         session_dir = session.get("directory")
         if session_dir and (Path(session_dir) / "calendar_event.json").exists():
-            return  # already tagged
+            return False  # already tagged
         started = session.get("started_at")
         stopped = session.get("stopped_at")
         if not started or not stopped:
             self._maybe_tag_detected_meeting(session, detected_name)
-            return
+            return False
         from datetime import datetime
         try:
             started_dt = datetime.fromisoformat(started)
             stopped_dt = datetime.fromisoformat(stopped)
         except ValueError:
             self._maybe_tag_detected_meeting(session, detected_name)
-            return
+            return False
 
         self._dispatch_calendar_lookup(session, started_dt, stopped_dt, detected_name=detected_name)
+        return True
 
     def _on_rename_started(self):
         """Fetch calendar matches to offer as rename suggestions.
@@ -2656,6 +2661,9 @@ class MainWindow(QMainWindow):
             # status text like "Transcribing...".
             if not manual:
                 self._maybe_tag_detected_meeting(session, detected_name)
+                # No calendar match: prompt for tags now if enabled
+                if self.config.get("general", "prompt_tags_after_recording") and self._is_current_session(session):
+                    self._open_tag_dialog(session)
             if manual and self._is_current_session(session):
                 self.status_label.setText("No other matching calendar events found.")
             return
@@ -2667,6 +2675,7 @@ class MainWindow(QMainWindow):
         # the banner visible-but-unseen until the window is next shown, same
         # as the recording header or transcript already sitting there.
         self._calendar_banner_session = session
+        self._calendar_banner_is_post_recording = not manual
         self.calendar_banner.show_matches(events)
 
     def _on_calendar_tag_requested(self, event):
@@ -2680,9 +2689,13 @@ class MainWindow(QMainWindow):
             self._calendar_banner_session
         ):
             return
+        was_post_rec = getattr(self, "_calendar_banner_is_post_recording", False)
+        self._calendar_banner_is_post_recording = False
         event_to_save = self._apply_calendar_event(event)
         self._maybe_suggest_rename(self._current_session, event_to_save)
         self._export_transcript()
+        if was_post_rec and self.config.get("general", "prompt_tags_after_recording"):
+            self._open_tag_dialog(self._current_session)
 
     def _apply_calendar_event(self, event):
         """Tag the displayed recording with this event and refresh the UI.
@@ -2733,11 +2746,15 @@ class MainWindow(QMainWindow):
             self._calendar_banner_session
         ):
             return
+        was_post_rec = getattr(self, "_calendar_banner_is_post_recording", False)
+        self._calendar_banner_is_post_recording = False
         self._current_session["calendar_prompt_dismissed"] = True
         session_dir = Path(self._current_session["directory"])
         meta_path = session_dir / "metadata.json"
         if meta_path.exists():
             atomic_write_json(meta_path, self._current_session, indent=2)
+        if was_post_rec and self.config.get("general", "prompt_tags_after_recording"):
+            self._open_tag_dialog(self._current_session)
 
     def _on_change_calendar_requested(self):
         session = self._current_session
