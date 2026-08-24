@@ -98,6 +98,13 @@ class TestMainWindowCompactStrip(unittest.TestCase):
             window.compact_strip.cancel_requested.emit()
         mock_cancel.assert_called_once()
 
+    def test_mute_requested_toggles_mute(self):
+        from app.main_window import MainWindow
+        with patch.object(MainWindow, "_toggle_mute") as mock_mute:
+            window = self._make_window()
+            window.compact_strip.mute_requested.emit()
+        mock_mute.assert_called_once()
+
     def test_expand_and_open_transcript_both_restore_from_tray(self):
         from app.main_window import MainWindow
         with patch.object(MainWindow, "_restore_from_tray") as mock_restore:

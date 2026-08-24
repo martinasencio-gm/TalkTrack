@@ -156,6 +156,7 @@ TalkTrack/
     TT_icon_*.png                      # Icon source files (32, 64, 128, 256, 512px)
     TT_logo_*.png                      # Logo files (655x200, 1300x400)
   docs/batch-transcription.md         # Batch CLI usage + Task Scheduler setup
+  docs/dynamics-crm-setup.md          # Entra app registration + Dynamics prerequisites for CRM export
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory (each session folder also holds its transcript.md export)
 ```
