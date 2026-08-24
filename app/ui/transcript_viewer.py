@@ -116,8 +116,7 @@ class TranscriptViewer(QWidget):
         # to the button that starts the work, not only a buried setting.
         self.diarize_cb = QCheckBox("Identify speakers")
         self.diarize_cb.setToolTip(
-            "Run full speaker diarization (pyannote) after transcription.\n"
-            "Much slower — on CPU it often takes longer than the recording.\n"
+            "Run speaker diarization after transcription to identify individual speakers.\n"
             "Unchecked, separate mic and system tracks still label You/Remote."
         )
         self.diarize_cb.toggled.connect(self.diarize_toggled)

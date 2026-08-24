@@ -327,13 +327,19 @@ class SettingsDialog(QDialog):
         whisper_form = QFormLayout(whisper_group)
 
         self.transcription_engine_combo = QComboBox()
+        self.transcription_engine_combo.addItem("Fast ONNX (sherpa-onnx) — Whisper & Moonshine", "sherpa_onnx")
         self.transcription_engine_combo.addItem("faster-whisper (CTranslate2, default)", "faster_whisper")
-        self.transcription_engine_combo.addItem("Fast ONNX (sherpa-onnx)", "sherpa_onnx")
         self.transcription_engine_combo.currentIndexChanged.connect(self._on_transcription_engine_changed)
         whisper_form.addRow("Transcription Engine:", self.transcription_engine_combo)
 
         self.model_combo = QComboBox()
+        self.model_combo.currentIndexChanged.connect(self._update_transcription_model_status)
         whisper_form.addRow("Model Size:", self.model_combo)
+
+        self.transcription_onnx_status_label = QLabel("Status: ONNX model ready")
+        self.transcription_onnx_status_label.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+        self.transcription_onnx_status_label.setVisible(False)
+        whisper_form.addRow("Model Status:", self.transcription_onnx_status_label)
 
         self.device_combo = QComboBox()
         self.device_combo.addItem("CPU", "cpu")
@@ -905,6 +911,26 @@ class SettingsDialog(QDialog):
         else:
             self.model_combo.setCurrentIndex(0)
         self.model_combo.blockSignals(False)
+        self._update_transcription_model_status()
+
+    def _update_transcription_model_status(self):
+        if not hasattr(self, "transcription_onnx_status_label"):
+            return
+        engine = self.transcription_engine_combo.currentData() or "faster_whisper"
+        if engine == "sherpa_onnx":
+            self.transcription_onnx_status_label.setVisible(True)
+            model = self.model_combo.currentData() or "base"
+            from app.transcription.sherpa_transcriber import is_model_available
+            if is_model_available(model):
+                self.transcription_onnx_status_label.setText(f"Status: ONNX model '{model}' is ready")
+                self.transcription_onnx_status_label.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+            else:
+                self.transcription_onnx_status_label.setText(
+                    f"Status: Model '{model}' will be downloaded automatically on first use"
+                )
+                self.transcription_onnx_status_label.setStyleSheet("color: #f9e2af; font-size: 11px;")
+        else:
+            self.transcription_onnx_status_label.setVisible(False)
 
     def _on_diarization_engine_changed(self, index=0):
         engine = self.diarization_engine_combo.currentData()
