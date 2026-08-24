@@ -193,10 +193,21 @@ class RecordingControls(QWidget):
 
         rec_layout.addWidget(_v_divider(40))
 
-        self.live_meters = LevelMeter()
-        rec_layout.addWidget(self.live_meters, stretch=1)
-
-        source_layout = QVBoxLayout()
+        self.rec_source_block = _ClickableFrame()
+        self.rec_source_block.setObjectName("recSourceBlock")
+        self.rec_source_block.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rec_source_block.setToolTip("Click to toggle audio level meters")
+        self.rec_source_block.setStyleSheet(
+            "QFrame#recSourceBlock {"
+            " border: 1px solid transparent; border-radius: 6px; padding: 2px 6px;"
+            "}"
+            "QFrame#recSourceBlock:hover {"
+            " background-color: rgba(233,233,237,0.06);"
+            " border-color: #292b31;"
+            "}"
+        )
+        source_layout = QVBoxLayout(self.rec_source_block)
+        source_layout.setContentsMargins(4, 2, 4, 2)
         source_layout.setSpacing(1)
         self.source_line = QLabel("")
         self.source_line.setStyleSheet("font-size: 12px; color: #cfd3e5;")
@@ -204,7 +215,13 @@ class RecordingControls(QWidget):
         self.health_line.setStyleSheet("font-size: 11.5px; color: #75798c;")
         source_layout.addWidget(self.source_line)
         source_layout.addWidget(self.health_line)
-        rec_layout.addLayout(source_layout)
+        self.rec_source_block.clicked.connect(self._toggle_live_meters)
+        rec_layout.addWidget(self.rec_source_block)
+
+        self.live_meters = LevelMeter()
+        self.live_meters.hide()
+        self.live_meters.clicked.connect(self._toggle_live_meters)
+        rec_layout.addWidget(self.live_meters, stretch=1)
 
         self.mute_btn = QPushButton("Mute mic")
         self.mute_btn.setStyleSheet("padding: 8px 14px; font-size: 13px;")
@@ -379,8 +396,12 @@ class RecordingControls(QWidget):
             self.mute_btn.setStyleSheet("")
             self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
 
+    def _toggle_live_meters(self):
+        self.live_meters.setVisible(not self.live_meters.isVisible())
+
     def reset_timer(self):
         self.timer_label.setText("00:00:00")
+        self.live_meters.hide()
 
     def clear_test_mic(self):
         pass # Migrated to preflight / sources dialog

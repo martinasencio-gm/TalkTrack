@@ -1,7 +1,7 @@
 """Real-time audio level meter widget with peak hold."""
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout
 
@@ -91,9 +91,18 @@ class LevelBar(QWidget):
 class LevelMeter(QWidget):
     """Dual-channel level meter (Mic + System)."""
 
+    clicked = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Click to hide audio level meters")
         self._setup_ui()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)

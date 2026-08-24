@@ -2947,6 +2947,25 @@ class MainWindow(QMainWindow):
                 self._strip_is_minimized_form = False
                 self.compact_strip_action.setChecked(False)
             self._update_activity_visibility()
+            if minimized:
+                if self.recorder.state != RecordingState.IDLE:
+                    if hasattr(self, "tray") and self.tray.is_supported():
+                        self.tray.notify_meeting(
+                            "Recording in Progress",
+                            "TalkTrack is continuing to record in the background."
+                        )
+                elif self._calendar_banner_session is not None and self.calendar_banner.isVisible():
+                    if hasattr(self, "tray") and self.tray.is_supported():
+                        self.tray.notify_meeting(
+                            "Save Confirmation Pending",
+                            "TalkTrack is waiting for calendar tag / save confirmation in the background."
+                        )
+                elif self._transcription_busy():
+                    if hasattr(self, "tray") and self.tray.is_supported():
+                        self.tray.notify_meeting(
+                            "Transcription in Progress",
+                            "TalkTrack is finishing transcription in the background."
+                        )
         super().changeEvent(event)
 
     def closeEvent(self, event):
@@ -3215,6 +3234,16 @@ class MainWindow(QMainWindow):
             body = (
                 "A recording is in progress. Closing will stop and save it — "
                 "minimize instead to keep recording in the background."
+            )
+        elif self._calendar_banner_session is not None and self.calendar_banner.isVisible():
+            body = (
+                "TalkTrack is waiting for tag/save confirmation on the finished recording. "
+                "Close TalkTrack, or minimize to keep running in the background?"
+            )
+        elif self._transcription_busy():
+            body = (
+                "Transcription is currently in progress. Closing will cancel saving the transcript — "
+                "minimize instead to finish in the background."
             )
         else:
             body = "Close TalkTrack, or minimize it to keep it running in the background?"
