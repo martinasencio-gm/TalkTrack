@@ -234,9 +234,9 @@ class TestCompactStripVariant(unittest.TestCase):
         self.assertEqual(strip._variant, "full")
         self.assertFalse(strip.frame.isHidden())
         self.assertTrue(strip.pill_frame.isHidden())
-        # 2px over the frame's 700x76 — the window carries a 1px margin
+        # 2px over the frame's 740x76 — the window carries a 1px margin
         # on every side so the frame's rounded border isn't clipped.
-        self.assertEqual((strip.width(), strip.height()), (702, 78))
+        self.assertEqual((strip.width(), strip.height()), (742, 78))
 
     def test_collapse_button_switches_to_pill(self):
         strip = CompactStrip()

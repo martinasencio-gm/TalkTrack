@@ -50,6 +50,8 @@ class CalendarSuggestionBanner(QWidget):
         dismiss_row = QHBoxLayout()
         dismiss_row.addStretch()
         self._dismiss_btn = QPushButton("Dismiss")
+        self._dismiss_btn.setMinimumWidth(80)
+        self._dismiss_btn.setStyleSheet("padding: 4px 12px;")
         self._dismiss_btn.clicked.connect(self._on_dismiss)
         dismiss_row.addWidget(self._dismiss_btn)
         self._layout.addLayout(dismiss_row)
@@ -78,6 +80,8 @@ class CalendarSuggestionBanner(QWidget):
             row.addWidget(label, 1)
 
             tag_btn = QPushButton("Tag Recording")
+            tag_btn.setMinimumWidth(115)
+            tag_btn.setStyleSheet("padding: 4px 12px;")
             tag_btn.clicked.connect(lambda checked=False, e=event: self._on_tag(e))
             row.addWidget(tag_btn)
 

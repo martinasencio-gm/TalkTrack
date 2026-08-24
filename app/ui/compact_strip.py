@@ -1,7 +1,7 @@
 import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QProgressBar,
-    QGraphicsOpacityEffect,
+    QGraphicsOpacityEffect, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QIcon, QMouseEvent
@@ -83,11 +83,11 @@ class CompactStrip(QWidget):
         self._setup_ui()
         
     def _setup_ui(self):
-        # 2px over the frame's own 700x76: the layout below insets the
+        # 2px over the frame's own 740x76: the layout below insets the
         # frame by 1px on every side so its antialiased 14px corner
         # radius and 1px border have a pixel to land on instead of
         # being cut off by the window boundary.
-        self.setFixedSize(702, 78)
+        self.setFixedSize(742, 78)
         
         # Flags: frameless, always on top, tool window
         self.setWindowFlags(
@@ -153,9 +153,11 @@ class CompactStrip(QWidget):
         
         self.title_label = QLabel("Recording Name")
         self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600;")
+        self.title_label.setMinimumWidth(80)
         
         self.subtitle_label = QLabel("")
         self.subtitle_label.setStyleSheet("font-size: 11.5px; color: #9397ab;")
+        self.subtitle_label.setMinimumWidth(80)
         
         self.title_layout.addWidget(self.title_label)
         self.title_layout.addWidget(self.subtitle_label)
@@ -230,11 +232,15 @@ class CompactStrip(QWidget):
         self.btn_primary.setObjectName("recordAction")
         self.btn_primary.setIconSize(QSize(12, 12))
         self.btn_primary.setFixedHeight(36)
+        self.btn_primary.setMinimumWidth(80)
+        self.btn_primary.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._set_icon(self.btn_primary, "record", "#f38ba8")
 
         self.btn_secondary = QPushButton("Cancel")
         self.btn_secondary.setIconSize(QSize(12, 12))
         self.btn_secondary.setFixedHeight(36)
+        self.btn_secondary.setMinimumWidth(80)
+        self.btn_secondary.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.btn_secondary.setStyleSheet("padding: 0 10px;")
         self.btn_secondary.hide()
 
@@ -403,7 +409,7 @@ class CompactStrip(QWidget):
         else:
             self.pill_frame.hide()
             self.frame.show()
-            self.setFixedSize(702, 78)
+            self.setFixedSize(742, 78)
         self.variant_changed.emit(variant)
 
 
@@ -439,6 +445,7 @@ class CompactStrip(QWidget):
             self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #cfd3e5;")
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
+            self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
             self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.hide()
@@ -459,6 +466,7 @@ class CompactStrip(QWidget):
             self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
+            self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
             self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.hide()
@@ -478,6 +486,7 @@ class CompactStrip(QWidget):
                 self.title_label.setText("Recording Name")
             self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
             self.btn_primary.setText("Stop")
+            self.btn_primary.setMinimumWidth(76)
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
             self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
             self.btn_secondary.hide()
@@ -497,9 +506,11 @@ class CompactStrip(QWidget):
             self._set_mark_icon("pause-fill", "#f9e2af", size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Stop")
+            self.btn_primary.setMinimumWidth(76)
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
             self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
             self.btn_secondary.setText("Resume")
+            self.btn_secondary.setMinimumWidth(88)
             self._set_icon(self.btn_secondary, "play-fill", "#e9e9ed")
             self.btn_secondary.show()
             self.btn_mute.hide()
@@ -516,6 +527,7 @@ class CompactStrip(QWidget):
             self._set_mark_icon("record-fill", "#f38ba8", size=11)
             self._set_mark_pulsing(True)
             self.btn_primary.setText("Stop")
+            self.btn_primary.setMinimumWidth(76)
             self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
             self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
             self.btn_secondary.hide()
@@ -536,9 +548,11 @@ class CompactStrip(QWidget):
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
+            self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
             self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.setText("Cancel")
+            self.btn_secondary.setMinimumWidth(76)
             self._set_icon(self.btn_secondary, "x", "#e9e9ed")
             self.btn_secondary.show()
             self.btn_mute.hide()
@@ -555,9 +569,11 @@ class CompactStrip(QWidget):
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
+            self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
             self._set_icon(self.btn_primary, "record", "#f38ba8")
             self.btn_secondary.setText("Open transcript")
+            self.btn_secondary.setMinimumWidth(130)
             self._set_icon(self.btn_secondary, "arrow-square-out", "#e9e9ed")
             self.btn_secondary.show()
             self.btn_mute.hide()
