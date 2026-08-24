@@ -111,6 +111,44 @@ MODEL_REGISTRY = {
 }
 
 
+VAD_BASE_DIR = Path.home() / ".talktrack" / "models" / "vad"
+VAD_FILENAME = "silero_vad.onnx"
+VAD_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+
+
+def get_vad_model_path() -> Path:
+    VAD_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    return VAD_BASE_DIR / VAD_FILENAME
+
+
+def is_vad_available() -> bool:
+    vad_path = get_vad_model_path()
+    return vad_path.exists() and vad_path.stat().st_size > 10000
+
+
+def ensure_vad_model(progress_callback: Optional[Callable[[str], None]] = None) -> Path:
+    vad_path = get_vad_model_path()
+    if vad_path.exists() and vad_path.stat().st_size > 10000:
+        return vad_path
+
+    if progress_callback:
+        progress_callback("Downloading Silero VAD model (~0.6 MB)...")
+
+    temp_dest = VAD_BASE_DIR / f"{VAD_FILENAME}.tmp"
+    try:
+        urllib.request.urlretrieve(VAD_URL, temp_dest)
+        if temp_dest.exists():
+            temp_dest.replace(vad_path)
+    except Exception as e:
+        if temp_dest.exists():
+            temp_dest.unlink(missing_ok=True)
+        # Try HuggingFace fallback mirror
+        hf_url = "https://huggingface.co/csukuangfj/silero-vad-v4/resolve/main/silero_vad.onnx"
+        urllib.request.urlretrieve(hf_url, vad_path)
+
+    return vad_path
+
+
 def get_model_dir(model_name: str) -> Path:
     target_dir = MODELS_BASE_DIR / model_name
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -234,13 +272,57 @@ class SherpaOnnxTranscriber:
         else:
             raise ValueError(f"Unsupported model type: {spec['type']}")
 
+    def _get_speech_segments(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> list[tuple[int, np.ndarray]]:
+        """Detect speech segments using Silero VAD or fall back to fixed 20-second chunking."""
+        import sherpa_onnx
+
+        speech_segments = []
+        try:
+            vad_path = ensure_vad_model(progress_callback=progress_callback)
+            config = sherpa_onnx.VadModelConfig()
+            config.silero_vad.model = str(vad_path)
+            config.silero_vad.min_silence_duration = 0.25
+            config.silero_vad.min_speech_duration = 0.25
+            config.silero_vad.max_speech_duration = 20.0
+            config.sample_rate = sample_rate
+            vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=60)
+
+            window_size = 512
+            for i in range(0, len(audio_data), window_size):
+                chunk = audio_data[i:i + window_size]
+                vad.accept_waveform(chunk)
+            vad.flush()
+
+            while not vad.empty():
+                seg = vad.front
+                if len(seg.samples) > 0:
+                    speech_segments.append((int(seg.start), np.array(seg.samples, dtype=np.float32)))
+                vad.pop()
+        except Exception as e:
+            logger.warning("VAD segmentation failed (%s), falling back to chunking", e)
+
+        # Fallback to chunking if VAD yielded no segments but audio is present
+        if not speech_segments and len(audio_data) > 0:
+            chunk_size = 20 * sample_rate
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i:i + chunk_size]
+                if len(chunk) > 0:
+                    speech_segments.append((i, chunk))
+
+        return speech_segments
+
     def transcribe(
         self,
         audio_path: str,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         is_cancelled: Optional[Callable[[], bool]] = None,
     ) -> Optional[tuple[list[TranscriptSegment], dict]]:
-        """Transcribe an audio file and return (segments, info) or None if cancelled."""
+        """Transcribe an audio file of any length and return (segments, info) or None if cancelled."""
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
@@ -271,45 +353,68 @@ class SherpaOnnxTranscriber:
         if is_cancelled and is_cancelled():
             return None
 
-        if progress_callback:
-            progress_callback(10, "Decoding audio with ONNX...")
+        def _vad_cb(msg):
+            if progress_callback:
+                progress_callback(5, msg)
 
-        stream = self._recognizer.create_stream()
-        stream.accept_waveform(sample_rate, audio_data)
-        self._recognizer.decode_stream(stream)
+        speech_segments = self._get_speech_segments(
+            audio_data,
+            sample_rate=16000,
+            progress_callback=_vad_cb,
+        )
 
         if is_cancelled and is_cancelled():
             return None
 
-        res = stream.result
+        total_segs = len(speech_segments)
         segments = []
+        detected_lang = self.language
 
-        # If model outputs segment-level timestamps:
-        if getattr(res, "segment_timestamps", None) and len(res.segment_timestamps) > 0:
-            texts = getattr(res, "segment_texts", [])
-            starts = res.segment_timestamps
-            durations = getattr(res, "segment_durations", [])
-            for i, start in enumerate(starts):
-                dur = durations[i] if i < len(durations) else (duration - start)
-                text = texts[i].strip() if i < len(texts) else ""
-                if text:
-                    segments.append(TranscriptSegment(
-                        start=round(float(start), 2),
-                        end=round(float(start + dur), 2),
-                        text=text,
-                        confidence=1.0,
-                    ))
-        elif getattr(res, "text", None) and res.text.strip():
-            # Single block transcript
-            segments.append(TranscriptSegment(
-                start=0.0,
-                end=round(duration, 2),
-                text=res.text.strip(),
-                confidence=1.0,
-            ))
+        for idx, (start_sample, samples) in enumerate(speech_segments):
+            if is_cancelled and is_cancelled():
+                return None
+
+            start_sec = start_sample / 16000.0
+            dur_sec = len(samples) / 16000.0
+            end_sec = start_sec + dur_sec
+
+            if progress_callback:
+                pct = int(min(99, (start_sec / max(1.0, duration)) * 100))
+                progress_callback(pct, f"Transcribing audio with ONNX ({idx + 1}/{total_segs})...")
+
+            stream = self._recognizer.create_stream()
+            stream.accept_waveform(sample_rate, samples)
+            self._recognizer.decode_stream(stream)
+            res = stream.result
+
+            if getattr(res, "lang", None):
+                detected_lang = res.lang
+
+            # If model outputs subsegment-level timestamps:
+            if getattr(res, "segment_timestamps", None) and len(res.segment_timestamps) > 0:
+                texts = getattr(res, "segment_texts", [])
+                starts = res.segment_timestamps
+                durations = getattr(res, "segment_durations", [])
+                for i, s in enumerate(starts):
+                    d = durations[i] if i < len(durations) else (dur_sec - s)
+                    t = texts[i].strip() if i < len(texts) else ""
+                    if t:
+                        segments.append(TranscriptSegment(
+                            start=round(float(start_sec + s), 2),
+                            end=round(float(start_sec + s + d), 2),
+                            text=t,
+                            confidence=1.0,
+                        ))
+            elif getattr(res, "text", None) and res.text.strip():
+                segments.append(TranscriptSegment(
+                    start=round(start_sec, 2),
+                    end=round(end_sec, 2),
+                    text=res.text.strip(),
+                    confidence=1.0,
+                ))
 
         info = {
-            "language": getattr(res, "lang", self.language) or self.language,
+            "language": detected_lang or self.language,
             "duration": duration,
         }
 

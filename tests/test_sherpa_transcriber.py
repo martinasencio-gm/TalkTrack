@@ -74,6 +74,59 @@ class TestSherpaOnnxTranscriber(unittest.TestCase):
             )
             self.assertIsNone(result)
 
+    def test_transcribe_long_audio_with_vad_segments(self):
+        with patch("os.path.exists", return_value=True), \
+             patch("app.transcription.sherpa_transcriber.is_model_available", return_value=True), \
+             patch("app.transcription.sherpa_transcriber.download_model"), \
+             patch("sherpa_onnx.OfflineRecognizer.from_whisper") as mock_from_whisper, \
+             patch("soundfile.read") as mock_read:
+
+            # Mock 100-second audio
+            mock_read.return_value = (np.zeros(16000 * 100, dtype=np.float32), 16000)
+
+            transcriber = SherpaOnnxTranscriber(model_name="base")
+            # Mock _get_speech_segments to return 3 distinct speech segments across the 100s
+            transcriber._get_speech_segments = MagicMock(return_value=[
+                (0, np.zeros(16000 * 10, dtype=np.float32)),        # 0s - 10s
+                (16000 * 30, np.zeros(16000 * 15, dtype=np.float32)), # 30s - 45s
+                (16000 * 70, np.zeros(16000 * 20, dtype=np.float32)), # 70s - 90s
+            ])
+
+            mock_results = [
+                MagicMock(text="First section", segment_timestamps=None),
+                MagicMock(text="Second section", segment_timestamps=None),
+                MagicMock(text="Third section", segment_timestamps=None),
+            ]
+            mock_streams = [MagicMock(result=r) for r in mock_results]
+            mock_rec = MagicMock()
+            mock_rec.create_stream.side_effect = mock_streams
+            mock_from_whisper.return_value = mock_rec
+
+            segments, info = transcriber.transcribe("/fake/audio.wav")
+
+            self.assertEqual(len(segments), 3)
+            self.assertEqual(segments[0].text, "First section")
+            self.assertEqual(segments[0].start, 0.0)
+            self.assertEqual(segments[0].end, 10.0)
+            self.assertEqual(segments[1].text, "Second section")
+            self.assertEqual(segments[1].start, 30.0)
+            self.assertEqual(segments[1].end, 45.0)
+            self.assertEqual(segments[2].text, "Third section")
+            self.assertEqual(segments[2].start, 70.0)
+            self.assertEqual(segments[2].end, 90.0)
+            self.assertEqual(info["duration"], 100.0)
+
+    def test_chunking_fallback_when_vad_fails(self):
+        with patch("app.transcription.sherpa_transcriber.ensure_vad_model", side_effect=RuntimeError("VAD error")):
+            transcriber = SherpaOnnxTranscriber(model_name="base")
+            audio = np.zeros(16000 * 50, dtype=np.float32)
+            segs = transcriber._get_speech_segments(audio, sample_rate=16000)
+            # 50 seconds should be chunked into 3 pieces (20s, 20s, 10s)
+            self.assertEqual(len(segs), 3)
+            self.assertEqual(segs[0][0], 0)
+            self.assertEqual(segs[1][0], 16000 * 20)
+            self.assertEqual(segs[2][0], 16000 * 40)
+
 
 class TestTranscriptionWorkerSherpaOnnxRouting(unittest.TestCase):
     def test_worker_routes_to_sherpa_onnx_single_track(self):
