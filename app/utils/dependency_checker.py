@@ -245,13 +245,34 @@ class DependencyChecker:
             }
 
     def check_whisper_model(self):
-        """Check if the configured Whisper model is cached locally."""
+        """Check if the configured transcription model is cached locally."""
         model_size = "base"
+        engine = "faster_whisper"
         if self.config:
             try:
-                model_size = self.config.get("transcription", "model_size")
+                model_size = self.config.get("transcription", "model_size") or "base"
+                engine = self.config.get("transcription", "engine") or "faster_whisper"
             except (KeyError, TypeError):
                 pass
+
+        if engine == "sherpa_onnx":
+            from app.transcription.sherpa_transcriber import is_model_available
+            if is_model_available(model_size):
+                return {
+                    "name": "Transcription Model",
+                    "passed": True,
+                    "level": "critical",
+                    "message": f"ONNX Model '{model_size}' is cached.",
+                    "action": None,
+                }
+            else:
+                return {
+                    "name": "Transcription Model",
+                    "passed": False,
+                    "level": "critical",
+                    "message": f"ONNX Model '{model_size}' not found in cache.",
+                    "action": "The model will be downloaded automatically on first transcription.",
+                }
 
         cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / f"models--Systran--faster-whisper-{model_size}"
         if cache_dir.exists():

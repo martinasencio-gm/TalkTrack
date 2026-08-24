@@ -30,6 +30,7 @@ class BatchSettings:
     hf_token: str = ""
     diarize: bool = False
     engine: str = "sherpa_onnx"
+    transcription_engine: str = "faster_whisper"
     min_speakers: int = None
     max_speakers: int = None
     replace_you_with_name: bool = False
@@ -40,6 +41,12 @@ class BatchSettings:
         engine = None
         try:
             engine = config.get("diarization", "engine")
+        except Exception:
+            pass
+
+        transcription_engine = "faster_whisper"
+        try:
+            transcription_engine = config.get("transcription", "engine") or "faster_whisper"
         except Exception:
             pass
 
@@ -83,6 +90,7 @@ class BatchSettings:
             hf_token=hf_token,
             diarize=can_diarize,
             engine=engine,
+            transcription_engine=transcription_engine,
             min_speakers=config.get("diarization", "min_speakers"),
             max_speakers=config.get("diarization", "max_speakers"),
             replace_you_with_name=replace_you,
@@ -172,6 +180,7 @@ def run_job(job, settings, workers=None, on_progress=None):
         # Nothing is capturing audio in a batch run, so there is no
         # real-time callback to leave headroom for.
         full_cpu=True,
+        engine=settings.transcription_engine,
     )
     result, error = _drive(worker, progress)
     if result is None:

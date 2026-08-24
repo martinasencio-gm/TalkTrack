@@ -323,15 +323,16 @@ class SettingsDialog(QDialog):
         transcription_tab = QWidget()
         transcription_layout = QVBoxLayout(transcription_tab)
 
-        whisper_group = QGroupBox("Whisper Transcription")
+        whisper_group = QGroupBox("Speech-to-Text Transcription")
         whisper_form = QFormLayout(whisper_group)
 
+        self.transcription_engine_combo = QComboBox()
+        self.transcription_engine_combo.addItem("faster-whisper (CTranslate2, default)", "faster_whisper")
+        self.transcription_engine_combo.addItem("Fast ONNX (sherpa-onnx)", "sherpa_onnx")
+        self.transcription_engine_combo.currentIndexChanged.connect(self._on_transcription_engine_changed)
+        whisper_form.addRow("Transcription Engine:", self.transcription_engine_combo)
+
         self.model_combo = QComboBox()
-        self.model_combo.addItem("tiny (fastest, least accurate)", "tiny")
-        self.model_combo.addItem("base (fast, good accuracy)", "base")
-        self.model_combo.addItem("small (balanced)", "small")
-        self.model_combo.addItem("medium (slower, better accuracy)", "medium")
-        self.model_combo.addItem("large-v3 (slowest, best accuracy)", "large-v3")
         whisper_form.addRow("Model Size:", self.model_combo)
 
         self.device_combo = QComboBox()
@@ -583,6 +584,12 @@ class SettingsDialog(QDialog):
             self.format_combo.setCurrentIndex(idx)
 
         # Transcription
+        transcription_engine = self.config.get("transcription", "engine") or "faster_whisper"
+        idx = self.transcription_engine_combo.findData(transcription_engine)
+        if idx >= 0:
+            self.transcription_engine_combo.setCurrentIndex(idx)
+        self._on_transcription_engine_changed()
+
         model = self.config.get("transcription", "model_size")
         idx = self.model_combo.findData(model)
         if idx >= 0:
@@ -707,6 +714,7 @@ class SettingsDialog(QDialog):
         self.config.set("audio", "hidden_devices", hidden)
         self.config.set("output", "directory", _clean_path(self.output_dir_edit.text()))
         self.config.set("output", "format", self.format_combo.currentData())
+        self.config.set("transcription", "engine", self.transcription_engine_combo.currentData())
         self.config.set("transcription", "model_size", self.model_combo.currentData())
         self.config.set("transcription", "device", self.device_combo.currentData())
 
@@ -864,6 +872,39 @@ class SettingsDialog(QDialog):
                 'CUDA requires an NVIDIA graphics card.</span>'
             )
             self.gpu_status_label.setVisible(True)
+
+    def _on_transcription_engine_changed(self):
+        engine = self.transcription_engine_combo.currentData() or "faster_whisper"
+        prev_model = self.model_combo.currentData()
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        if engine == "sherpa_onnx":
+            models = [
+                ("base (Whisper Base Multilingual, ~75 MB) - Recommended", "base"),
+                ("base.en (Whisper Base English, ~75 MB)", "base.en"),
+                ("tiny (Whisper Tiny Multilingual, ~40 MB)", "tiny"),
+                ("tiny.en (Whisper Tiny English, ~40 MB)", "tiny.en"),
+                ("small (Whisper Small Multilingual, ~250 MB)", "small"),
+                ("small.en (Whisper Small English, ~250 MB)", "small.en"),
+                ("moonshine-tiny (Moonshine Tiny English, ~30 MB)", "moonshine-tiny"),
+                ("moonshine-base (Moonshine Base English, ~60 MB)", "moonshine-base"),
+            ]
+        else:
+            models = [
+                ("tiny (fastest, least accurate)", "tiny"),
+                ("base (fast, good accuracy)", "base"),
+                ("small (balanced)", "small"),
+                ("medium (slower, better accuracy)", "medium"),
+                ("large-v3 (slowest, best accuracy)", "large-v3"),
+            ]
+        for label, val in models:
+            self.model_combo.addItem(label, val)
+        idx = self.model_combo.findData(prev_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+        else:
+            self.model_combo.setCurrentIndex(0)
+        self.model_combo.blockSignals(False)
 
     def _on_diarization_engine_changed(self, index=0):
         engine = self.diarization_engine_combo.currentData()

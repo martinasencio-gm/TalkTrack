@@ -42,6 +42,7 @@ DEFAULT_CONFIG = {
         "session_import_done": False,
     },
     "transcription": {
+        "engine": "faster_whisper",
         "model_size": "base",
         "language": None,
         "device": "cpu",

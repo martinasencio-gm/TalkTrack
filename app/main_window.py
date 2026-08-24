@@ -1590,6 +1590,7 @@ class MainWindow(QMainWindow):
         model_size = self.config.get("transcription", "model_size")
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
+        transcription_engine = self.config.get("transcription", "engine") or "faster_whisper"
 
         # Read the viewer's checkbox, not the config, so the choice in force
         # is the one visible next to the button that started this job. Bound
@@ -1601,9 +1602,9 @@ class MainWindow(QMainWindow):
         # instead of the mix: Whisper never sees the doubled copy of remote
         # speech that bleed puts into combined_audio.wav, and the You/Remote
         # labels come from which file a segment was read out of.
-        engine = self.config.get("diarization", "engine") or "sherpa_onnx"
+        diarization_engine = self.config.get("diarization", "engine") or "sherpa_onnx"
         tracks = dual_track_plan(
-            session, diarize, self.config.get("diarization", "hf_token"), engine=engine,
+            session, diarize, self.config.get("diarization", "hf_token"), engine=diarization_engine,
         )
 
         self._current_transcription_percent = None
@@ -1616,6 +1617,7 @@ class MainWindow(QMainWindow):
             # Half the cores exist to protect the live capture callback;
             # with nothing recording that cap only slows the job down.
             full_cpu=self.recorder.state == RecordingState.IDLE,
+            engine=transcription_engine,
         )
         self._transcription_worker.session = session
         self._transcription_worker.diarize = diarize
