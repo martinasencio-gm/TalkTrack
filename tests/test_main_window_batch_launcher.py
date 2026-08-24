@@ -118,6 +118,26 @@ class TestMainWindowBatchLauncher(unittest.TestCase):
             window._poll_batch_processes()
             self.assertTrue(window.recordings_list.batch_btn.isHidden())
 
+    def test_launch_detached_batch_enqueues_notification(self):
+        window = self._make_window()
+        mock_proc = MagicMock(pid=1234)
+
+        with patch("app.batch.launcher.launch_detached_batch", return_value=mock_proc), \
+             patch.object(window, "_poll_batch_processes"), \
+             patch.object(window.notification_region, "enqueue") as mock_enqueue:
+            window._launch_detached_batch()
+            mock_enqueue.assert_called_once()
+            args, kwargs = mock_enqueue.call_args
+            self.assertIn("1234", kwargs.get("text", "") or args[1])
+
+    def test_batch_finished_enqueues_notification(self):
+        window = self._make_window()
+        with patch.object(window.notification_region, "enqueue") as mock_enqueue:
+            window._on_batch_finished(processed=3, failed=0, deferred=0)
+            mock_enqueue.assert_called_once()
+            args, kwargs = mock_enqueue.call_args
+            self.assertIn("3 recording(s)", kwargs.get("text", "") or args[1])
+
     def test_open_batch_logs_actions(self):
         window = self._make_window()
 

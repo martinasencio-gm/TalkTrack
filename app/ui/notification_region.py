@@ -50,37 +50,73 @@ class NotificationRegion(QWidget):
 
     def _setup_ui(self):
         self.setStyleSheet("""
-            QWidget {
-                background-color: #232532;
-                border-bottom: 1px solid #3f424d;
+            NotificationRegion {
+                background-color: #1a1c29;
+                border-bottom: 1px solid #292b3d;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+            QPushButton {
+                font-size: 11.5px;
+                padding: 3px 10px;
+                border-radius: 4px;
+                border: 1px solid #3f4256;
+                background-color: rgba(255, 255, 255, 0.04);
+                color: #cdd6f4;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.09);
+                border-color: #585b70;
+            }
+            QPushButton#primaryAction {
+                border-color: #cba6f7;
+                color: #cba6f7;
+                background-color: rgba(203, 166, 247, 0.12);
+                font-weight: 600;
+            }
+            QPushButton#primaryAction:hover {
+                background-color: rgba(203, 166, 247, 0.24);
+                border-color: #cba6f7;
+                color: #ffffff;
+            }
+            QPushButton#dismissBtn {
+                border: none;
+                background-color: transparent;
+                padding: 0;
+            }
+            QPushButton#dismissBtn:hover {
+                background-color: rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
             }
         """)
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(17, 0, 17, 0)
-        self.main_layout.setSpacing(11)
+        self.main_layout.setContentsMargins(16, 0, 14, 0)
+        self.main_layout.setSpacing(10)
         
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(colored_pixmap("info", "#9184d9", _NOTIF_ICON_SIZE))
+        self.icon_label.setPixmap(colored_pixmap("info", "#cba6f7", _NOTIF_ICON_SIZE))
         
         self.text_label = QLabel("")
-        self.text_label.setStyleSheet("color: #e9e9ed; font-size: 12.5px;")
+        self.text_label.setStyleSheet("color: #e9e9ed; font-size: 12px; font-weight: 500;")
         
         self.main_layout.addWidget(self.icon_label)
         self.main_layout.addWidget(self.text_label, stretch=1)
+        
+        self.secondary_btn = QPushButton("")
+        self.secondary_btn.clicked.connect(self._on_secondary_clicked)
+        self.secondary_btn.hide()
         
         self.primary_btn = QPushButton("")
         self.primary_btn.setObjectName("primaryAction")
         self.primary_btn.clicked.connect(self._on_primary_clicked)
         self.primary_btn.hide()
         
-        self.secondary_btn = QPushButton("")
-        self.secondary_btn.clicked.connect(self._on_secondary_clicked)
-        self.secondary_btn.hide()
-        
         self.dismiss_btn = QPushButton()
+        self.dismiss_btn.setObjectName("dismissBtn")
         self.dismiss_btn.setIcon(QIcon(colored_pixmap("x", "#9397ab", 12)))
-        self.dismiss_btn.setFixedSize(24, 24)
-        self.dismiss_btn.setStyleSheet("border: none;")
+        self.dismiss_btn.setFixedSize(22, 22)
+        self.dismiss_btn.setToolTip("Dismiss notification")
         self.dismiss_btn.clicked.connect(self.dismiss_current)
         
         self.main_layout.addWidget(self.secondary_btn)
@@ -133,6 +169,10 @@ class NotificationRegion(QWidget):
             self.icon_label.setPixmap(colored_pixmap("warning-octagon", "#f38ba8", _NOTIF_ICON_SIZE))
         elif notif.priority == PRIORITY_RECORDING_INTEGRITY:
             self.icon_label.setPixmap(colored_pixmap("warning", "#f9e2af", _NOTIF_ICON_SIZE))
+        elif notif.priority == PRIORITY_JOB_FINISHED:
+            self.icon_label.setPixmap(colored_pixmap("check-circle-fill", "#a6e3a1", _NOTIF_ICON_SIZE))
+        elif notif.priority == PRIORITY_CONFIRMATION:
+            self.icon_label.setPixmap(colored_pixmap("cpu", "#cba6f7", _NOTIF_ICON_SIZE))
         else:
             self.icon_label.setPixmap(colored_pixmap("info", "#9184d9", _NOTIF_ICON_SIZE))
         

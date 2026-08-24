@@ -470,7 +470,17 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
+        self.statusbar.setStyleSheet(
+            "QStatusBar {"
+            " background-color: #12141f;"
+            " color: #75798c;"
+            " border-top: 1px solid #232532;"
+            " min-height: 28px;"
+            " padding: 0px 8px;"
+            "}"
+        )
         self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #75798c; font-size: 11.5px; padding-left: 4px;")
         self.statusbar.addWidget(self.status_label)
 
         self.batch_indicator = QPushButton()
@@ -479,15 +489,17 @@ class MainWindow(QMainWindow):
         self.batch_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.batch_indicator.setStyleSheet(
             "QPushButton#batchIndicatorBtn {"
-            " background-color: rgba(203, 166, 247, 0.18);"
+            " background-color: rgba(203, 166, 247, 0.14);"
             " color: #cba6f7;"
-            " font-size: 11px; font-weight: bold;"
-            " border: 1px solid rgba(203, 166, 247, 0.4);"
+            " font-size: 11.5px; font-weight: 600;"
+            " border: 1px solid rgba(203, 166, 247, 0.35);"
             " border-radius: 10px; padding: 2px 10px;"
+            " margin-right: 6px;"
             "}"
             "QPushButton#batchIndicatorBtn:hover {"
-            " background-color: rgba(203, 166, 247, 0.32);"
+            " background-color: rgba(203, 166, 247, 0.28);"
             " border-color: #cba6f7;"
+            " color: #ffffff;"
             "}"
         )
         self.batch_indicator.clicked.connect(self._show_batch_process_info)
@@ -1395,6 +1407,14 @@ class MainWindow(QMainWindow):
         self._batch_worker.cancelled.connect(self._on_batch_cancelled)
         self._batch_worker.start(QThread.Priority.LowPriority)
 
+        from app.ui.notification_region import PRIORITY_CONFIRMATION
+        self.notification_region.enqueue(
+            priority=PRIORITY_CONFIRMATION,
+            text="Batch transcription started · Processing queued recordings",
+            action_text="View Details",
+            action_callback=self._show_batch_process_info,
+            ttl=8,
+        )
         self.status_label.setText("Starting batch transcription...")
         self._update_activity_visibility()
         self._poll_batch_processes()
@@ -1402,24 +1422,27 @@ class MainWindow(QMainWindow):
     def _launch_detached_batch(self, diarize=None, limit=None):
         """Spawn batch_transcribe.py as a detached background OS process."""
         from app.batch.launcher import launch_detached_batch
+        from app.ui.notification_region import PRIORITY_CONFIRMATION, PRIORITY_BLOCKING_ERROR
 
         try:
             proc = launch_detached_batch(diarize=diarize, limit=limit)
-            self.status_label.setText(
-                f"Background batch process started (PID {proc.pid})."
-            )
             self._poll_batch_processes()
-            QMessageBox.information(
-                self, "Batch Transcription",
-                f"Background batch process launched (PID {proc.pid}).\n\n"
-                "It will continue running even if TalkTrack is closed.\n"
-                "Detailed progress is logged to Documents\\TalkTrack\\batch Log.",
+            self.notification_region.enqueue(
+                priority=PRIORITY_CONFIRMATION,
+                text=f"Background batch process started (PID {proc.pid}) · Processing in background",
+                action_text="View Details",
+                action_callback=self._show_batch_process_info,
+                secondary_action_text="Open Logs",
+                secondary_action_callback=self._open_batch_logs_folder,
+                ttl=12,
             )
+            self.status_label.setText(f"Batch process active (PID {proc.pid})")
         except Exception as e:
             logger.exception("Failed to launch detached batch process")
-            QMessageBox.warning(
-                self, "Batch Launch Failed",
-                f"Could not launch background batch process: {e}",
+            self.notification_region.enqueue(
+                priority=PRIORITY_BLOCKING_ERROR,
+                text=f"Failed to launch background batch process: {e}",
+                ttl=10,
             )
 
     def _poll_batch_processes(self):
@@ -1444,14 +1467,14 @@ class MainWindow(QMainWindow):
             primary = self._running_batch_processes[0]
             count = len(self._running_batch_processes)
             if count == 1:
-                text = f"Batch Active (PID {primary.pid})"
+                text = f"Batch Active · PID {primary.pid}"
                 tooltip = (
                     f"Batch transcription running ({primary.process_type_label}, "
                     f"PID {primary.pid}, {primary.formatted_duration} elapsed).\n"
                     "Click to view details or end process."
                 )
             else:
-                text = f"Batch Active ({count} jobs)"
+                text = f"Batch Active · {count} Jobs"
                 tooltip = (
                     f"{count} batch transcription processes running.\n"
                     "Click to view details or end process."
@@ -1536,13 +1559,19 @@ class MainWindow(QMainWindow):
             msg += f" {deferred} deferred past cutoff."
 
         self.status_label.setText(msg)
+        from app.ui.notification_region import PRIORITY_JOB_FINISHED
+        self.notification_region.enqueue(
+            priority=PRIORITY_JOB_FINISHED,
+            text=msg,
+            action_text="Refresh",
+            action_callback=self.recordings_list.refresh,
+            ttl=12,
+        )
         if self._is_hidden_to_tray():
             if failed:
                 self._flag_error_notification()
             else:
                 self._flag_success_notification()
-        else:
-            QMessageBox.information(self, "Batch Run Finished", msg)
 
     def _on_batch_cancelled(self):
         self.recordings_list.refresh()
@@ -1551,6 +1580,12 @@ class MainWindow(QMainWindow):
         self._update_activity_visibility()
         self._poll_batch_processes()
         self.status_label.setText("Batch transcription cancelled.")
+        from app.ui.notification_region import PRIORITY_CONFIRMATION
+        self.notification_region.enqueue(
+            priority=PRIORITY_CONFIRMATION,
+            text="Batch transcription cancelled",
+            ttl=6,
+        )
 
     def _on_viewer_transcribe_requested(self, audio_path):
         session = self._current_session
