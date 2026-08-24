@@ -75,8 +75,10 @@ class TestResolveDotColor(unittest.TestCase):
     def test_paused_is_amber(self):
         self.assertEqual(resolve_dot_color("paused"), "#f9e2af")
 
-    def test_transcribing_is_blue(self):
-        self.assertEqual(resolve_dot_color("transcribing"), "#89b4fa")
+    def test_transcribing_is_the_accent(self):
+        # Same accent the capture bar's transcribing strip uses, so the
+        # two surfaces agree about what "a job is running" looks like.
+        self.assertEqual(resolve_dot_color("transcribing"), "#9184d9")
 
     def test_none_state_returns_none(self):
         self.assertIsNone(resolve_dot_color(None))

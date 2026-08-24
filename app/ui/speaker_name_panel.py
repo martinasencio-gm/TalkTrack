@@ -7,7 +7,7 @@ from PyQt6.QtGui import QIcon
 
 from app.utils.icons import colored_pixmap
 
-_EMPTY_ICON_COLOR = "#45475a"
+_EMPTY_ICON_COLOR = "#3f424d"
 _EMPTY_ICON_SIZE = 20
 _CARET_COLOR = "#9397ab"
 
@@ -123,7 +123,7 @@ class SpeakerNamePanel(QWidget):
             "and system audio separately to get You / Remote."
         )
         self._empty_label.setWordWrap(True)
-        self._empty_label.setStyleSheet("color: #6c7086; font-size: 12.5px; line-height: 1.6;")
+        self._empty_label.setStyleSheet("color: #75798c; font-size: 12.5px; line-height: 1.6;")
         empty_layout.addWidget(self._empty_label)
 
         self._main_layout.addWidget(self._empty_row_widget)

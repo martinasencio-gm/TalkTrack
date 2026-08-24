@@ -49,26 +49,26 @@ class MeetingNotificationToast(QWidget):
         self._frame.setObjectName("meetingToastFrame")
         self._frame.setStyleSheet("""
             QFrame#meetingToastFrame {
-                background-color: #1e1e2e;
-                border: 1px solid #45475a;
+                background-color: #161826;
+                border: 1px solid #3f424d;
                 border-left: 4px solid #f38ba8;
                 border-radius: 8px;
             }
             QFrame#meetingToastFrame[mode="end"] {
-                border-left: 4px solid #89b4fa;
+                border-left: 4px solid #9184d9;
             }
             QLabel#toastTitle {
-                color: #cdd6f4;
+                color: #e9e9ed;
                 font-weight: bold;
                 font-size: 10pt;
             }
             QLabel#toastBody {
-                color: #a6adc8;
+                color: #9397ab;
                 font-size: 9pt;
             }
             QPushButton#toastCloseBtn {
                 background: transparent;
-                color: #6c7086;
+                color: #75798c;
                 border: none;
                 font-size: 11pt;
                 font-weight: bold;
@@ -79,7 +79,7 @@ class MeetingNotificationToast(QWidget):
             }
             QPushButton#toastRecordBtn {
                 background-color: #f38ba8;
-                color: #11111b;
+                color: #12141f;
                 font-weight: bold;
                 font-size: 9pt;
                 border: none;
@@ -91,20 +91,20 @@ class MeetingNotificationToast(QWidget):
                 background-color: #eba0ac;
             }
             QPushButton#toastDismissBtn {
-                background-color: #313244;
-                color: #cdd6f4;
+                background-color: #232532;
+                color: #e9e9ed;
                 font-size: 9pt;
-                border: 1px solid #45475a;
+                border: 1px solid #3f424d;
                 border-radius: 4px;
                 padding: 5px 14px;
                 min-height: 22px;
             }
             QPushButton#toastDismissBtn:hover {
-                background-color: #45475a;
+                background-color: #3f424d;
             }
             QPushButton#toastPauseBtn {
                 background-color: #f9e2af;
-                color: #11111b;
+                color: #12141f;
                 font-weight: bold;
                 font-size: 9pt;
                 border: none;

@@ -36,7 +36,7 @@ class ActionItemWidget(QWidget):
 
         label = QLabel(" ".join(label_parts))
         label.setWordWrap(True)
-        label.setStyleSheet("color: #cdd6f4; font-size: 13px;")
+        label.setStyleSheet("color: #e9e9ed; font-size: 13px;")
         layout.addWidget(label, 1)
 
 
@@ -54,7 +54,7 @@ class ActionItemsPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._status = QLabel("No action items extracted yet.")
-        self._status.setStyleSheet("color: #a6adc8; padding: 8px;")
+        self._status.setStyleSheet("color: #9397ab; padding: 8px;")
         layout.addWidget(self._status)
 
         self._scroll = QScrollArea()

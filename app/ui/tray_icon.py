@@ -178,7 +178,7 @@ class TrayIcon(QObject):
         margin = 2
         x = size - diameter - margin
         y = size - diameter - margin
-        painter.setPen(QPen(QColor("#1e1e2e"), 1))
+        painter.setPen(QPen(QColor("#161826"), 1))
         painter.setBrush(color)
         painter.drawEllipse(x, y, diameter, diameter)
         painter.end()

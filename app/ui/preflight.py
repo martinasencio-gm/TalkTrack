@@ -44,12 +44,12 @@ class PreflightWidget(QWidget):
         self.verdict_icon.setFixedSize(_VERDICT_BADGE_SIZE, _VERDICT_BADGE_SIZE)
         self.verdict_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.verdict_title = QLabel("Ready to record")
-        self.verdict_title.setStyleSheet("font-weight: 600; font-size: 15px;")
+        self.verdict_title.setStyleSheet("font-weight: 600; font-size: 16px; color: #e9e9ed;")
         self.verdict_subtitle = QLabel("Microphone and system audio ready")
-        self.verdict_subtitle.setStyleSheet("color: #9397ab; font-size: 12px;")
+        self.verdict_subtitle.setStyleSheet("color: #9397ab; font-size: 13px;")
 
         v_text_layout = QVBoxLayout()
-        v_text_layout.setSpacing(2)
+        v_text_layout.setSpacing(3)
         v_text_layout.addWidget(self.verdict_title)
         v_text_layout.addWidget(self.verdict_subtitle)
 

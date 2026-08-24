@@ -89,7 +89,7 @@ class BatchProcessInfoDialog(QDialog):
             f"{count} batch transcription processes are currently executing in the background."
         )
         self._desc_label = QLabel(desc_text)
-        self._desc_label.setStyleSheet("font-size: 11px; color: #a6adc8;")
+        self._desc_label.setStyleSheet("font-size: 11px; color: #9397ab;")
         header_layout.addWidget(self._desc_label)
 
         self._main_layout.addWidget(self._header_card)
@@ -171,7 +171,7 @@ class BatchProcessInfoDialog(QDialog):
     def _build_process_card(self, proc: BatchProcessInfo) -> QWidget:
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background-color: #181825; border: 1px solid #313244; border-radius: 8px; }"
+            "QFrame { background-color: #12141f; border: 1px solid #292b31; border-radius: 8px; }"
         )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 10, 12, 10)
@@ -202,10 +202,10 @@ class BatchProcessInfoDialog(QDialog):
         def add_field(label_text: str, value_text: str) -> QLabel:
             row = QHBoxLayout()
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #a6adc8; font-size: 12px; font-weight: 500;")
+            lbl.setStyleSheet("color: #9397ab; font-size: 12px; font-weight: 500;")
             lbl.setFixedWidth(120)
             val = QLabel(value_text)
-            val.setStyleSheet("color: #cdd6f4; font-size: 12px; font-weight: bold;")
+            val.setStyleSheet("color: #e9e9ed; font-size: 12px; font-weight: bold;")
             val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             row.addWidget(lbl)
             row.addWidget(val, 1)

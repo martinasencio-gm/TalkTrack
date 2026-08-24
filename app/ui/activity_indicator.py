@@ -48,11 +48,11 @@ def format_activity_label(state, elapsed_seconds=None, progress_percent=None):
 
 
 def resolve_dot_color(state):
-    """Hex color for the state dot: red/amber/blue."""
+    """Hex color for the state dot: red/amber/accent."""
     return {
         "recording": "#f38ba8",
         "paused": "#f9e2af",
-        "transcribing": "#89b4fa",
+        "transcribing": "#9184d9",
     }.get(state)
 
 
@@ -137,7 +137,7 @@ class ActivityIndicator(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#1e1e2e"))
+        painter.setBrush(QColor("#161826"))
         painter.drawRoundedRect(self.rect(), _HEIGHT / 2, _HEIGHT / 2)
 
         if self._dot_color and self._dot_visible:
@@ -145,7 +145,7 @@ class ActivityIndicator(QWidget):
             dot_y = (_HEIGHT - _DOT_DIAMETER) // 2
             painter.drawEllipse(_DOT_MARGIN, dot_y, _DOT_DIAMETER, _DOT_DIAMETER)
 
-        painter.setPen(QColor("#cdd6f4"))
+        painter.setPen(QColor("#e9e9ed"))
         text_rect = self.rect().adjusted(_DOT_MARGIN + _DOT_DIAMETER + 8, 0, -10, 0)
         painter.drawText(
             text_rect,

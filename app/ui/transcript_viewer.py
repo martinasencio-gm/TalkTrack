@@ -14,7 +14,7 @@ from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 from app.ui.transcript_search_bar import TranscriptSearchBar
 from app.utils.icons import colored_pixmap
 
-_EMPTY_ICON_COLOR = "#45475a"
+_EMPTY_ICON_COLOR = "#3f424d"
 _EMPTY_ICON_SIZE = 34
 
 
@@ -94,11 +94,14 @@ class TranscriptViewer(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        # Bottom margin matches the 4px spacing above the toolbar row (the
-        # gap between it and the scroll area's border above) — without it,
-        # the row sits flush against the tab pane's bottom edge while
-        # having visible breathing room above, reading as "not centered".
-        layout.setContentsMargins(0, 0, 0, 4)
+        # Horizontal inset matches RecordingHeader's 8px directly above in
+        # the same column — at 0 the section title and toolbar sat 8px left
+        # of the recording name and the Transcribe button ended 1px from
+        # the splitter divider. Top stays 0 (the header supplies the gap);
+        # the bottom 4px matches the spacing above the toolbar row, without
+        # which it sits flush against the column's bottom edge while having
+        # visible breathing room above, reading as "not centered".
+        layout.setContentsMargins(8, 0, 8, 4)
         layout.setSpacing(4)
 
         # Header row: title + transcribe button
@@ -191,7 +194,7 @@ class TranscriptViewer(QWidget):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._segments_container = QWidget()
-        self._segments_container.setStyleSheet("background-color: #181825;")
+        self._segments_container.setStyleSheet("background-color: #12141f;")
         self._segments_layout = QVBoxLayout(self._segments_container)
         self._segments_layout.setContentsMargins(8, 8, 8, 8)
         self._segments_layout.setSpacing(2)
@@ -370,6 +373,26 @@ class TranscriptViewer(QWidget):
     def _on_cancel_clicked(self):
         self.cancel_requested.emit()
 
+    def show_loading(self, message="Loading transcript..."):
+        """Show a clean loading state while transcript data is being processed."""
+        self.scroll_area.setUpdatesEnabled(False)
+        self._segments_container.setUpdatesEnabled(False)
+        try:
+            self._segment_widgets.clear()
+            while self._segments_layout.count():
+                item = self._segments_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            loading_label = QLabel(message)
+            loading_label.setObjectName("transcriptPlaceholder")
+            loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            loading_label.setStyleSheet("color: #9397ab; font-size: 14px; padding: 40px;")
+            self._segments_layout.addWidget(loading_label)
+            self._segments_layout.addStretch()
+        finally:
+            self._segments_container.setUpdatesEnabled(True)
+            self.scroll_area.setUpdatesEnabled(True)
+
     def display_transcript(self, transcript, speaker_names=None, attendees=None):
         """Render transcript with interactive segment widgets."""
         self._transcript = transcript
@@ -394,40 +417,46 @@ class TranscriptViewer(QWidget):
         for i, speaker in enumerate(speakers):
             self._speaker_colors[speaker] = SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
 
-        # Clear existing segment widgets
-        self._segment_widgets.clear()
-        while self._segments_layout.count():
-            item = self._segments_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        self.scroll_area.setUpdatesEnabled(False)
+        self._segments_container.setUpdatesEnabled(False)
+        try:
+            # Clear existing segment widgets
+            self._segment_widgets.clear()
+            while self._segments_layout.count():
+                item = self._segments_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
-        # Build segment widgets
-        from app.ui.segment_widget import SegmentWidget
+            # Build segment widgets
+            from app.ui.segment_widget import SegmentWidget
 
-        has_audio = self._audio_path is not None
+            has_audio = self._audio_path is not None
 
-        for i, seg in enumerate(transcript.segments):
-            color = self._speaker_colors.get(seg.speaker, "#cdd6f4")
-            name = self._speaker_names.get(seg.speaker, "")
+            for i, seg in enumerate(transcript.segments):
+                color = self._speaker_colors.get(seg.speaker, "#e9e9ed")
+                name = self._speaker_names.get(seg.speaker, "")
 
-            widget = SegmentWidget(
-                index=i,
-                segment=seg,
-                speaker_color=color,
-                speaker_name=name,
-                has_audio=has_audio,
-                parent=self._segments_container,
-            )
-            widget.play_requested.connect(self._on_play_requested)
-            widget.stop_requested.connect(self._on_stop_requested)
-            widget.text_edited.connect(self._on_text_edited)
-            widget.text_reverted.connect(self._on_text_reverted)
-            widget.speaker_clicked.connect(self._on_speaker_label_clicked)
+                widget = SegmentWidget(
+                    index=i,
+                    segment=seg,
+                    speaker_color=color,
+                    speaker_name=name,
+                    has_audio=has_audio,
+                    parent=None,
+                )
+                widget.play_requested.connect(self._on_play_requested)
+                widget.stop_requested.connect(self._on_stop_requested)
+                widget.text_edited.connect(self._on_text_edited)
+                widget.text_reverted.connect(self._on_text_reverted)
+                widget.speaker_clicked.connect(self._on_speaker_label_clicked)
 
-            self._segment_widgets.append(widget)
-            self._segments_layout.addWidget(widget)
+                self._segment_widgets.append(widget)
+                self._segments_layout.addWidget(widget)
 
-        self._segments_layout.addStretch()
+            self._segments_layout.addStretch()
+        finally:
+            self._segments_container.setUpdatesEnabled(True)
+            self.scroll_area.setUpdatesEnabled(True)
 
         # Update speaker panel
         if attendees is not None:
@@ -489,7 +518,7 @@ class TranscriptViewer(QWidget):
         )
         subtitle.setWordWrap(True)
         subtitle.setFixedWidth(440)
-        subtitle.setStyleSheet("font-size: 14px; color: #6c7086;")
+        subtitle.setStyleSheet("font-size: 14px; color: #75798c;")
         layout.addWidget(subtitle)
 
         open_last_btn = QPushButton("Open the last one")
@@ -623,7 +652,7 @@ class TranscriptViewer(QWidget):
         """Highlight the currently playing segment."""
         if 0 <= index < len(self._segment_widgets):
             self._segment_widgets[index].setStyleSheet(
-                "background-color: #313244; border-radius: 4px;"
+                "background-color: #232532; border-radius: 4px;"
             )
 
     def _clear_highlight(self):

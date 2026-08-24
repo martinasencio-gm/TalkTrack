@@ -264,7 +264,7 @@ class SettingsDialog(QDialog):
             "Matching devices won't appear in the mic or system audio dropdowns."
         )
         hidden_help.setWordWrap(True)
-        hidden_help.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        hidden_help.setStyleSheet("color: #9397ab; font-size: 12px;")
         hidden_layout.addWidget(hidden_help)
 
         self.hidden_devices_list = QListWidget()
@@ -376,9 +376,9 @@ class SettingsDialog(QDialog):
 
         token_help = QLabel(
             '<a href="https://huggingface.co/settings/tokens" '
-            'style="color: #89b4fa;">Get token</a> | '
+            'style="color: #9184d9;">Get token</a> | '
             '<a href="https://huggingface.co/pyannote/speaker-diarization-community-1" '
-            'style="color: #89b4fa;">Accept model terms</a>'
+            'style="color: #9184d9;">Accept model terms</a>'
         )
         token_help.setOpenExternalLinks(True)
         diarization_form.addRow("", token_help)
@@ -895,7 +895,7 @@ class SettingsDialog(QDialog):
             return False
 
         self.ai_package_label.setText(
-            f'<span style="color: #89b4fa;">Installing {display_name}...</span>'
+            f'<span style="color: #9184d9;">Installing {display_name}...</span>'
         )
         self.ai_package_label.setVisible(True)
         QApplication.processEvents()

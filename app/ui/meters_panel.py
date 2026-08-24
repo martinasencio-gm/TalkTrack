@@ -135,7 +135,7 @@ class _VerticalMeter(QWidget):
         h = self.height()
 
         # Background
-        painter.fillRect(0, 0, w, h, QColor("#1e1e2e"))
+        painter.fillRect(0, 0, w, h, QColor("#161826"))
 
         # Paint color zones top-to-bottom
         # -6 to 0 dB: red
@@ -151,7 +151,7 @@ class _VerticalMeter(QWidget):
         # (bar fills upward from the bottom, DAW-style)
         current_y = _db_to_y(self._db, h)
         if current_y > 0:
-            painter.fillRect(0, 0, w, current_y, QColor("#1e1e2e"))
+            painter.fillRect(0, 0, w, current_y, QColor("#161826"))
 
         # Peak hold line (bright, 3px)
         peak_db = 20.0 * float(np.log10(max(self._peak_abs, 1e-10)))
@@ -164,7 +164,7 @@ class _VerticalMeter(QWidget):
 
         # 2px outline so the channel is visible even when silent.
         # Drawn last so it overdraws any fills at the extreme edges.
-        border = QColor("#313244")
+        border = QColor("#292b31")
         painter.fillRect(0, 0, w, 2, border)
         painter.fillRect(0, h - 2, w, 2, border)
         painter.fillRect(0, 0, 2, h, border)
@@ -183,12 +183,12 @@ class _DbScale(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(0, 0, self.width(), self.height(), QColor("#1e1e2e"))
+        painter.fillRect(0, 0, self.width(), self.height(), QColor("#161826"))
 
         font = QFont()
         font.setPixelSize(11)
         painter.setFont(font)
-        painter.setPen(QColor("#a6adc8"))
+        painter.setPen(QColor("#9397ab"))
 
         h = self.height()
         text_h = 16

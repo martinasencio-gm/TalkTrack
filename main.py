@@ -160,7 +160,7 @@ def build_bug_report_url(error_text=""):
         "body": body,
         "labels": "bug",
     })
-    return f"https://github.com/ObscureAintSecure/TalkTrack/issues/new?{params}"
+    return f"https://github.com/martinasencio-gm/TalkTrack/issues/new?{params}"
 
 
 def _exception_handler(exc_type, exc_value, exc_tb):
@@ -213,13 +213,14 @@ def main():
     from app.utils.single_instance import SingleInstanceGuard, sweep_orphaned_processes
     guard = SingleInstanceGuard(LOG_DIR)
     if not guard.try_acquire():
-        logger.info("Another TalkTrack instance is already running — exiting")
-        guard.notify_running_instance()
-        QMessageBox.information(
-            None,
-            "TalkTrack",
-            "TalkTrack is already running. Check your system tray.",
-        )
+        logger.info("Another TalkTrack instance is already running — notifying and exiting")
+        notified = guard.notify_running_instance()
+        if not notified:
+            QMessageBox.information(
+                None,
+                "TalkTrack",
+                "TalkTrack is already running.",
+            )
         sys.exit(0)
 
     # We're now the confirmed sole instance — anything else out there still

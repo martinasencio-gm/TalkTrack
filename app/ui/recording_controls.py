@@ -17,6 +17,24 @@ _REC_MARK_BADGE_SIZE = 48
 
 _CAPTURE_ICON_COLORS = {"ready": "#75798c", "warning": "#f9e2af", "blocked": "#f38ba8"}
 
+_DIVIDER_COLOR = "#292b31"
+
+
+def _v_divider(height):
+    """A hairline vertical rule for the capture bar.
+
+    Shape.NoFrame rather than VLine: Qt paints its own etched line for a
+    VLine underneath whatever the stylesheet draws, so the two variants of
+    this bar (one styled with background-color, one with border-left)
+    rendered subtly differently from each other.
+    """
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.NoFrame)
+    line.setFixedWidth(1)
+    line.setFixedHeight(height)
+    line.setStyleSheet(f"background-color: {_DIVIDER_COLOR};")
+    return line
+
 
 class _ClickableFrame(QFrame):
     """A QFrame that emits `clicked` on left-click — used for the
@@ -67,21 +85,18 @@ class RecordingControls(QWidget):
         # 1) Ready Variant (Preflight embedded)
         self.ready_widget = QFrame()
         self.ready_widget.setObjectName("captureBarReady")
+        self.ready_widget.setMinimumHeight(76)
         self.ready_widget.setStyleSheet(
             "QFrame#captureBarReady { border-bottom: 1px solid #292b31; }"
         )
         ready_layout = QHBoxLayout(self.ready_widget)
-        ready_layout.setContentsMargins(17, 0, 17, 0)
+        ready_layout.setContentsMargins(20, 12, 20, 12)
 
         self.preflight = PreflightWidget()
         ready_layout.addWidget(self.preflight)
 
         # Divider between the verdict and the "what's being captured" block.
-        preflight_divider = QFrame()
-        preflight_divider.setFrameShape(QFrame.Shape.VLine)
-        preflight_divider.setFixedHeight(46)
-        preflight_divider.setStyleSheet("background-color: #292b31; max-width: 1px;")
-        ready_layout.addWidget(preflight_divider)
+        ready_layout.addWidget(_v_divider(50))
 
         # "CAPTURING" sources block — mic + call source at a glance,
         # clickable to open the sources dialog. Replaces the old bare
@@ -98,7 +113,7 @@ class RecordingControls(QWidget):
             "}"
         )
         cb_layout = QHBoxLayout(self.capturing_block)
-        cb_layout.setContentsMargins(13, 7, 13, 7)
+        cb_layout.setContentsMargins(15, 8, 15, 8)
         cb_layout.setSpacing(12)
 
         cb_text_layout = QVBoxLayout()
@@ -138,7 +153,7 @@ class RecordingControls(QWidget):
 
         self.record_btn = QPushButton("Record")
         self.record_btn.setObjectName("recordAction")
-        self.record_btn.setStyleSheet("font-size: 15px; padding: 10px 18px;")
+        self.record_btn.setStyleSheet("font-size: 15px; font-weight: 600; padding: 12px 24px;")
         self._set_button_icon(self.record_btn, "record", "#f38ba8")
         self.record_btn.clicked.connect(self.record_clicked.emit)
 
@@ -147,8 +162,17 @@ class RecordingControls(QWidget):
         # 2) Recording Variant (also covers Paused)
         self.rec_widget = QFrame()
         self.rec_widget.setObjectName("captureBarActive")
+        self.rec_widget.setMinimumHeight(76)
+        # Same bottom rule as the Ready and Transcribing variants —
+        # without it the separator under the bar disappeared the
+        # moment recording started.
+        self.rec_widget.setStyleSheet(
+            "QFrame#captureBarActive { border-bottom: 1px solid #292b31; }"
+        )
         rec_layout = QHBoxLayout(self.rec_widget)
-        rec_layout.setContentsMargins(22, 0, 17, 0)
+        # Matches the Ready variant exactly; at 22 the whole bar
+        # shifted 2px right when recording started.
+        rec_layout.setContentsMargins(20, 12, 20, 12)
         rec_layout.setSpacing(17)
 
         self.rec_mark = QLabel()
@@ -167,10 +191,7 @@ class RecordingControls(QWidget):
 
         rec_layout.addLayout(timer_layout)
 
-        rec_divider = QFrame()
-        rec_divider.setFrameShape(QFrame.Shape.VLine)
-        rec_divider.setStyleSheet("border-left: 1px solid #292b31; max-height: 40px;")
-        rec_layout.addWidget(rec_divider)
+        rec_layout.addWidget(_v_divider(40))
 
         self.live_meters = LevelMeter()
         rec_layout.addWidget(self.live_meters, stretch=1)
@@ -186,15 +207,17 @@ class RecordingControls(QWidget):
         rec_layout.addLayout(source_layout)
 
         self.mute_btn = QPushButton("Mute mic")
+        self.mute_btn.setStyleSheet("padding: 8px 14px; font-size: 13px;")
         self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
         self.mute_btn.clicked.connect(self.mute_clicked.emit)
 
         self.pause_btn = QPushButton("Pause")
+        self.pause_btn.setStyleSheet("padding: 8px 14px; font-size: 13px;")
         self._set_button_icon(self.pause_btn, "pause", "#e9e9ed")
         self.pause_btn.clicked.connect(self.pause_clicked.emit)
 
         self.stop_btn = QPushButton("Stop && transcribe")
-        self.stop_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8;")
+        self.stop_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8; padding: 8px 16px; font-size: 13px; font-weight: 600;")
         self._set_button_icon(self.stop_btn, "stop-fill", "#f38ba8")
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
 
@@ -219,7 +242,7 @@ class RecordingControls(QWidget):
             "}"
         )
         ts_layout = QHBoxLayout(self.transcribing_strip)
-        ts_layout.setContentsMargins(22, 6, 17, 6)
+        ts_layout.setContentsMargins(22, 10, 17, 10)
         ts_layout.setSpacing(11)
 
         self.transcribing_icon = QLabel()

@@ -95,7 +95,7 @@ class SegmentWidget(QWidget):
     text_reverted = pyqtSignal(int)
     speaker_clicked = pyqtSignal(str)
 
-    def __init__(self, index, segment, speaker_color="#cdd6f4",
+    def __init__(self, index, segment, speaker_color="#e9e9ed",
                  speaker_name="", has_audio=True, parent=None):
         super().__init__(parent)
         self._index = index

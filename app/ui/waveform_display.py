@@ -115,10 +115,10 @@ class WaveformDisplay(QWidget):
         mid_y = y + h / 2
 
         # Background
-        painter.fillRect(int(x), int(y), int(w), int(h), QColor("#1e1e2e"))
+        painter.fillRect(int(x), int(y), int(w), int(h), QColor("#161826"))
 
         # Center line
-        painter.setPen(QPen(QColor("#45475a"), 1))
+        painter.setPen(QPen(QColor("#3f424d"), 1))
         painter.drawLine(int(x), int(mid_y), int(x + w), int(mid_y))
 
         points = downsample_for_display(data, self._display_points)
@@ -188,7 +188,7 @@ class WaveformDisplay(QWidget):
         )
 
         # Labels
-        painter.fillRect(0, 0, label_w, h, QColor("#1e1e2e"))
+        painter.fillRect(0, 0, label_w, h, QColor("#161826"))
         font = QFont()
         font.setPixelSize(9)
         painter.setFont(font)
@@ -202,7 +202,7 @@ class WaveformDisplay(QWidget):
                          Qt.AlignmentFlag.AlignCenter, "Sys")
 
         # Divider line between the two
-        painter.setPen(QPen(QColor("#585b70"), 1))
+        painter.setPen(QPen(QColor("#4d5063"), 1))
         painter.drawLine(label_w, int(half_h), w, int(half_h))
 
         painter.end()

@@ -37,7 +37,12 @@ class CollapsibleSection(QWidget):
                 f"QFrame#collapsibleHeader {{ border-left: 3px solid {accent}; }}"
             )
         self._header_row = QHBoxLayout(self._header_frame)
-        self._header_row.setContentsMargins(6, 2, 6, 2)
+        # Header band and section content share one 8px inset so the
+        # content lines up under the band rather than running out to
+        # the column edge. The title text sits further right than 8px
+        # because the section icon precedes it — that offset is the
+        # icon, not a second margin.
+        self._header_row.setContentsMargins(8, 2, 8, 2)
         self._header_row.setSpacing(4)
 
         if icon:
@@ -65,7 +70,7 @@ class CollapsibleSection(QWidget):
         self._content = QWidget()
         self._content.setVisible(False)
         self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(0, 4, 0, 0)
+        self._content_layout.setContentsMargins(8, 4, 8, 0)
         layout.addWidget(self._content, 1)
 
         self._title = title

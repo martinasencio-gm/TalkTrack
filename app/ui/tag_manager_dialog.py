@@ -27,7 +27,7 @@ class ColorPickerDialog(QDialog):
         layout.setSpacing(12)
 
         label = QLabel("Select a color from the Catppuccin palette:")
-        label.setStyleSheet("color: #cdd6f4; font-size: 11px;")
+        label.setStyleSheet("color: #e9e9ed; font-size: 11px;")
         layout.addWidget(label)
 
         grid_widget = QWidget()
@@ -40,7 +40,7 @@ class ColorPickerDialog(QDialog):
             btn = QPushButton()
             btn.setFixedSize(32, 32)
             btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            border = "3px solid #ffffff" if color_hex.lower() == self.selected_color.lower() else "1px solid #45475a"
+            border = "3px solid #ffffff" if color_hex.lower() == self.selected_color.lower() else "1px solid #3f424d"
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {color_hex};
@@ -86,7 +86,7 @@ class TagManagerDialog(QDialog):
             "Manage tags across your recordings. Renaming or deleting a tag updates all assigned recordings."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #a6adc8; font-size: 11px; margin-bottom: 4px;")
+        desc_label.setStyleSheet("color: #9397ab; font-size: 11px; margin-bottom: 4px;")
         layout.addWidget(desc_label)
 
         # Table
@@ -136,40 +136,40 @@ class TagManagerDialog(QDialog):
 
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
+                background-color: #161826;
+                color: #e9e9ed;
             }
             QTableWidget#tagsTable {
-                background-color: #181825;
-                color: #cdd6f4;
-                border: 1px solid #313244;
+                background-color: #12141f;
+                color: #e9e9ed;
+                border: 1px solid #292b31;
                 border-radius: 6px;
-                gridline-color: #313244;
-                selection-background-color: #45475a;
-                selection-color: #cdd6f4;
+                gridline-color: #292b31;
+                selection-background-color: #3f424d;
+                selection-color: #e9e9ed;
             }
             QHeaderView::section {
-                background-color: #1e1e2e;
-                color: #a6adc8;
+                background-color: #161826;
+                color: #9397ab;
                 border: none;
-                border-bottom: 1px solid #313244;
+                border-bottom: 1px solid #292b31;
                 padding: 6px 8px;
                 font-weight: bold;
                 font-size: 11px;
             }
             QPushButton#deleteTagBtn {
-                background-color: #313244;
+                background-color: #232532;
                 color: #f38ba8;
-                border: 1px solid #45475a;
+                border: 1px solid #3f424d;
             }
             QPushButton#deleteTagBtn:hover {
                 background-color: rgba(243, 139, 168, 0.2);
                 border-color: #f38ba8;
             }
             QPushButton#deleteTagBtn:disabled {
-                color: #585b70;
-                border-color: #313244;
-                background-color: #1e1e2e;
+                color: #4d5063;
+                border-color: #292b31;
+                background-color: #161826;
             }
         """)
 
@@ -195,7 +195,7 @@ class TagManagerDialog(QDialog):
             swatch_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot = QFrame()
             dot.setFixedSize(14, 14)
-            dot.setStyleSheet(f"background-color: {color}; border-radius: 7px; border: 1px solid #45475a;")
+            dot.setStyleSheet(f"background-color: {color}; border-radius: 7px; border: 1px solid #3f424d;")
             swatch_layout.addWidget(dot)
             self.table.setCellWidget(row, 0, swatch_widget)
 
