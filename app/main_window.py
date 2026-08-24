@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self.compact_strip.pause_requested.connect(self._toggle_pause)
         self.compact_strip.resume_requested.connect(self._toggle_pause)
         self.compact_strip.cancel_requested.connect(self._cancel_transcription)
+        self.compact_strip.mute_requested.connect(self._toggle_mute)
         self.compact_strip.position_changed.connect(self._on_compact_strip_moved)
         self.compact_strip.shrink_requested.connect(self._advance_presentation)
         self.compact_strip.variant_changed.connect(self._on_compact_strip_variant_changed)
@@ -580,6 +581,16 @@ class MainWindow(QMainWindow):
         self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
+        # Meeting detection prompts (floating desktop toast only;
+        # the compact strip's armed state covers the visible-strip case)
+        self.meeting_toast.record_accepted.connect(self._on_meeting_start_accepted)
+        self.meeting_toast.dismissed.connect(self._on_meeting_start_dismissed)
+        self.meeting_toast.end_chosen.connect(self._on_meeting_end_chosen)
+
+        # Calendar suggestion banner (post-recording calendar match)
+        self.calendar_banner.tag_requested.connect(self._on_calendar_tag_requested)
+        self.calendar_banner.dismissed.connect(self._on_calendar_dismissed)
+
         # Deferred (not called synchronously here): opens a real audio device,
         # so firing it during __init__ made every test that constructs a bare
         # MainWindow() start a live sounddevice capture thread that outlived
@@ -591,6 +602,8 @@ class MainWindow(QMainWindow):
         self._update_preflight()
 
     def _start_recording(self):
+        if getattr(self, "_meeting_detector", None) is not None and self._meeting_detector.state == "suggested":
+            self._meeting_detector.accept_start()
         self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
             self.meeting_toast.hide_and_clear()
@@ -917,17 +930,11 @@ class MainWindow(QMainWindow):
         if action == "suggest_start":
             self._active_detected_meeting_name = decision.meeting_name
             elapsed = self._meeting_elapsed(snapshot)
-            self.meeting_banner.show_start(decision.meeting_name, elapsed)
-            if hasattr(self, "meeting_toast"):
+            # Show the floating toast only when the compact strip isn't
+            # already visible — the strip's armed state with its Record
+            # button is sufficient when it's on screen.
+            if hasattr(self, "meeting_toast") and not self.compact_strip.isVisible():
                 self.meeting_toast.show_start(decision.meeting_name, elapsed)
-            if hasattr(self, "tray") and self.tray.is_supported():
-                self._pending_meeting_notification = "start"
-                display_name = decision.meeting_name or "A meeting"
-                self.tray.notify_meeting(
-                    "Meeting detected",
-                    f"{display_name} is running — "
-                    "click here to record it."
-                )
         elif action == "start":
             self._active_detected_meeting_name = decision.meeting_name
             display_name = decision.meeting_name or "Meeting"
@@ -935,15 +942,8 @@ class MainWindow(QMainWindow):
             self._start_recording()
         elif action == "suggest_end":
             elapsed = self.recorder.get_elapsed_time()
-            self.meeting_banner.show_end(decision.meeting_name, elapsed)
-            if hasattr(self, "meeting_toast"):
+            if hasattr(self, "meeting_toast") and not self.compact_strip.isVisible():
                 self.meeting_toast.show_end(decision.meeting_name, elapsed)
-            if hasattr(self, "tray") and self.tray.is_supported():
-                self._pending_meeting_notification = "end"
-                self.tray.notify_meeting(
-                    "Meeting ended",
-                    "TalkTrack is still recording — click here to stop or pause."
-                )
         elif action == "stop":
             self.status_label.setText("Meeting ended — stopping recording...")
             self.recorder.stop_recording()
