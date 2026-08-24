@@ -44,6 +44,17 @@ class TestRecordingControlsLiveMeters(unittest.TestCase):
         controls.live_meters.update_mic_level(loud)
         self.assertGreater(controls.live_meters._mic_bar._level, 0.0)
 
+    def test_rec_source_block_click_emits_sources_clicked(self):
+        controls = RecordingControls()
+        clicked = []
+        controls.sources_clicked.connect(lambda: clicked.append(True))
+        controls.rec_source_block.clicked.emit()
+        self.assertEqual(clicked, [True])
+
+    def test_live_meters_not_hidden_by_default(self):
+        controls = RecordingControls()
+        self.assertFalse(controls.live_meters.isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()

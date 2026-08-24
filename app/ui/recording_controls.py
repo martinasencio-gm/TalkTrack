@@ -196,7 +196,7 @@ class RecordingControls(QWidget):
         self.rec_source_block = _ClickableFrame()
         self.rec_source_block.setObjectName("recSourceBlock")
         self.rec_source_block.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.rec_source_block.setToolTip("Click to toggle audio level meters")
+        self.rec_source_block.setToolTip("Click to change audio sources")
         self.rec_source_block.setStyleSheet(
             "QFrame#recSourceBlock {"
             " border: 1px solid #292b31; border-radius: 8px; padding: 4px 10px;"
@@ -206,8 +206,12 @@ class RecordingControls(QWidget):
             " border-color: #3b3e4d;"
             "}"
         )
-        source_layout = QVBoxLayout(self.rec_source_block)
-        source_layout.setContentsMargins(4, 2, 4, 2)
+        rec_block_layout = QHBoxLayout(self.rec_source_block)
+        rec_block_layout.setContentsMargins(6, 4, 8, 4)
+        rec_block_layout.setSpacing(8)
+
+        source_layout = QVBoxLayout()
+        source_layout.setContentsMargins(0, 0, 0, 0)
         source_layout.setSpacing(2)
 
         rec_kicker = QLabel("CAPTURING")
@@ -235,16 +239,21 @@ class RecordingControls(QWidget):
         self.source_line = QLabel("")
         self.source_line.hide()  # preserved for backwards compatibility
 
-        self.health_line = QLabel("Click to toggle live meters")
+        self.health_line = QLabel("")
         self.health_line.setStyleSheet("font-size: 11px; color: #75798c;")
+        self.health_line.hide()
         source_layout.addWidget(self.health_line)
 
-        self.rec_source_block.clicked.connect(self._toggle_live_meters)
+        rec_block_layout.addLayout(source_layout)
+
+        rec_caret = QLabel()
+        rec_caret.setPixmap(colored_pixmap("caret-down", "#75798c", 12))
+        rec_block_layout.addWidget(rec_caret)
+
+        self.rec_source_block.clicked.connect(self.sources_clicked.emit)
         rec_layout.addWidget(self.rec_source_block)
 
         self.live_meters = LevelMeter()
-        self.live_meters.hide()
-        self.live_meters.clicked.connect(self._toggle_live_meters)
         rec_layout.addWidget(self.live_meters, stretch=1)
 
         self.mute_btn = QPushButton("Mute mic")
@@ -410,7 +419,12 @@ class RecordingControls(QWidget):
         """Two-line source/health block next to the level meters — what's
         being captured and whether it's actually coming through."""
         self.source_line.setText(source_text)
-        self.health_line.setText(health_text)
+        if health_text:
+            self.health_line.setText(health_text)
+            self.health_line.show()
+        else:
+            self.health_line.setText("")
+            self.health_line.hide()
 
     def update_time(self, seconds):
         h = int(seconds // 3600)
@@ -429,11 +443,10 @@ class RecordingControls(QWidget):
             self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
 
     def _toggle_live_meters(self):
-        self.live_meters.setVisible(not self.live_meters.isVisible())
+        pass
 
     def reset_timer(self):
         self.timer_label.setText("00:00:00")
-        self.live_meters.hide()
 
     def clear_test_mic(self):
         pass # Migrated to preflight / sources dialog
