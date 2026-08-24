@@ -367,6 +367,8 @@ class SherpaOnnxTranscriber:
             return None
 
         total_segs = len(speech_segments)
+        total_speech_samples = sum(len(samples) for _, samples in speech_segments)
+        processed_samples = 0
         segments = []
         detected_lang = self.language
 
@@ -378,14 +380,15 @@ class SherpaOnnxTranscriber:
             dur_sec = len(samples) / 16000.0
             end_sec = start_sec + dur_sec
 
-            if progress_callback:
-                pct = int(min(99, (start_sec / max(1.0, duration)) * 100))
-                progress_callback(pct, f"Transcribing audio with ONNX ({idx + 1}/{total_segs})...")
-
             stream = self._recognizer.create_stream()
             stream.accept_waveform(sample_rate, samples)
             self._recognizer.decode_stream(stream)
             res = stream.result
+
+            processed_samples += len(samples)
+            if progress_callback and total_speech_samples > 0:
+                pct = int(min(99, (processed_samples / total_speech_samples) * 100))
+                progress_callback(pct, f"Transcribing audio with ONNX ({idx + 1}/{total_segs})...")
 
             if getattr(res, "lang", None):
                 detected_lang = res.lang
