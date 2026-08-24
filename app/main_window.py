@@ -56,7 +56,6 @@ from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
-from app.ui.tag_prompt_banner import TagPromptBanner
 from app.ui.meeting_banner import MeetingBanner
 from app.ui.meeting_toast import MeetingNotificationToast
 from app.integrations.meeting_detector import MeetingDetector
@@ -453,8 +452,6 @@ class MainWindow(QMainWindow):
         from app.ui.source_selector import SourceSelector
         self.source_selector = SourceSelector(config=self.config, com_poller=self._com_poller)
         self.source_selector.hide()
-        self.tag_prompt_banner = TagPromptBanner()
-        self.tag_prompt_banner.hide()
         self.calendar_banner = CalendarSuggestionBanner()
         self.calendar_banner.hide()
         self.meeting_banner = MeetingBanner()
@@ -1302,9 +1299,7 @@ class MainWindow(QMainWindow):
 
         # Prompt for tagging if enabled
         if self.config.get("general", "prompt_tags_after_recording"):
-            self.tag_prompt_banner.show_prompt(session)
-        else:
-            self.tag_prompt_banner.hide_and_clear()
+            self._open_tag_dialog(session)
 
     def _maybe_queue_for_batch(self, session):
         """Tag a recording the app isn't going to transcribe itself.
@@ -2054,7 +2049,6 @@ class MainWindow(QMainWindow):
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
-        self.tag_prompt_banner.hide_and_clear()
         # Suggestions belong to the recording they were looked up for; a
         # leftover one must not tag the recording being opened now.
         self._rename_candidate_events = []
@@ -2768,16 +2762,15 @@ class MainWindow(QMainWindow):
             self._current_session["tags"] = tags
         self.recordings_list.refresh()
 
-    def _open_tag_dialog(self):
-        """The header's "+ Tag" button — opens the same "Tag this recording"
-        dialog as the recordings list's right-click Tag... action, so there
-        is one tagging UI throughout the app rather than a second, lighter
-        popup."""
-        if not self._current_session or not self._current_session.get("directory"):
+    def _open_tag_dialog(self, session=None):
+        """The header's "+ Tag" button and post-recording prompt — opens the
+        standard "Tag this recording" dialog as used throughout the app."""
+        target_session = session if session is not None else self._current_session
+        if not target_session or not target_session.get("directory"):
             return
         from app.ui.tag_recording_dialog import TagRecordingDialog
         recordings_dir = self.config.get("output", "directory")
-        dialog = TagRecordingDialog(self._current_session, recordings_dir, parent=self)
+        dialog = TagRecordingDialog(target_session, recordings_dir, parent=self)
         dialog.tags_changed.connect(self._on_header_tags_changed)
         dialog.exec()
         self.recording_header.refresh_tags()
