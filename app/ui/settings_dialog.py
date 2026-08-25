@@ -25,6 +25,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, config, parent=None, initial_tab=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.config = config
         self.setWindowTitle("Settings")
         self.setMinimumSize(500, 450)

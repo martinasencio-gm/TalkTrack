@@ -16,10 +16,16 @@ class ColorPickerDialog(QDialog):
 
     def __init__(self, current_color="#89b4fa", parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("Choose Tag Color")
         self.setFixedSize(280, 180)
         self.selected_color = current_color
         self._setup_ui()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -68,6 +74,7 @@ class TagManagerDialog(QDialog):
 
     def __init__(self, recordings_dir=None, tags_file=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.recordings_dir = recordings_dir
         self.tags_file = tags_file
         self.setWindowTitle("Manage Tags")

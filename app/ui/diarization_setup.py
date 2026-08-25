@@ -61,6 +61,7 @@ class DiarizationSetupWizard(QDialog):
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.config = config
         self.setWindowTitle("Speaker Diarization Setup")
         self.setMinimumSize(550, 520)

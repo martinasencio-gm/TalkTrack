@@ -19,6 +19,7 @@ class BatchProcessInfoDialog(QDialog):
     def __init__(self, process_info: Union[BatchProcessInfo, List[BatchProcessInfo]],
                  in_app_worker=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         if isinstance(process_info, list):
             self.processes = list(process_info)
         else:

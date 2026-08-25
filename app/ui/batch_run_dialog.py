@@ -14,6 +14,7 @@ class BatchRunDialog(QDialog):
 
     def __init__(self, queued_count=0, config=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("Run Batch Transcription")
         self.setMinimumWidth(450)
         self._queued_count = queued_count

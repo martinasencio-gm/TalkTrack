@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QDateTimeEdit, QDialogButtonBox, QLabel
 )
-from PyQt6.QtCore import QDateTime
+from PyQt6.QtCore import QDateTime, Qt
 
 
 class ImportTimestampDialog(QDialog):
@@ -10,6 +10,7 @@ class ImportTimestampDialog(QDialog):
 
     def __init__(self, default_datetime, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("When was this recorded?")
         self._setup_ui(default_datetime)
 

@@ -205,6 +205,7 @@ class TagRecordingDialog(QDialog):
 
     def __init__(self, metadata, recordings_dir, tags_file=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.metadata = metadata
         self.recordings_dir = recordings_dir
         self.tags_file = tags_file

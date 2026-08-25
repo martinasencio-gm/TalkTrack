@@ -69,6 +69,11 @@ def center_on_active_screen(widget, parent=None):
     x = max(geo.left(), min(x, geo.right() - w_width))
     y = max(geo.top(), min(y, geo.bottom() - w_height))
     widget.move(x, y)
+    try:
+        widget.raise_()
+        widget.activateWindow()
+    except Exception:
+        pass
 
 
 def position_corner_on_active_screen(widget, corner="bottom-right", margin=20, reference_widget=None):
@@ -105,6 +110,11 @@ def position_corner_on_active_screen(widget, corner="bottom-right", margin=20, r
     x = max(geo.left(), min(x, geo.right() - w_width))
     y = max(geo.top(), min(y, geo.bottom() - w_height))
     widget.move(x, y)
+    try:
+        widget.raise_()
+        widget.activateWindow()
+    except Exception:
+        pass
 
 
 def ensure_within_screens(x, y, width=100, height=40, reference_widget=None):

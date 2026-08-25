@@ -63,6 +63,7 @@ class SystemStatusDialog(QDialog):
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("System Status")
         self.setMinimumSize(500, 400)
         self.setMaximumSize(600, 600)

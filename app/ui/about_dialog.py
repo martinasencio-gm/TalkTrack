@@ -14,6 +14,7 @@ VERSION = "1.0.0"
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("About TalkTrack")
         # Sized to the button row, which is the widest item: the two
         # link buttons need 496px together, plus the layout's 11px

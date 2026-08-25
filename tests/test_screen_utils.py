@@ -116,6 +116,25 @@ class TestScreenUtils(unittest.TestCase):
         self.assertGreaterEqual(clamped_y, geo.top())
         self.assertLessEqual(clamped_y + 60, geo.bottom() + 1)
 
+    def test_dialogs_have_stay_on_top_hint(self):
+        from PyQt6.QtCore import Qt
+        from app.ui.about_dialog import AboutDialog
+        from app.ui.delete_scope_dialog import DeleteScopeDialog
+        from app.ui.import_timestamp_dialog import ImportTimestampDialog
+        from datetime import datetime
+
+        about = AboutDialog()
+        self.assertTrue(bool(about.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        about.close()
+
+        delete = DeleteScopeDialog(1)
+        self.assertTrue(bool(delete.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        delete.close()
+
+        import_dlg = ImportTimestampDialog(datetime.now())
+        self.assertTrue(bool(import_dlg.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        import_dlg.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -169,6 +169,7 @@ class SourceSelector(QDialog):
 
     def __init__(self, config=None, parent=None, com_poller=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self._config = config
         self._com_poller = com_poller
         self._mic_devices = []
