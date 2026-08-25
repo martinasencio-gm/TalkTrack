@@ -9,10 +9,20 @@ from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
 logger = logging.getLogger(__name__)
 
-# Loaded Whisper models keyed by (model_size, device, compute_type).
-# Loading costs seconds-to-tens-of-seconds per recording; models stay
-# resident between transcriptions by design.
+# The loaded Whisper model, keyed by (model_size, device, compute_type,
+# cpu_threads). Loading costs seconds-to-tens-of-seconds, so the model in use
+# stays resident between transcriptions by design.
+#
+# Exactly ONE is kept. The key spans both model_size and cpu_threads, so an
+# unbounded cache accumulated a separate multi-GB model for every size the
+# user had ever selected AND for each of the two thread counts —
+# base+small+medium x2 measured at ~4GB retained, enough to page the whole
+# app out and leave it sluggish long after a big job finished. Staying warm
+# for repeated jobs at the same settings is the case that mattered; switching
+# model size (or moving between recording-era and idle jobs) now pays one
+# reload instead of hoarding both.
 _MODEL_CACHE = {}
+_MODEL_CACHE_MAXSIZE = 1
 _MODEL_CACHE_LOCK = threading.Lock()
 
 
@@ -38,6 +48,16 @@ def _get_model(model_size, device, compute_type, full_cpu=False):
     with _MODEL_CACHE_LOCK:
         if key not in _MODEL_CACHE:
             from faster_whisper import WhisperModel
+            # Evict BEFORE constructing, so peak residency is one model rather
+            # than briefly two. A job already running holds its own reference
+            # to the model it was handed, so dropping ours cannot pull a model
+            # out from under it.
+            # No gc.collect() here: _get_model runs on a worker thread, and a
+            # global collection there can finalize GUI-thread QObjects. Popping
+            # drops the last reference, so CTranslate2 releases the weights
+            # via refcounting before the replacement is built.
+            while len(_MODEL_CACHE) >= _MODEL_CACHE_MAXSIZE:
+                _MODEL_CACHE.pop(next(iter(_MODEL_CACHE)))
             _MODEL_CACHE[key] = WhisperModel(
                 model_size, device=device, compute_type=compute_type,
                 cpu_threads=cpu_threads,

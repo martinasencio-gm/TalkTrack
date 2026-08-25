@@ -69,7 +69,6 @@ class TestDiarizationThreadCap(unittest.TestCase):
             audio_path="/fake/audio.wav",
             transcript_result=MagicMock(),
             hf_token="fake-token",
-            engine="pyannote",
         )
 
         with patch("app.transcription.diarizer._get_pipeline") as mock_get_pipeline, \
@@ -95,7 +94,6 @@ class TestDiarizationThreadCap(unittest.TestCase):
             transcript_result=MagicMock(),
             hf_token="fake-token",
             full_cpu=True,
-            engine="pyannote",
         )
 
         with patch("app.transcription.diarizer._get_pipeline") as mock_get_pipeline, \
@@ -117,6 +115,44 @@ class TestDiarizationThreadCap(unittest.TestCase):
         # saturated every core. One core held back is enough to fix that.
         mock_set_threads.assert_called_once_with(15)
 
+class TestWhisperModelCacheIsBounded(unittest.TestCase):
+    """The cache key spans model_size AND cpu_threads, so an unbounded dict
+    accumulated a separate multi-GB model for every size the user tried and
+    for each of the two thread counts. base+small+medium x2 was measured at
+    ~4GB retained, which paged the whole app out after a big job."""
+
+    def test_only_one_model_stays_resident(self):
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel"), \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+            transcriber._get_model("small", "cpu", "int8", full_cpu=True)
+            transcriber._get_model("medium", "cpu", "int8", full_cpu=True)
+        self.assertEqual(len(transcriber._MODEL_CACHE), 1)
+        self.assertEqual(
+            list(transcriber._MODEL_CACHE)[0][:3], ("medium", "cpu", "int8"))
+
+    def test_thread_count_variants_do_not_both_stay_resident(self):
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel"), \
+             patch("os.cpu_count", return_value=8):
+            transcriber._get_model("base", "cpu", "int8", full_cpu=False)
+            transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+        self.assertEqual(len(transcriber._MODEL_CACHE), 1)
+        # The idle (7-thread) variant is the one still held.
+        self.assertEqual(list(transcriber._MODEL_CACHE)[0][3], 7)
+
+    def test_repeated_identical_requests_stay_warm(self):
+        # The whole point of the cache: same settings must not reload.
+        from app.transcription import transcriber
+        transcriber._MODEL_CACHE.clear()
+        with patch("faster_whisper.WhisperModel") as MockModel, \
+             patch("os.cpu_count", return_value=8):
+            for _ in range(5):
+                transcriber._get_model("base", "cpu", "int8", full_cpu=True)
+        self.assertEqual(MockModel.call_count, 1)
 
 if __name__ == "__main__":
     unittest.main()

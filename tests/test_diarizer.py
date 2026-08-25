@@ -91,3 +91,124 @@ class TestSimpleDiarizeWorkerExists(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSimpleDiarizerAudioDtype(unittest.TestCase):
+    """Both full tracks are loaded into RAM at once, so they must be read at
+    the precision the RMS math actually needs — not soundfile's float64
+    default, which doubles the footprint of a long recording for nothing."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write_wav(self, name, data, rate):
+        path = self.dir / name
+        sf.write(str(path), data, rate)
+        return str(path)
+
+    def test_both_tracks_are_read_as_float32(self):
+        from app.transcription.diarizer import SimpleDiarizer
+
+        mic_path = self._write_wav("mic.wav", np.zeros(1600, dtype=np.float32), 16000)
+        sys_path = self._write_wav("sys.wav", np.zeros(1600, dtype=np.float32), 16000)
+
+        real_read = sf.read
+        seen = []
+
+        def spy(path, *args, **kwargs):
+            seen.append(kwargs.get("dtype"))
+            return real_read(path, *args, **kwargs)
+
+        result = TranscriptResult(
+            segments=[TranscriptSegment(start=0.0, end=0.1, text="hi")]
+        )
+        with patch("soundfile.read", side_effect=spy):
+            SimpleDiarizer(mic_path, sys_path).diarize(result)
+
+        self.assertEqual(seen, ["float32", "float32"])
+
+
+class TestDiarizationMergeScales(unittest.TestCase):
+    """Speaker assignment must not be a nested scan of transcript segments x
+    speaker turns: on a long meeting that product runs into the hundreds of
+    millions of Python iterations and stalls the tail of every big job."""
+
+    def _merge(self, transcript, speaker_segments):
+        from app.transcription.diarizer import DiarizationWorker
+
+        worker = DiarizationWorker.__new__(DiarizationWorker)
+        return worker._merge_diarization_with_transcript(transcript, speaker_segments)
+
+    def test_picks_the_maximum_overlap_speaker(self):
+        from app.transcription.diarizer import SpeakerSegment
+
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=10.0, end=20.0, text="x")]
+        )
+        speakers = [
+            SpeakerSegment(0.0, 11.0, "A"),    # 1s overlap
+            SpeakerSegment(11.0, 18.0, "B"),   # 7s overlap  <- winner
+            SpeakerSegment(18.0, 30.0, "C"),   # 2s overlap
+        ]
+        out = self._merge(transcript, speakers)
+        self.assertEqual(out.segments[0].speaker, "B")
+
+    def test_no_overlap_is_unknown(self):
+        from app.transcription.diarizer import SpeakerSegment
+
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=100.0, end=101.0, text="x")]
+        )
+        out = self._merge(transcript, [SpeakerSegment(0.0, 5.0, "A")])
+        self.assertEqual(out.segments[0].speaker, "Unknown")
+
+    def test_overlapping_speaker_turns_still_resolve(self):
+        from app.transcription.diarizer import SpeakerSegment
+
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=5.0, end=6.0, text="x")]
+        )
+        # Crosstalk: a long turn fully containing a short competing one.
+        speakers = [
+            SpeakerSegment(0.0, 100.0, "A"),   # 1.0s overlap <- winner
+            SpeakerSegment(5.4, 5.6, "B"),     # 0.2s overlap
+        ]
+        out = self._merge(transcript, speakers)
+        self.assertEqual(out.segments[0].speaker, "A")
+
+    def test_unsorted_speaker_segments_are_handled(self):
+        from app.transcription.diarizer import SpeakerSegment
+
+        transcript = TranscriptResult(
+            segments=[TranscriptSegment(start=10.0, end=20.0, text="x")]
+        )
+        speakers = [
+            SpeakerSegment(18.0, 30.0, "C"),
+            SpeakerSegment(0.0, 11.0, "A"),
+            SpeakerSegment(11.0, 18.0, "B"),
+        ]
+        out = self._merge(transcript, speakers)
+        self.assertEqual(out.segments[0].speaker, "B")
+
+    def test_long_meeting_merges_without_quadratic_blowup(self):
+        from app.transcription.diarizer import SpeakerSegment
+
+        # 20k transcript segments x 20k speaker turns. The nested scan is
+        # 4e8 iterations (minutes); a bounded search is effectively instant.
+        n = 20000
+        transcript = TranscriptResult(segments=[
+            TranscriptSegment(start=i * 1.0, end=i * 1.0 + 0.9, text="x")
+            for i in range(n)
+        ])
+        speakers = [
+            SpeakerSegment(i * 1.0, i * 1.0 + 0.8, f"S{i % 4}")
+            for i in range(n)
+        ]
+        out = self._merge(transcript, speakers)
+        self.assertEqual(out.segments[0].speaker, "S0")
+        self.assertEqual(out.segments[9].speaker, "S1")
+        self.assertTrue(all(s.speaker != "Unknown" for s in out.segments))

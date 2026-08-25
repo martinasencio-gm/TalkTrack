@@ -37,12 +37,22 @@ Same two values in both: `cpu_count - 1` (min 1) when idle, `cpu_count // 2` (mi
 - No HF token → the checkbox is disabled and `diarization_enabled()` returns False regardless of its checked state. A saved `enabled=True` from a machine that had a token must not queue a job pyannote cannot run.
 - On-demand: `diarize_btn` ("Identify Speakers") appears only with a token + a loaded transcript + audio, and re-runs diarization over the transcript already on screen (`_on_diarize_requested` → `_start_diarization`), so a fast unlabelled pass can be upgraded without transcribing again. It defers rather than stacking when `_transcription_busy()`.
 
-## Model caches — resident by design
+## Model caches — resident, but bounded to one Whisper model
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type, cpu_threads)`. `cpu_threads` is fixed at construction, so it belongs in the key: without it the first model built during a recording would serve every later idle job at half speed.
-- `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed by HF token.
+- **`_MODEL_CACHE_MAXSIZE` is 1 — do not remove the eviction.** The key spans model_size *and* cpu_threads, so an unbounded dict retained a separate multi-GB model for every size ever selected and for each of the two thread counts. Measured: base+small+medium x2 ≈ 4GB private, against a 581MB working set — the app had been paged almost entirely to disk and every click faulted back off it. Eviction happens *before* constructing the replacement, so peak residency is one model, not two; an in-flight job holds its own reference and is unaffected.
+- The trade is deliberate: repeated jobs at the same settings still stay warm (the case worth protecting), while switching model size — or moving between a recording-era job and an idle one — pays one reload.
+- `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed by HF token. Left unbounded: one token in practice, ~32MB.
 - `provider.get_sentence_transformer()` — shared embed model cache.
-Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.
+Loading costs seconds-to-tens-of-seconds per recording, so keeping *the model in use* resident between recordings is intentional. Keeping a collection of every model ever loaded is not — that was the bug.
+
+## Long-recording memory and the O(N x M) merge
+
+Both fixed after a 3h job left the app at 4.7GB private / 581MB working set:
+
+- `DiarizationWorker._run_pyannote` decodes the entire recording into one in-memory waveform (pyannote 4.0 wants `{"waveform", "sample_rate"}`, and preloading avoids the torchcodec dep). It must `del` the waveform/audio arrays as soon as speaker turns are extracted — before the merge — or a multi-GB allocation survives the rest of the job. Refcounting is sufficient (arrays and tensors, not cycles). **Do not add `gc.collect()` to either this path or `_get_model`'s eviction:** both run on worker threads, where a global collection can finalize QObjects owned by the GUI thread.
+- `SimpleDiarizer.diarize` reads both full tracks with `dtype="float32"`. soundfile's default is float64, which doubled the footprint of both tracks for RMS math that never needed the precision.
+- `_merge_diarization_with_transcript` uses a bounded backward search (turns sorted by start, plus a running `reach` maximum of end times), NOT a nested scan over every turn per segment. The nested version was O(segments x turns): 20k x 20k measured at 97.7s versus <1s, i.e. a multi-second stall at the tail of every long meeting. Ties keep the earliest-starting speaker, matching the old input-order behaviour. The prune assumes turns are short relative to the recording, which is what pyannote produces.
 
 ## Per-track transcription (the default "simple" path)
 

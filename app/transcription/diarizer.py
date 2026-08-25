@@ -1,3 +1,4 @@
+import bisect
 import threading
 from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -148,6 +149,20 @@ class DiarizationWorker(QThread):
             self.cancelled.emit()
             return
 
+        # The whole recording was decoded into `waveform` up front; on a long
+        # meeting that is a multi-GB allocation, and holding it through the
+        # merge (and past this worker's own lifetime) is what leaves the app
+        # swapped out and sluggish once a big job finishes. Dropping the last
+        # reference is enough: these are arrays and tensors, not reference
+        # cycles, so refcounting frees them here and now.
+        #
+        # Deliberately NO gc.collect(). This runs on a worker thread, and a
+        # global collection there can finalize QObjects owned by the GUI
+        # thread. Any cycles among the pyannote objects are picked up by the
+        # automatic generational collector moments later anyway; the multi-GB
+        # arrays are not cyclic and do not need it.
+        del audio_input, waveform, audio_data, diarization, result
+
         self.progress.emit("Mapping speakers to transcript...")
 
         # Assign speakers to transcript segments
@@ -161,22 +176,52 @@ class DiarizationWorker(QThread):
         self.finished.emit(result)
 
     def _merge_diarization_with_transcript(self, transcript, speaker_segments):
-        """Assign speaker labels to transcript segments based on overlap."""
+        """Assign speaker labels to transcript segments based on overlap.
+
+        Bounded search, not the full cross product. Speaker turns are sorted
+        by start and paired with `reach` — a running maximum of their end
+        times — so each transcript segment only walks back through turns that
+        can still touch it, and stops as soon as `reach` drops to its start.
+        The old nested scan was O(segments x turns): 20k x 20k measured at
+        ~98s, i.e. a multi-second stall at the tail of every long meeting.
+
+        Ties keep the earliest-starting speaker, matching the previous
+        input-order behaviour (pyannote yields turns chronologically).
+
+        The prune assumes turns are mostly short relative to the recording,
+        which is what pyannote produces; one turn spanning the whole file
+        would degrade back toward the nested scan.
+        """
+        if not speaker_segments:
+            for seg in transcript.segments:
+                seg.speaker = "Unknown"
+            return transcript
+
+        ordered = sorted(speaker_segments, key=lambda s: s.start)
+        starts = [s.start for s in ordered]
+        reach = []
+        furthest = float("-inf")
+        for spk_seg in ordered:
+            furthest = max(furthest, spk_seg.end)
+            reach.append(furthest)
+
         for seg in transcript.segments:
             best_speaker = "Unknown"
             best_overlap = 0.0
-
             seg_start = seg.start
             seg_end = seg.end
 
-            for spk_seg in speaker_segments:
-                overlap_start = max(seg_start, spk_seg.start)
-                overlap_end = min(seg_end, spk_seg.end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                if overlap > best_overlap:
+            # Turns starting at or after seg_end cannot overlap it.
+            i = bisect.bisect_left(starts, seg_end) - 1
+            while i >= 0 and reach[i] > seg_start:
+                spk_seg = ordered[i]
+                overlap = min(seg_end, spk_seg.end) - max(seg_start, spk_seg.start)
+                # >= so that the earliest start wins a tie: descending walk
+                # visits it last.
+                if overlap > 0 and overlap >= best_overlap:
                     best_overlap = overlap
                     best_speaker = spk_seg.speaker
+                i -= 1
 
             seg.speaker = best_speaker
 
@@ -204,12 +249,12 @@ class SimpleDiarizer:
         sys_data = None
 
         if self.mic_audio_path:
-            mic_data, mic_sr = sf.read(self.mic_audio_path)
+            mic_data, mic_sr = sf.read(self.mic_audio_path, dtype="float32")
             if mic_data.ndim > 1:
                 mic_data = mic_data.mean(axis=1)
 
         if self.system_audio_path:
-            sys_data, sys_sr = sf.read(self.system_audio_path)
+            sys_data, sys_sr = sf.read(self.system_audio_path, dtype="float32")
             if sys_data.ndim > 1:
                 sys_data = sys_data.mean(axis=1)
 
