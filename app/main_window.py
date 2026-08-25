@@ -164,6 +164,7 @@ class MainWindow(QMainWindow):
         # from the taskbar dismisses it); False when it's a free-floating
         # panel opened alongside the window from View > Show Compact Strip.
         self._strip_is_minimized_form = False
+        self._auto_shown_minimized_pill = False
         self.compact_strip = CompactStrip()
         self.compact_strip.expand_requested.connect(self._switch_to_full_ui)
         self.compact_strip.open_transcript_requested.connect(self._switch_to_full_ui)
@@ -3047,9 +3048,13 @@ class MainWindow(QMainWindow):
         """
         if event.type() == QEvent.Type.WindowStateChange:
             minimized = bool(self.windowState() & Qt.WindowState.WindowMinimized)
-            if not minimized and self._strip_is_minimized_form:
-                self._strip_is_minimized_form = False
-                self.compact_strip_action.setChecked(False)
+            if not minimized:
+                if self._strip_is_minimized_form:
+                    self._strip_is_minimized_form = False
+                    self.compact_strip_action.setChecked(False)
+                if getattr(self, "_auto_shown_minimized_pill", False):
+                    self._auto_shown_minimized_pill = False
+                    self.compact_strip.hide()
             self._update_activity_visibility()
             if minimized:
                 if self.recorder.state != RecordingState.IDLE:
@@ -3157,28 +3162,27 @@ class MainWindow(QMainWindow):
             self._pending_transcriptions,
         ))
         busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
-        # Compact/pill mode is now a genuinely minimized window, so without
-        # the strip check both floating widgets would stack on screen while
-        # recording — and the strip already renders the busy states itself.
-        should_show = (
+        # When TalkTrack is minimized/hidden while recording or busy, show
+        # the CompactStrip in pill mode (with live REC indicator, timer, level
+        # meters, pause, and stop controls).
+        should_show_auto_pill = (
             busy_state is not None
             and (self.isMinimized() or self.isHidden())
             and not self.compact_strip.isVisible()
         )
-        if should_show:
-            elapsed = (
-                int(self.recorder.get_elapsed_time())
-                if busy_state in ("recording", "paused") else None
-            )
-            percent = (
-                self._current_transcription_percent
-                if busy_state == "transcribing" else None
-            )
-            if not self._activity_widget.isVisible():
-                x, y = self._activity_widget_position()
-                self._activity_widget.show_at(x, y)
-            self._activity_widget.set_activity(busy_state, elapsed, percent)
-        elif self._activity_widget.isVisible():
+        if should_show_auto_pill:
+            self.compact_strip.set_variant("pill")
+            x, y = self._compact_strip_position()
+            self.compact_strip.move(x, y)
+            self._auto_shown_minimized_pill = True
+            self.compact_strip.show()
+            self._update_compact_strip_state()
+        elif getattr(self, "_auto_shown_minimized_pill", False):
+            if not (self.isMinimized() or self.isHidden()) or busy_state is None:
+                self.compact_strip.hide()
+                self._auto_shown_minimized_pill = False
+
+        if hasattr(self, "_activity_widget") and self._activity_widget.isVisible():
             self._activity_widget.hide()
 
     def _on_compact_strip_toggled(self, checked):
@@ -3235,7 +3239,9 @@ class MainWindow(QMainWindow):
     def _switch_to_full_ui(self):
         """Swap back to the full window, dismissing the strip."""
         self._strip_is_minimized_form = False
+        self._auto_shown_minimized_pill = False
         self.compact_strip_action.setChecked(False)
+        self.compact_strip.hide()
         self._restore_from_tray()
 
     def _compact_strip_position(self):

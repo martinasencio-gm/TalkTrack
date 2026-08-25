@@ -42,58 +42,43 @@ class TestMainWindowActivityWidget(unittest.TestCase):
                 window.close()
 
     def test_update_activity_visibility_hides_when_visible_but_not_minimized(self):
-        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator:
-            mock_instance = MockActivityIndicator.return_value
-            mock_instance.isVisible.return_value = True
-            from app.main_window import MainWindow
-            window = MainWindow()
-            try:
-                window._update_activity_visibility()
-                mock_instance.hide.assert_called_once_with()
-            finally:
-                window._really_quit = True
-                window.close()
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window.show()
+            window._update_activity_visibility()
+            self.assertFalse(window._auto_shown_minimized_pill)
+        finally:
+            window._really_quit = True
+            window.close()
 
     def test_update_activity_visibility_shows_when_minimized_and_recording(self):
-        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator:
-            mock_instance = MockActivityIndicator.return_value
-            mock_instance.isVisible.return_value = False
-            from app.main_window import MainWindow
-            from app.recording.recorder import RecordingState
-            window = MainWindow()
-            try:
-                window.recorder._state = RecordingState.RECORDING
-                window.isMinimized = lambda: True
-                window._update_activity_visibility()
-                mock_instance.show_at.assert_called_once()
-                mock_instance.set_activity.assert_called_once()
-                args, _ = mock_instance.set_activity.call_args
-                self.assertEqual(args[0], "recording")
-            finally:
-                # Reset the forced RECORDING state before teardown: closeEvent()
-                # calls recorder.stop_recording() for any non-IDLE state, and this
-                # recorder never went through a real start_recording() (no _capture
-                # object) -- that would raise and surface a blocking
-                # QMessageBox.critical() dialog via _on_error(), which is
-                # pre-existing behavior unrelated to this test or Task 3.
-                window.recorder._state = RecordingState.IDLE
-                window._really_quit = True
-                window.close()
+        from app.main_window import MainWindow
+        from app.recording.recorder import RecordingState
+        window = MainWindow()
+        try:
+            window.recorder._state = RecordingState.RECORDING
+            window.isMinimized = lambda: True
+            window._update_activity_visibility()
+            self.assertTrue(window.compact_strip.isVisible())
+            self.assertEqual(window.compact_strip.variant(), "pill")
+            self.assertTrue(window._auto_shown_minimized_pill)
+        finally:
+            window.recorder._state = RecordingState.IDLE
+            window._really_quit = True
+            window.close()
 
     def test_update_activity_visibility_does_not_show_when_idle(self):
-        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator:
-            mock_instance = MockActivityIndicator.return_value
-            mock_instance.isVisible.return_value = False
-            from app.main_window import MainWindow
-            window = MainWindow()
-            try:
-                window.isMinimized = lambda: True
-                window._update_activity_visibility()
-                mock_instance.show_at.assert_not_called()
-                mock_instance.set_activity.assert_not_called()
-            finally:
-                window._really_quit = True
-                window.close()
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window.isMinimized = lambda: True
+            window._update_activity_visibility()
+            self.assertFalse(window.compact_strip.isVisible())
+            self.assertFalse(window._auto_shown_minimized_pill)
+        finally:
+            window._really_quit = True
+            window.close()
 
     def test_on_activity_widget_moved_saves_config(self):
         with patch("app.main_window.ActivityIndicator"):
@@ -130,10 +115,7 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             mock_instance.close.assert_called_once_with()
 
     def test_start_diarization_resets_stale_percent_and_updates_widget(self):
-        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator, \
-             patch("app.main_window.DiarizationWorker") as MockDiarizationWorker:
-            mock_activity = MockActivityIndicator.return_value
-            mock_activity.isVisible.return_value = False
+        with patch("app.main_window.DiarizationWorker") as MockDiarizationWorker:
             from app.main_window import MainWindow
             window = MainWindow()
             try:
@@ -148,19 +130,12 @@ class TestMainWindowActivityWidget(unittest.TestCase):
                 )
                 self.assertIsNone(window._current_transcription_percent)
                 MockDiarizationWorker.return_value.start.assert_called_once()
-                mock_activity.set_activity.assert_called_once()
-                args, _ = mock_activity.set_activity.call_args
-                self.assertEqual(args[0], "transcribing")
-                self.assertIsNone(args[2])
             finally:
                 window._really_quit = True
                 window.close()
 
     def test_start_simple_diarization_resets_stale_percent_and_updates_widget(self):
-        with patch("app.main_window.ActivityIndicator") as MockActivityIndicator, \
-             patch("app.main_window.SimpleDiarizeWorker") as MockSimpleDiarizeWorker:
-            mock_activity = MockActivityIndicator.return_value
-            mock_activity.isVisible.return_value = False
+        with patch("app.main_window.SimpleDiarizeWorker") as MockSimpleDiarizeWorker:
             from app.main_window import MainWindow
             window = MainWindow()
             try:
@@ -174,10 +149,6 @@ class TestMainWindowActivityWidget(unittest.TestCase):
                 )
                 self.assertIsNone(window._current_transcription_percent)
                 MockSimpleDiarizeWorker.return_value.start.assert_called_once()
-                mock_activity.set_activity.assert_called_once()
-                args, _ = mock_activity.set_activity.call_args
-                self.assertEqual(args[0], "transcribing")
-                self.assertIsNone(args[2])
             finally:
                 window._really_quit = True
                 window.close()
