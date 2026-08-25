@@ -357,7 +357,8 @@ class RecordingControls(QWidget):
             self.pause_btn.setEnabled(False)
             self.mute_btn.setEnabled(False)
 
-    def set_transcribing(self, active, percent=None, name=None, elapsed_seconds=None, queued=0):
+    def set_transcribing(self, active, percent=None, name=None, elapsed_seconds=None, queued=0,
+                          phase_label="Transcribing"):
         """Show/update the slim transcribing strip below the capture bar,
         mirroring CompactStrip's "transcribing" state so both surfaces
         agree about background work happening between recordings.
@@ -366,12 +367,17 @@ class RecordingControls(QWidget):
         per the design spec this strip is where that information belongs,
         rather than buried in one transcript tab (see
         transcript_viewer._format_progress_text, which computes the same
-        elapsed/remaining shape for the tab-local status label)."""
+        elapsed/remaining shape for the tab-local status label).
+
+        `phase_label` names the verb ("Transcribing", "Identifying
+        speakers", ...) since this strip is shared by both the
+        transcription and diarization workers and must describe whichever
+        one is actually running."""
         self.transcribing_strip.setVisible(active)
         if not active:
             return
         self.transcribing_label.setText(
-            f"Transcribing <b>{name}</b>" if name else "Transcribing…"
+            f"{phase_label} <b>{name}</b>" if name else f"{phase_label}…"
         )
         if percent is None:
             self.transcribing_bar.setRange(0, 0)  # indeterminate

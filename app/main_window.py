@@ -3176,8 +3176,23 @@ class MainWindow(QMainWindow):
         busy = self._transcription_busy()
         job_name = None
         elapsed = None
+        phase_label = "Transcribing"
         if busy:
-            session = getattr(self._transcription_worker, "session", None)
+            # Which worker is actually running decides both the session
+            # (name) and the verb shown — a finished-but-not-yet-replaced
+            # TranscriptionWorker must not paint a live diarization job as
+            # "Transcribing".
+            active_worker = None
+            if self._diarization_worker is not None and self._diarization_worker.isRunning():
+                active_worker = self._diarization_worker
+                phase_label = "Identifying speakers"
+            elif self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning():
+                active_worker = self._simple_diarize_worker
+                phase_label = "Identifying speakers"
+            elif self._transcription_worker is not None and self._transcription_worker.isRunning():
+                active_worker = self._transcription_worker
+                phase_label = "Transcribing"
+            session = getattr(active_worker, "session", None)
             if session:
                 from app.ui.recording_header import _display_name_from_metadata
                 job_name = _display_name_from_metadata(session)
@@ -3188,6 +3203,7 @@ class MainWindow(QMainWindow):
             busy, self._current_transcription_percent,
             name=job_name, elapsed_seconds=elapsed,
             queued=len(self._pending_transcriptions),
+            phase_label=phase_label,
         )
         self.recordings_list.set_transcribing(transcribing_directories(
             [self._transcription_worker, self._diarization_worker,

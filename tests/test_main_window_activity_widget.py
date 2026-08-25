@@ -218,6 +218,37 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             window._really_quit = True
             window.close()
 
+    def test_activity_visibility_labels_diarization_as_identifying_speakers(self):
+        # A stale, no-longer-running TranscriptionWorker from the same
+        # recording must not paint the strip as "Transcribing" while a
+        # DiarizationWorker is the one actually busy.
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            stale_transcription = MagicMock()
+            stale_transcription.isRunning.return_value = False
+            stale_transcription.session = {"directory": "/fake/recording_1"}
+            window._transcription_worker = stale_transcription
+
+            busy_diarizer = MagicMock()
+            busy_diarizer.isRunning.return_value = True
+            busy_diarizer.session = {"directory": "/fake/recording_1"}
+            window._diarization_worker = busy_diarizer
+
+            with patch.object(window.recording_controls, "set_transcribing") as mock_set:
+                window._update_activity_visibility()
+                self.assertEqual(
+                    mock_set.call_args.kwargs.get("phase_label"),
+                    "Identifying speakers",
+                )
+                self.assertEqual(
+                    mock_set.call_args.kwargs.get("name"), "recording_1"
+                )
+        finally:
+            window._diarization_worker = None
+            window._really_quit = True
+            window.close()
+
     def test_recording_state_populates_capturing_sources(self):
         from app.main_window import MainWindow
         from app.recording.recorder import RecordingState
