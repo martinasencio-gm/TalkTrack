@@ -186,6 +186,42 @@ class _AllTagPill(QFrame):
             self._name_label.setStyleSheet("color: #e9e9ed; font-size: 12.5px; font-weight: 500;")
 
 
+class _CreateTagPill(QFrame):
+    """Action pill shown when typed filter doesn't match an existing tag: '+ Create \"Tag\"'."""
+
+    clicked = pyqtSignal(str)
+
+    def __init__(self, name, parent=None):
+        super().__init__(parent)
+        self.tag_name = name
+        self.setObjectName("createTagPill")
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(6)
+
+        plus_label = QLabel("+")
+        plus_label.setStyleSheet("color: #cba6f7; font-size: 13px; font-weight: bold;")
+        layout.addWidget(plus_label)
+
+        self._name_label = QLabel(f'Create "{name}"')
+        self._name_label.setStyleSheet("color: #cba6f7; font-size: 12.5px; font-weight: 600;")
+        layout.addWidget(self._name_label)
+
+        self.setStyleSheet(
+            "QFrame#createTagPill { background-color: rgba(203, 166, 247, 0.12); "
+            "border: 1px dashed #cba6f7; border-radius: 8px; }"
+            "QFrame#createTagPill:hover { background-color: rgba(203, 166, 247, 0.22); }"
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.tag_name)
+        super().mousePressEvent(event)
+
+
 def _format_duration(seconds):
     seconds = int(seconds or 0)
     h, rem = divmod(seconds, 3600)
@@ -257,11 +293,21 @@ class TagRecordingDialog(QDialog):
         subtitle.setStyleSheet("color: #75798c; font-size: 12.5px;")
         outer.addWidget(subtitle)
 
+        input_row = QHBoxLayout()
+        input_row.setSpacing(8)
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText("Filter or type a new tag")
-        self.filter_input.textChanged.connect(lambda _t: self._refresh_all_tags())
+        self.filter_input.textChanged.connect(self._on_filter_text_changed)
         self.filter_input.returnPressed.connect(self._on_filter_enter)
-        outer.addWidget(self.filter_input)
+        input_row.addWidget(self.filter_input, 1)
+
+        self.add_btn = QPushButton("+ Add")
+        self.add_btn.setObjectName("primaryAction")
+        self.add_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.add_btn.setEnabled(False)
+        self.add_btn.clicked.connect(self._on_filter_enter)
+        input_row.addWidget(self.add_btn)
+        outer.addLayout(input_row)
 
         self._on_this_header = QLabel()
         self._on_this_header.setObjectName("sectionHeader")
@@ -326,6 +372,10 @@ class TagRecordingDialog(QDialog):
 
     # --- data refresh -----------------------------------------------------
 
+    def _on_filter_text_changed(self, text):
+        self.add_btn.setEnabled(bool(text.strip()))
+        self._refresh_all_tags()
+
     def _refresh_all(self):
         self._refresh_assigned()
         self._refresh_suggestion()
@@ -374,7 +424,8 @@ class TagRecordingDialog(QDialog):
         self._suggestion_frame.setVisible(True)
 
     def _refresh_all_tags(self):
-        query = self.filter_input.text().strip().lower()
+        query = self.filter_input.text().strip()
+        query_lower = query.lower()
         while self._all_flow.count():
             item = self._all_flow.takeAt(0)
             widget = item.widget()
@@ -393,9 +444,15 @@ class TagRecordingDialog(QDialog):
 
         all_tags.sort(key=lambda t: counts.get(t["name"], 0), reverse=True)
 
+        # If user is searching and query doesn't match an existing tag exactly, show "+ Create 'query'" pill first
+        if query and query_lower not in known and query_lower not in {a.lower() for a in self._assigned}:
+            create_pill = _CreateTagPill(query)
+            create_pill.clicked.connect(self._create_and_assign_tag)
+            self._all_flow.addWidget(create_pill)
+
         for t in all_tags:
             name = t["name"]
-            if query and query not in name.lower():
+            if query_lower and query_lower not in name.lower():
                 continue
             pill = _AllTagPill(name, counts.get(name, 0), name in self._assigned)
             pill.clicked.connect(self._on_toggle_tag)
@@ -403,38 +460,61 @@ class TagRecordingDialog(QDialog):
 
     # --- actions ------------------------------------------------------------
 
+    def _create_and_assign_tag(self, name):
+        name = name.strip()
+        if not name:
+            return
+        tag_manager.create_tag(name, tags_file=self.tags_file)
+        if self._session_dir:
+            self._assigned = tag_manager.add_tag_to_recording(
+                self._session_dir, name, tags_file=self.tags_file
+            )
+        elif name not in self._assigned:
+            self._assigned.append(name)
+        if isinstance(self.metadata, dict):
+            self.metadata["tags"] = list(self._assigned)
+        self.filter_input.clear()
+        self._refresh_all()
+        self.tags_changed.emit(self._assigned)
+
     def _on_toggle_tag(self, name):
         if not self._session_dir:
-            return
-        if name in self._assigned:
+            if name in self._assigned:
+                self._assigned.remove(name)
+            else:
+                self._assigned.append(name)
+        elif name in self._assigned:
             self._assigned = tag_manager.remove_tag_from_recording(self._session_dir, name)
         else:
             self._assigned = tag_manager.add_tag_to_recording(
                 self._session_dir, name, tags_file=self.tags_file
             )
+        if isinstance(self.metadata, dict):
+            self.metadata["tags"] = list(self._assigned)
         self._refresh_all()
         self.tags_changed.emit(self._assigned)
 
     def _on_remove_tag(self, name):
         if not self._session_dir:
-            return
-        self._assigned = tag_manager.remove_tag_from_recording(self._session_dir, name)
+            if name in self._assigned:
+                self._assigned.remove(name)
+        else:
+            self._assigned = tag_manager.remove_tag_from_recording(self._session_dir, name)
+        if isinstance(self.metadata, dict):
+            self.metadata["tags"] = list(self._assigned)
         self._refresh_all()
         self.tags_changed.emit(self._assigned)
 
     def _on_filter_enter(self):
         text = self.filter_input.text().strip()
-        if not text or not self._session_dir:
-            return
-        existing = {t["name"].lower() for t in tag_manager.load_all_tags(tags_file=self.tags_file)}
-        if text.lower() not in existing:
-            tag_manager.create_tag(text, tags_file=self.tags_file)
-        self._assigned = tag_manager.add_tag_to_recording(
-            self._session_dir, text, tags_file=self.tags_file
-        )
-        self.filter_input.clear()
-        self._refresh_all()
-        self.tags_changed.emit(self._assigned)
+        if text:
+            self._create_and_assign_tag(text)
+
+    def accept(self):
+        text = self.filter_input.text().strip()
+        if text:
+            self._create_and_assign_tag(text)
+        super().accept()
 
     def _apply_suggestion(self):
         if not self._session_dir:
@@ -444,6 +524,8 @@ class TagRecordingDialog(QDialog):
                 self._assigned = tag_manager.add_tag_to_recording(
                     self._session_dir, name, tags_file=self.tags_file
                 )
+        if isinstance(self.metadata, dict):
+            self.metadata["tags"] = list(self._assigned)
         self._suggestion_frame.setVisible(False)
         self._refresh_assigned()
         self._refresh_all_tags()
