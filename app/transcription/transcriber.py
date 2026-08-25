@@ -194,7 +194,7 @@ class TranscriptionWorker(QThread):
     cancelled = pyqtSignal()
 
     def __init__(self, audio_path, model_size="base", language=None, device="cpu",
-                 tracks=None, full_cpu=False, engine="faster_whisper"):
+                 tracks=None, full_cpu=False):
         """tracks is an optional [(speaker, path), ...].
 
         When given, each track is transcribed separately and the results
@@ -211,7 +211,6 @@ class TranscriptionWorker(QThread):
         self.device = device
         self.tracks = tracks
         self.full_cpu = full_cpu
-        self.engine = engine or "faster_whisper"
         # Segments removed as bleed copies — the only visible evidence that
         # the mic is hearing the speakers.
         self.bleed_dropped = 0
@@ -220,79 +219,6 @@ class TranscriptionWorker(QThread):
     def cancel(self):
         """Request cancellation of the transcription."""
         self._cancel_requested = True
-
-    def _run_sherpa_onnx(self):
-        from app.transcription.sherpa_transcriber import SherpaOnnxTranscriber
-        from app.transcription.track_merge import merge_tracks
-
-        cpu_count = os.cpu_count() or 4
-        threads = max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
-        provider = "cuda" if self.device == "cuda" else "cpu"
-
-        transcriber = SherpaOnnxTranscriber(
-            model_name=self.model_size,
-            language=self.language,
-            num_threads=threads,
-            provider=provider,
-        )
-
-        def _on_progress(pct, msg):
-            self.progress.emit(msg)
-            self.progress_percent.emit(pct)
-
-        if self.tracks:
-            span = 1.0 / len(self.tracks)
-            transcribed = []
-            language, duration = None, 0.0
-            for i, (speaker, path) in enumerate(self.tracks):
-                if self._cancel_requested:
-                    return None
-                self.progress.emit(f"Transcribing {speaker} audio...")
-
-                def _track_progress(pct, msg):
-                    self.progress.emit(msg)
-                    base = i * span
-                    self.progress_percent.emit(int(min(100, (base + (pct / 100.0) * span) * 100)))
-
-                try:
-                    outcome = transcriber.transcribe(
-                        path,
-                        progress_callback=_track_progress,
-                        is_cancelled=lambda: self._cancel_requested,
-                    )
-                except Exception:
-                    logger.exception("Track %s (%s) failed to transcribe with sherpa-onnx", speaker, path)
-                    continue
-
-                if outcome is None:
-                    return None
-                segments, info = outcome
-                transcribed.append((speaker, segments))
-                language = language or info.get("language")
-                duration = max(duration, info.get("duration", 0.0))
-
-            result = TranscriptResult(language=language, duration=duration)
-            result.segments = merge_tracks(transcribed)
-            self.bleed_dropped = (
-                sum(len(segments) for _, segments in transcribed) - len(result.segments)
-            )
-            return result
-        else:
-            self.progress.emit("Transcribing audio...")
-            outcome = transcriber.transcribe(
-                self.audio_path,
-                progress_callback=_on_progress,
-                is_cancelled=lambda: self._cancel_requested,
-            )
-            if outcome is None:
-                return None
-            segments, info = outcome
-            result = TranscriptResult(
-                language=info.get("language", self.language),
-                duration=info.get("duration", 0.0),
-            )
-            result.segments = segments
-            return result
 
     def _transcribe_one(self, model, path, progress_base=0.0, progress_span=1.0):
         """Transcribe one file. Returns (segments, info), or None if cancelled."""
@@ -367,37 +293,34 @@ class TranscriptionWorker(QThread):
                 self.cancelled.emit()
                 return
 
-            if self.engine == "sherpa_onnx":
-                result = self._run_sherpa_onnx()
-            else:
-                self.progress.emit("Loading transcription model...")
+            self.progress.emit("Loading transcription model...")
 
-                device = self.device
-                if device == "cuda":
-                    try:
-                        import torch
-                        if not torch.cuda.is_available():
-                            self.progress.emit(
-                                "CUDA selected but not available — falling back to CPU. "
-                                "Install CUDA PyTorch for GPU acceleration: "
-                                "pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126"
-                            )
-                            device = "cpu"
-                    except ImportError:
-                        self.progress.emit("PyTorch not found — falling back to CPU.")
+            device = self.device
+            if device == "cuda":
+                try:
+                    import torch
+                    if not torch.cuda.is_available():
+                        self.progress.emit(
+                            "CUDA selected but not available — falling back to CPU. "
+                            "Install CUDA PyTorch for GPU acceleration: "
+                            "pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126"
+                        )
                         device = "cpu"
+                except ImportError:
+                    self.progress.emit("PyTorch not found — falling back to CPU.")
+                    device = "cpu"
 
-                compute_type = "float16" if device == "cuda" else "int8"
-                model = _get_model(self.model_size, device, compute_type, self.full_cpu)
+            compute_type = "float16" if device == "cuda" else "int8"
+            model = _get_model(self.model_size, device, compute_type, self.full_cpu)
 
-                if self._cancel_requested:
-                    self.cancelled.emit()
-                    return
+            if self._cancel_requested:
+                self.cancelled.emit()
+                return
 
-                if self.tracks:
-                    result = self._run_tracks(model)
-                else:
-                    result = self._run_single(model)
+            if self.tracks:
+                result = self._run_tracks(model)
+            else:
+                result = self._run_single(model)
 
             if result is None:
                 self.cancelled.emit()

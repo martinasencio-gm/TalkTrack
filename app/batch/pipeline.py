@@ -29,8 +29,6 @@ class BatchSettings:
     device: str = "cpu"
     hf_token: str = ""
     diarize: bool = False
-    engine: str = "sherpa_onnx"
-    transcription_engine: str = "faster_whisper"
     min_speakers: int = None
     max_speakers: int = None
     replace_you_with_name: bool = False
@@ -38,18 +36,6 @@ class BatchSettings:
 
     @classmethod
     def from_config(cls, config, diarize=None):
-        engine = None
-        try:
-            engine = config.get("diarization", "engine")
-        except Exception:
-            pass
-
-        transcription_engine = "faster_whisper"
-        try:
-            transcription_engine = config.get("transcription", "engine") or "faster_whisper"
-        except Exception:
-            pass
-
         hf_token = ""
         try:
             hf_token = config.get("diarization", "hf_token") or ""
@@ -74,14 +60,7 @@ class BatchSettings:
         except Exception:
             pass
 
-        if engine == "sherpa_onnx":
-            can_diarize = bool(want)
-        elif engine == "pyannote":
-            can_diarize = bool(want and hf_token)
-        else:
-            # Fallback when engine is not explicitly in config (legacy/mock config)
-            can_diarize = bool(want and hf_token)
-            engine = "pyannote" if hf_token else "sherpa_onnx"
+        can_diarize = bool(want and hf_token)
 
         return cls(
             model_size=config.get("transcription", "model_size"),
@@ -89,8 +68,6 @@ class BatchSettings:
             device=config.get("transcription", "device"),
             hf_token=hf_token,
             diarize=can_diarize,
-            engine=engine,
-            transcription_engine=transcription_engine,
             min_speakers=config.get("diarization", "min_speakers"),
             max_speakers=config.get("diarization", "max_speakers"),
             replace_you_with_name=replace_you,
@@ -168,7 +145,7 @@ def run_job(job, settings, workers=None, on_progress=None):
     # to run the mix must stay intact — dual_track_plan already declines
     # in that case, but the argument order matters.
     tracks = dual_track_plan(
-        job.session, settings.diarize, settings.hf_token, engine=settings.engine
+        job.session, settings.diarize, settings.hf_token
     )
 
     worker = workers.transcription(
@@ -180,7 +157,6 @@ def run_job(job, settings, workers=None, on_progress=None):
         # Nothing is capturing audio in a batch run, so there is no
         # real-time callback to leave headroom for.
         full_cpu=True,
-        engine=settings.transcription_engine,
     )
     result, error = _drive(worker, progress)
     if result is None:
@@ -206,7 +182,6 @@ def run_job(job, settings, workers=None, on_progress=None):
             min_speakers=settings.min_speakers,
             max_speakers=settings.max_speakers,
             full_cpu=True,
-            engine=settings.engine,
         )
         diarized_result, diarize_error = _drive(diarize_worker, progress)
         if diarized_result is None:

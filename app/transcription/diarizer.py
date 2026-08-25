@@ -34,7 +34,7 @@ class SpeakerSegment:
 
 
 class DiarizationWorker(QThread):
-    """Runs speaker diarization in a background thread using sherpa-onnx or pyannote.audio."""
+    """Runs speaker diarization in a background thread using pyannote.audio."""
 
     progress = pyqtSignal(str)
     finished = pyqtSignal(TranscriptResult)
@@ -42,8 +42,7 @@ class DiarizationWorker(QThread):
     cancelled = pyqtSignal()
 
     def __init__(self, audio_path, transcript_result, hf_token="",
-                 min_speakers=None, max_speakers=None, full_cpu=False,
-                 engine="sherpa_onnx"):
+                 min_speakers=None, max_speakers=None, full_cpu=False):
         super().__init__()
         self.audio_path = audio_path
         self.transcript_result = transcript_result
@@ -51,7 +50,6 @@ class DiarizationWorker(QThread):
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
         self.full_cpu = full_cpu
-        self.engine = engine
         self._cancel_requested = False
 
     def cancel(self):
@@ -60,59 +58,11 @@ class DiarizationWorker(QThread):
 
     def run(self):
         try:
-            if self.engine == "sherpa_onnx":
-                self._run_sherpa_onnx()
-            else:
-                self._run_pyannote()
+            self._run_pyannote()
         except ImportError as e:
             self.error.emit(f"Diarization dependency missing: {e}")
         except Exception as e:
             self.error.emit(f"Diarization failed: {e}")
-
-    def _run_sherpa_onnx(self):
-        if self._cancel_requested:
-            self.cancelled.emit()
-            return
-
-        from app.transcription.sherpa_diarizer import SherpaOnnxDiarizer
-        import os
-
-        self.progress.emit("Loading ONNX diarization models...")
-        cpu_count = os.cpu_count() or 4
-        threads = max(1, cpu_count - 1) if self.full_cpu else max(1, cpu_count // 2)
-
-        diarizer = SherpaOnnxDiarizer(num_threads=threads)
-        if self._cancel_requested:
-            self.cancelled.emit()
-            return
-
-        self.progress.emit("Running speaker diarization...")
-
-        def _cb(msg):
-            if not self._cancel_requested:
-                self.progress.emit(msg)
-
-        speaker_segments = diarizer.diarize(
-            self.audio_path,
-            min_speakers=self.min_speakers,
-            max_speakers=self.max_speakers,
-            progress_callback=_cb,
-            is_cancelled=lambda: self._cancel_requested,
-        )
-
-        if self._cancel_requested:
-            self.cancelled.emit()
-            return
-
-        self.progress.emit("Mapping speakers to transcript...")
-        result = self._merge_diarization_with_transcript(
-            self.transcript_result, speaker_segments
-        )
-        if self._cancel_requested:
-            self.cancelled.emit()
-            return
-
-        self.finished.emit(result)
 
     def _run_pyannote(self):
         if self._cancel_requested:

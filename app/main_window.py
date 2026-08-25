@@ -1646,7 +1646,6 @@ class MainWindow(QMainWindow):
         model_size = self.config.get("transcription", "model_size")
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
-        transcription_engine = self.config.get("transcription", "engine") or "faster_whisper"
 
         # Read the viewer's checkbox, not the config, so the choice in force
         # is the one visible next to the button that started this job. Bound
@@ -1658,9 +1657,8 @@ class MainWindow(QMainWindow):
         # instead of the mix: Whisper never sees the doubled copy of remote
         # speech that bleed puts into combined_audio.wav, and the You/Remote
         # labels come from which file a segment was read out of.
-        diarization_engine = self.config.get("diarization", "engine") or "sherpa_onnx"
         tracks = dual_track_plan(
-            session, diarize, self.config.get("diarization", "hf_token"), engine=diarization_engine,
+            session, diarize, self.config.get("diarization", "hf_token"),
         )
 
         self._current_transcription_percent = None
@@ -1673,7 +1671,6 @@ class MainWindow(QMainWindow):
             # Half the cores exist to protect the live capture callback;
             # with nothing recording that cap only slows the job down.
             full_cpu=self.recorder.state == RecordingState.IDLE,
-            engine=transcription_engine,
         )
         self._transcription_worker.session = session
         self._transcription_worker.diarize = diarize
@@ -1727,11 +1724,8 @@ class MainWindow(QMainWindow):
         # The worker carries the choice made when the job started; the
         # checkbox may have been toggled since.
         diarization_enabled = getattr(self._transcription_worker, "diarize", False)
-        engine = self.config.get("diarization", "engine") or "sherpa_onnx"
         hf_token = self.config.get("diarization", "hf_token")
-        should_diarize = diarization_enabled and (
-            engine == "sherpa_onnx" or (engine == "pyannote" and bool(hf_token))
-        )
+        should_diarize = diarization_enabled and bool(hf_token)
 
         if getattr(self._transcription_worker, "tracks", None):
             # Per-track transcription already labelled every segment.
@@ -1791,17 +1785,12 @@ class MainWindow(QMainWindow):
         The checkbox is the live source of truth for new jobs; this keeps it
         agreeing with Settings, in both directions (see _on_diarize_toggled).
         """
-        engine = "sherpa_onnx"
-        try:
-            engine = self.config.get("diarization", "engine") or "sherpa_onnx"
-        except Exception:
-            pass
         hf_token = ""
         try:
             hf_token = self.config.get("diarization", "hf_token")
         except Exception:
             pass
-        available = True if engine == "sherpa_onnx" else bool(hf_token)
+        available = bool(hf_token)
         self.transcript_viewer.set_diarization_available(available)
         enabled = True
         try:
@@ -1840,11 +1829,6 @@ class MainWindow(QMainWindow):
             self.source_selector.output_mismatch,
         )
 
-        engine = "sherpa_onnx"
-        try:
-            engine = self.config.get("diarization", "engine") or "sherpa_onnx"
-        except Exception:
-            pass
         hf_token_present = False
         try:
             hf_token_present = bool(self.config.get("diarization", "hf_token"))
@@ -1852,7 +1836,7 @@ class MainWindow(QMainWindow):
             pass
         diarization_enabled = self.transcript_viewer.diarization_enabled()
         model_check = preflight_status.compute_transcription_check(
-            diarization_enabled, hf_token_present, engine=engine
+            diarization_enabled, hf_token_present
         )
 
         verdict, title, subtitle = preflight_status.compute_verdict(
@@ -1897,7 +1881,6 @@ class MainWindow(QMainWindow):
         min_speakers = self.config.get("diarization", "min_speakers")
         max_speakers = self.config.get("diarization", "max_speakers")
 
-        engine = self.config.get("diarization", "engine") or "sherpa_onnx"
         self._current_transcription_percent = None
         self._diarization_worker = DiarizationWorker(
             audio_path=audio_path,
@@ -1906,7 +1889,6 @@ class MainWindow(QMainWindow):
             min_speakers=min_speakers,
             max_speakers=max_speakers,
             full_cpu=self.recorder.state == RecordingState.IDLE,
-            engine=engine,
         )
         self._diarization_worker.session = session
         self._diarization_worker.progress.connect(self._on_transcription_progress)

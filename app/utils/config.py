@@ -42,7 +42,6 @@ DEFAULT_CONFIG = {
         "session_import_done": False,
     },
     "transcription": {
-        "engine": "faster_whisper",
         "model_size": "base",
         "language": None,
         "device": "cpu",
@@ -50,7 +49,6 @@ DEFAULT_CONFIG = {
     },
     "diarization": {
         "enabled": True,
-        "engine": "sherpa_onnx",
         "hf_token": "",
         "min_speakers": None,
         "max_speakers": None,
