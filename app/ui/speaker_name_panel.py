@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QTimer
 from PyQt6.QtGui import QIcon
 
 from app.utils.icons import colored_pixmap
+from app.ui.avatar_widget import AvatarWidget
 
 _EMPTY_ICON_COLOR = "#3f424d"
 _EMPTY_ICON_SIZE = 20
@@ -167,24 +168,27 @@ class SpeakerNamePanel(QWidget):
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 2, 0, 2)
+            row_layout.setSpacing(8)
 
-            # Color swatch
             color = SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
-            swatch = QLabel("\u25cf")
-            swatch.setStyleSheet(f"color: {color}; font-size: 16px;")
-            swatch.setFixedWidth(20)
-            row_layout.addWidget(swatch)
+
+            # Letter avatar with circle in speaker color
+            initial = speaker_id[:1].upper() if speaker_id else "?"
+            avatar = AvatarWidget(initial, color, size=22)
+            row_layout.addWidget(avatar)
 
             # Speaker ID label
             id_label = QLabel(speaker_id)
             id_label.setObjectName("speakerIdLabel")
-            id_label.setFixedWidth(100)
+            id_label.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 13px;")
+            id_label.setFixedWidth(105)
             row_layout.addWidget(id_label)
 
             # Arrow
             arrow_label = QLabel("\u2192")
             arrow_label.setObjectName("speakerArrowLabel")
-            arrow_label.setFixedWidth(20)
+            arrow_label.setStyleSheet("color: #75798c; font-size: 14px;")
+            arrow_label.setFixedWidth(18)
             row_layout.addWidget(arrow_label)
 
             existing_name = self._speaker_names.get(speaker_id, "")

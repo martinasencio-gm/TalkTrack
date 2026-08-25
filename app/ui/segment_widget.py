@@ -7,33 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPointF
 from PyQt6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QPolygonF, QPen, QFont
 
 from app.utils.icons import icon_path
-
-
-class AvatarWidget(QWidget):
-    def __init__(self, initial, color, parent=None):
-        super().__init__(parent)
-        self.initial = initial[:1].upper() if initial else "?"
-        self.color = color
-        self.setFixedSize(24, 24)
-
-    def set_initial(self, initial):
-        self.initial = initial[:1].upper() if initial else "?"
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        pen = QPen(QColor(self.color))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        painter.drawEllipse(1, 1, 22, 22)
-        
-        painter.setPen(QColor(self.color))
-        font = QFont("Inter", 10, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.initial)
-        painter.end()
+from app.ui.avatar_widget import AvatarWidget
 
 
 def _format_time(seconds):
