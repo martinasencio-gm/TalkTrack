@@ -38,43 +38,29 @@ class TestMainWindowMeetingNotificationClick(unittest.TestCase):
         self.addCleanup(_close)
         return window
 
-    def test_suggest_start_shows_toast_when_strip_hidden(self):
+    def test_suggest_start_shows_toast_and_notifies_tray(self):
         window = self._make_window()
-        window.compact_strip.hide()
-        with patch.object(window.meeting_toast, "show_start") as mock_show:
+        with patch.object(window.meeting_toast, "show_start") as mock_show, \
+             patch.object(window.tray, "is_supported", return_value=True), \
+             patch.object(window.tray, "notify_meeting") as mock_notify:
             window._handle_meeting_decision(
                 Decision("suggest_start", "Team Sync"), {"timestamp": 0}
             )
         mock_show.assert_called_once()
+        mock_notify.assert_called_once()
+        self.assertEqual(window._pending_meeting_notification, "start")
 
-    def test_suggest_start_no_toast_when_strip_visible(self):
+    def test_suggest_end_shows_toast_and_notifies_tray(self):
         window = self._make_window()
-        window.compact_strip.show()
-        with patch.object(window.meeting_toast, "show_start") as mock_show:
-            window._handle_meeting_decision(
-                Decision("suggest_start", "Team Sync"), {"timestamp": 0}
-            )
-        mock_show.assert_not_called()
-        window.compact_strip.hide()
-
-    def test_suggest_end_shows_toast_when_strip_hidden(self):
-        window = self._make_window()
-        window.compact_strip.hide()
-        with patch.object(window.meeting_toast, "show_end") as mock_show:
+        with patch.object(window.meeting_toast, "show_end") as mock_show, \
+             patch.object(window.tray, "is_supported", return_value=True), \
+             patch.object(window.tray, "notify_meeting") as mock_notify:
             window._handle_meeting_decision(
                 Decision("suggest_end", "Team Sync"), {"timestamp": 0}
             )
         mock_show.assert_called_once()
-
-    def test_suggest_end_no_toast_when_strip_visible(self):
-        window = self._make_window()
-        window.compact_strip.show()
-        with patch.object(window.meeting_toast, "show_end") as mock_show:
-            window._handle_meeting_decision(
-                Decision("suggest_end", "Team Sync"), {"timestamp": 0}
-            )
-        mock_show.assert_not_called()
-        window.compact_strip.hide()
+        mock_notify.assert_called_once()
+        self.assertEqual(window._pending_meeting_notification, "end")
 
     def test_clicking_start_notification_starts_recording_and_clears_banner(self):
         window = self._make_window()

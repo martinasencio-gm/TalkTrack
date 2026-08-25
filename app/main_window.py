@@ -945,11 +945,15 @@ class MainWindow(QMainWindow):
         if action == "suggest_start":
             self._active_detected_meeting_name = decision.meeting_name
             elapsed = self._meeting_elapsed(snapshot)
-            # Show the floating toast only when the compact strip isn't
-            # already visible — the strip's armed state with its Record
-            # button is sufficient when it's on screen.
-            if hasattr(self, "meeting_toast") and not self.compact_strip.isVisible():
+            if hasattr(self, "meeting_toast"):
                 self.meeting_toast.show_start(decision.meeting_name, elapsed)
+            if hasattr(self, "tray") and self.tray.is_supported():
+                self._pending_meeting_notification = "start"
+                display_name = decision.meeting_name or "A meeting"
+                self.tray.notify_meeting(
+                    "Meeting Detected",
+                    f"{display_name} is underway. Click to record.",
+                )
         elif action == "start":
             self._active_detected_meeting_name = decision.meeting_name
             display_name = decision.meeting_name or "Meeting"
@@ -957,8 +961,15 @@ class MainWindow(QMainWindow):
             self._start_recording()
         elif action == "suggest_end":
             elapsed = self.recorder.get_elapsed_time()
-            if hasattr(self, "meeting_toast") and not self.compact_strip.isVisible():
+            if hasattr(self, "meeting_toast"):
                 self.meeting_toast.show_end(decision.meeting_name, elapsed)
+            if hasattr(self, "tray") and self.tray.is_supported():
+                self._pending_meeting_notification = "end"
+                display_name = decision.meeting_name or "The meeting"
+                self.tray.notify_meeting(
+                    "Meeting Ended",
+                    f"{display_name} has ended. Click to stop and save.",
+                )
         elif action == "stop":
             self.status_label.setText("Meeting ended — stopping recording...")
             self.recorder.stop_recording()

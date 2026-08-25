@@ -199,6 +199,7 @@ class MeetingNotificationToast(QWidget):
 
         self._reposition()
         self.show()
+        self.raise_()
         self._auto_close_timer.start()
 
     def show_end(self, meeting_name, recorded_seconds):
@@ -235,6 +236,7 @@ class MeetingNotificationToast(QWidget):
 
         self._reposition()
         self.show()
+        self.raise_()
         self._auto_close_timer.start()
 
     def hide_and_clear(self):

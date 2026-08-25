@@ -15,12 +15,20 @@ logger = logging.getLogger(__name__)
 _MEETING_TITLE_MARKERS = (
     "zoom meeting",
     "zoom workplace",
+    "zoom",
     "meeting with",
     "| microsoft teams",
     "| teams",
+    "- microsoft teams",
+    "- teams",
     "microsoft teams, meeting window",
     "microsoft teams call",
+    "microsoft teams meeting",
+    "microsoft teams",
     "| webex",
+    "- webex",
+    "cisco webex",
+    "google meet",
 )
 
 # IAudioSessionControl::GetState -> AudioSessionStateActive
@@ -45,12 +53,17 @@ def parse_meeting_title(title: str) -> str | None:
     # "Jane Doe | Microsoft Teams"
     # "Chat | Jane Doe | Microsoft Teams"
     # "Sprint Planning | Microsoft Teams"
-    if "microsoft teams" in lower or "| teams" in lower:
+    # "Sprint Planning - Microsoft Teams"
+    if "microsoft teams" in lower or "| teams" in lower or "- teams" in lower:
         clean_t = t
-        for suffix in [", meeting window", " call"]:
+        for suffix in [", meeting window", " call", " meeting"]:
             if clean_t.lower().endswith(suffix):
                 clean_t = clean_t[:-len(suffix)].strip()
-        parts = [p.strip() for p in clean_t.split("|") if p.strip()]
+        # Split on | or -
+        parts = []
+        for segment in clean_t.replace(" - ", " | ").split("|"):
+            if segment.strip():
+                parts.append(segment.strip())
         generic_markers = {
             "microsoft teams", "teams", "chat", "meeting", "calls", "call"
         }
@@ -106,8 +119,17 @@ def _base_name(process_name):
 
 def is_meeting_app(process_name, apps):
     """True if process_name is one of the configured meeting apps."""
-    base = _base_name(process_name).lower()
-    return any(base == _base_name(a).lower() for a in apps)
+    def normalize(name):
+        return _base_name(name).lower().replace("-", "").replace("_", "")
+
+    proc_norm = normalize(process_name)
+    for a in apps:
+        app_norm = normalize(a)
+        if proc_norm == app_norm:
+            return True
+        if proc_norm in ("msteams", "teams") and app_norm in ("msteams", "teams", "msteamsprocess"):
+            return True
+    return False
 
 
 def get_mic_capture_pids(exclude_pid=None):
@@ -194,13 +216,20 @@ def _default_titles():
     titles = []
 
     def callback(hwnd, _):
-        if not win32gui.IsWindowVisible(hwnd):
-            return
-        text = win32gui.GetWindowText(hwnd)
-        if text and any(m in text.lower() for m in _MEETING_TITLE_MARKERS):
-            titles.append(text)
+        try:
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            text = win32gui.GetWindowText(hwnd)
+            if text and any(m in text.lower() for m in _MEETING_TITLE_MARKERS):
+                titles.append(text)
+        except Exception:
+            pass
+        return True
 
-    win32gui.EnumWindows(callback, None)
+    try:
+        win32gui.EnumWindows(callback, None)
+    except Exception:
+        pass
     return titles
 
 
