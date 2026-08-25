@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QProgressBar, QFileDialog, QScrollArea, QCheckBox,
+    QLabel, QFileDialog, QScrollArea, QCheckBox,
     QApplication, QToolTip,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -19,7 +19,13 @@ _EMPTY_ICON_SIZE = 34
 
 
 def _format_progress_text(message, elapsed_seconds, percent=None):
-    """Format the progress status line, including ETA when percent is known."""
+    """Format a progress status line, including ETA when percent is known.
+
+    No longer used to drive any visible widget in this panel (see
+    _setup_ui) — RecordingControls.set_transcribing formats its own strip
+    text now — but kept as the tested, reusable formatting helper in case
+    a future surface needs the same "message  NN%  (elapsed · ETA)" shape.
+    """
     if elapsed_seconds is None:
         return message
 
@@ -61,7 +67,6 @@ class TranscriptViewer(QWidget):
     """
 
     transcribe_requested = pyqtSignal(str)  # audio file path
-    cancel_requested = pyqtSignal()         # emitted when cancel button clicked
     transcript_changed = pyqtSignal()       # emitted when text or names change
     speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
     diarize_requested = pyqtSignal()        # run diarization on the loaded transcript
@@ -140,30 +145,13 @@ class TranscriptViewer(QWidget):
 
         layout.addLayout(header)
 
-        # Progress row (bar + cancel button)
-        progress_row = QHBoxLayout()
-        # Qt's indeterminate QProgressBar animates a moving block on every
-        # style, not just Windows' native theme — there's no stylesheet
-        # that turns it off. So we never use indeterminate mode: the bar
-        # stays hidden until we have a real percent to show (during the
-        # transcription loop), and status_label alone carries progress
-        # for phases with no percent data (model loading, diarization).
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.hide()
-        progress_row.addWidget(self.progress_bar)
-
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedWidth(70)
-        self.cancel_btn.hide()
-        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
-        progress_row.addWidget(self.cancel_btn)
-        layout.addLayout(progress_row)
-
-        self.status_label = QLabel("")
-        self.status_label.hide()
-        layout.addWidget(self.status_label)
+        # No progress bar/status label/Cancel button here — the recording
+        # controls' transcribing strip (RecordingControls.set_transcribing)
+        # already shows percent/elapsed/remaining and a Cancel button for
+        # whichever job (transcription or diarization) is running, so this
+        # panel would just be a duplicate. Progress state (elapsed time,
+        # percent) is still tracked below since main_window reads
+        # _progress_start_time to feed that strip.
 
         # Speaker name panel. Normally injected by MainWindow (it lives in
         # the Inspector's "Speakers" section, not this column) — building
@@ -328,49 +316,26 @@ class TranscriptViewer(QWidget):
             self.transcribe_requested.emit(self._audio_path)
 
     def show_progress(self, message):
+        """Track that a job is running — no visible UI here, but
+        main_window reads _progress_start_time/_progress_percent off this
+        object to drive the recording controls' transcribing strip, which
+        is the only place progress is now shown (see _setup_ui)."""
         self._progress_message = message
-        # No percent data yet for this phase (model loading, diarization,
-        # or before the first segment lands) — hide the bar rather than
-        # show it in indeterminate mode, since status_label + the elapsed
-        # timer already say "work is happening" without any animation.
         self._progress_percent = None
-        self.progress_bar.hide()
-        self.cancel_btn.show()
         if self._progress_start_time is None:
             self._progress_start_time = time.monotonic()
             self._elapsed_timer.start()
-        self._update_status_label()
-        self.status_label.show()
 
     def set_progress_percent(self, percent):
-        """Show the bar at a real percent — the only mode it's ever shown in."""
         self._progress_percent = percent
-        self.progress_bar.setValue(percent)
-        self.progress_bar.show()
-        self._update_status_label()
 
     def _tick_elapsed(self):
-        self._update_status_label()
-
-    def _update_status_label(self):
-        elapsed = (
-            time.monotonic() - self._progress_start_time
-            if self._progress_start_time is not None else None
-        )
-        self.status_label.setText(
-            _format_progress_text(self._progress_message, elapsed, self._progress_percent)
-        )
+        pass
 
     def hide_progress(self):
-        self.progress_bar.hide()
-        self.cancel_btn.hide()
-        self.status_label.hide()
         self._elapsed_timer.stop()
         self._progress_start_time = None
         self._progress_percent = None
-
-    def _on_cancel_clicked(self):
-        self.cancel_requested.emit()
 
     def show_loading(self, message="Loading transcript..."):
         """Show a clean loading state while transcript data is being processed."""
@@ -383,11 +348,25 @@ class TranscriptViewer(QWidget):
                 item = self._segments_layout.takeAt(0)
                 if item.widget():
                     item.widget().deleteLater()
+
+            loading_container = QWidget()
+            loading_layout = QVBoxLayout(loading_container)
+            loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            loading_layout.setSpacing(10)
+            loading_layout.setContentsMargins(0, 60, 0, 60)
+
+            icon_lbl = QLabel()
+            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_lbl.setPixmap(colored_pixmap("hourglass", "#9184d9", 28))
+            loading_layout.addWidget(icon_lbl)
+
             loading_label = QLabel(message)
             loading_label.setObjectName("transcriptPlaceholder")
             loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            loading_label.setStyleSheet("color: #9397ab; font-size: 14px; padding: 40px;")
-            self._segments_layout.addWidget(loading_label)
+            loading_label.setStyleSheet("color: #9397ab; font-size: 13.5px; font-weight: 500;")
+            loading_layout.addWidget(loading_label)
+
+            self._segments_layout.addWidget(loading_container)
             self._segments_layout.addStretch()
         finally:
             self._segments_container.setUpdatesEnabled(True)
@@ -395,6 +374,13 @@ class TranscriptViewer(QWidget):
 
     def display_transcript(self, transcript, speaker_names=None, attendees=None):
         """Render transcript with interactive segment widgets."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self._do_display_transcript(transcript, speaker_names=speaker_names, attendees=attendees)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _do_display_transcript(self, transcript, speaker_names=None, attendees=None):
         self.hide_progress()
         self._transcript = transcript
         if speaker_names is not None:

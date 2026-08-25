@@ -545,7 +545,6 @@ class MainWindow(QMainWindow):
 
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._on_viewer_transcribe_requested)
-        self.transcript_viewer.cancel_requested.connect(self._cancel_transcription)
         self.transcript_viewer.diarize_toggled.connect(self._on_diarize_toggled)
         self.transcript_viewer.diarize_requested.connect(self._on_diarize_requested)
         self._sync_diarization_controls()
@@ -2166,6 +2165,13 @@ class MainWindow(QMainWindow):
 
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self._do_on_recording_selected(metadata)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _do_on_recording_selected(self, metadata):
         # Clear any stale calendar-suggestion banner from the previously
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
