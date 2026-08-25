@@ -246,14 +246,8 @@ class MeetingNotificationToast(QWidget):
 
     def _reposition(self):
         self.adjustSize()
-        screen = QApplication.primaryScreen()
-        if not screen:
-            return
-        geo = screen.availableGeometry()
-        margin = 20
-        x = geo.right() - self.width() - margin
-        y = geo.bottom() - self.height() - margin
-        self.move(x, y)
+        from app.utils.screen_utils import position_corner_on_active_screen
+        position_corner_on_active_screen(self, corner="bottom-right", margin=20, reference_widget=self.parent())
 
     def _on_record(self):
         self.hide_and_clear()

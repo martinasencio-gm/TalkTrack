@@ -218,6 +218,11 @@ class TagRecordingDialog(QDialog):
         self._setup_ui()
         self._refresh_all()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
     def _setup_ui(self):
         self.setStyleSheet("QDialog { background-color: #161826; }")
 

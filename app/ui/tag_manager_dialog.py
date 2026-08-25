@@ -76,6 +76,11 @@ class TagManagerDialog(QDialog):
         self._setup_ui()
         self.refresh()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)

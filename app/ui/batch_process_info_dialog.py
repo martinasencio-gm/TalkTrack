@@ -39,6 +39,11 @@ class BatchProcessInfoDialog(QDialog):
         self._tick_timer.timeout.connect(self._update_runtime)
         self._tick_timer.start()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
     @property
     def process_info(self) -> BatchProcessInfo:
         return self.processes[0] if self.processes else None

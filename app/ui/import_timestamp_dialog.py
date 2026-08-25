@@ -11,6 +11,14 @@ class ImportTimestampDialog(QDialog):
     def __init__(self, default_datetime, parent=None):
         super().__init__(parent)
         self.setWindowTitle("When was this recorded?")
+        self._setup_ui(default_datetime)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
+    def _setup_ui(self, default_datetime):
         layout = QVBoxLayout(self)
 
         hint = QLabel(

@@ -22,6 +22,11 @@ class AboutDialog(QDialog):
         self.setFixedSize(540, 320)
         self._setup_ui()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)

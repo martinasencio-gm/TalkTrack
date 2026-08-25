@@ -187,6 +187,11 @@ class SourceSelector(QDialog):
         if self._win11:
             self._start_auto_refresh()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         
         # Instantiate these so the rest of MainWindow doesn't crash
         from app.ui.source_selector import SourceSelector
-        self.source_selector = SourceSelector(config=self.config, com_poller=self._com_poller)
+        self.source_selector = SourceSelector(config=self.config, parent=self, com_poller=self._com_poller)
         self.source_selector.hide()
         self.calendar_banner = CalendarSuggestionBanner()
         self.calendar_banner.hide()
@@ -792,6 +792,8 @@ class MainWindow(QMainWindow):
     def _open_source_selector(self):
         """Sources button on the capture bar. Non-modal — per the redesign,
         a modal here would steal focus from a call in progress."""
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self.source_selector, self)
         self.source_selector.show()
         self.source_selector.raise_()
         self.source_selector.activateWindow()
@@ -3264,10 +3266,11 @@ class MainWindow(QMainWindow):
         self._restore_from_tray()
 
     def _compact_strip_position(self):
+        from app.utils.screen_utils import get_active_screen, ensure_within_screens
         saved = self.config.get("ui", "compact_strip_position")
         if isinstance(saved, (list, tuple)) and len(saved) == 2:
-            return saved[0], saved[1]
-        screen = QApplication.primaryScreen()
+            return ensure_within_screens(saved[0], saved[1], width=742, height=78, reference_widget=self)
+        screen = get_active_screen(self)
         if screen is None:
             return 0, 0
         geo = screen.availableGeometry()
@@ -3302,14 +3305,15 @@ class MainWindow(QMainWindow):
             self._activity_widget.update_meters(self._activity_widget.pill_mic_meter.value(), pct)
 
     def _activity_widget_position(self):
+        from app.utils.screen_utils import get_active_screen, ensure_within_screens
         saved = self.config.get("ui", "activity_widget_position")
         if isinstance(saved, (list, tuple)) and len(saved) == 2:
-            return saved[0], saved[1]
-        screen = QApplication.primaryScreen()
+            return ensure_within_screens(saved[0], saved[1], width=282, height=46, reference_widget=self)
+        screen = get_active_screen(self)
         if screen is None:
             return 0, 0
         geo = screen.availableGeometry()
-        return geo.right() - 150, geo.top() + 20
+        return geo.right() - 290, geo.top() + 20
 
     def _on_activity_widget_moved(self, x, y):
         self.config.set("ui", "activity_widget_position", [x, y])

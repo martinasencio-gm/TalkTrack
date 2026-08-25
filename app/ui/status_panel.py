@@ -67,6 +67,12 @@ class SystemStatusDialog(QDialog):
         self.setMinimumSize(500, 400)
         self.setMaximumSize(600, 600)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 

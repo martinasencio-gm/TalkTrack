@@ -19,6 +19,14 @@ class DeleteScopeDialog(QDialog):
     def __init__(self, count=1, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Delete Recording" if count == 1 else "Delete Recordings")
+        self._setup_ui(count)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from app.utils.screen_utils import center_on_active_screen
+        center_on_active_screen(self, self.parent())
+
+    def _setup_ui(self, count):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
