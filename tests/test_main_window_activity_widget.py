@@ -47,7 +47,7 @@ class TestMainWindowActivityWidget(unittest.TestCase):
         try:
             window.show()
             window._update_activity_visibility()
-            self.assertFalse(window._auto_shown_minimized_pill)
+            self.assertFalse(window._activity_widget.isVisible())
         finally:
             window._really_quit = True
             window.close()
@@ -60,9 +60,9 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             window.recorder._state = RecordingState.RECORDING
             window.isMinimized = lambda: True
             window._update_activity_visibility()
-            self.assertTrue(window.compact_strip.isVisible())
-            self.assertEqual(window.compact_strip.variant(), "pill")
-            self.assertTrue(window._auto_shown_minimized_pill)
+            self.assertTrue(window._activity_widget.isVisible())
+            self.assertTrue(window._activity_widget.pill_btn_stop.isVisible())
+            self.assertTrue(window._activity_widget.pill_btn_pause.isVisible())
         finally:
             window.recorder._state = RecordingState.IDLE
             window._really_quit = True
@@ -74,8 +74,7 @@ class TestMainWindowActivityWidget(unittest.TestCase):
         try:
             window.isMinimized = lambda: True
             window._update_activity_visibility()
-            self.assertFalse(window.compact_strip.isVisible())
-            self.assertFalse(window._auto_shown_minimized_pill)
+            self.assertFalse(window._activity_widget.isVisible())
         finally:
             window._really_quit = True
             window.close()

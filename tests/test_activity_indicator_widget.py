@@ -29,24 +29,33 @@ class TestActivityIndicatorWidget(unittest.TestCase):
     def setUpClass(cls):
         _get_app()
 
-    def test_set_activity_recording_starts_pulse_timer(self):
+    def test_set_activity_recording_starts_pulse_animation(self):
+        from PyQt6.QtCore import QPropertyAnimation
         widget = ActivityIndicator()
+        widget.show()
         widget.set_activity("recording", elapsed_seconds=5)
-        self.assertTrue(widget._pulse_timer.isActive())
+        self.assertEqual(widget._mark_pulse_anim.state(), QPropertyAnimation.State.Running)
+        self.assertFalse(widget.pill_btn_stop.isHidden())
+        self.assertFalse(widget.pill_btn_pause.isHidden())
+        self.assertFalse(widget.pill_mic_meter.isHidden())
         widget.close()
 
-    def test_set_activity_paused_stops_pulse_timer(self):
+    def test_set_activity_paused_stops_pulse_animation(self):
+        from PyQt6.QtCore import QPropertyAnimation
         widget = ActivityIndicator()
+        widget.show()
         widget.set_activity("recording", elapsed_seconds=5)
         widget.set_activity("paused", elapsed_seconds=5)
-        self.assertFalse(widget._pulse_timer.isActive())
+        self.assertEqual(widget._mark_pulse_anim.state(), QPropertyAnimation.State.Stopped)
+        self.assertEqual(widget.pill_status_label.text(), "PAUSED")
         widget.close()
 
-    def test_set_activity_transcribing_stops_pulse_timer(self):
+    def test_set_activity_transcribing_shows_progress(self):
         widget = ActivityIndicator()
-        widget.set_activity("recording", elapsed_seconds=5)
+        widget.show()
         widget.set_activity("transcribing", progress_percent=50)
-        self.assertFalse(widget._pulse_timer.isActive())
+        self.assertEqual(widget.pill_status_label.text(), "Transcribing 50%")
+        self.assertTrue(widget.pill_btn_stop.isHidden())
         widget.close()
 
     def test_show_at_clamps_to_screen_geometry(self):
@@ -64,51 +73,38 @@ class TestActivityIndicatorWidget(unittest.TestCase):
         self.assertTrue(widget.isVisible())
         widget.close()
 
-    def test_click_without_drag_emits_restore_requested(self):
+    def test_click_stop_emits_stop_requested(self):
         widget = ActivityIndicator()
         received = []
-        widget.restore_requested.connect(lambda: received.append(True))
-        widget._press_pos = QPoint(10, 10)
-        widget._press_widget_pos = widget.pos()
-        widget._moved_distance = 0
-        widget.mouseReleaseEvent(_FakeLeftButtonEvent())
+        widget.stop_requested.connect(lambda: received.append(True))
+        widget.set_activity("recording")
+        widget.pill_btn_stop.click()
         self.assertEqual(received, [True])
         widget.close()
 
-    def test_drag_past_threshold_emits_position_changed(self):
+    def test_click_pause_emits_pause_requested(self):
         widget = ActivityIndicator()
         received = []
-        widget.position_changed.connect(lambda x, y: received.append((x, y)))
-        widget._press_pos = QPoint(10, 10)
-        widget._press_widget_pos = widget.pos()
-        widget._moved_distance = 20
-        widget.mouseReleaseEvent(_FakeLeftButtonEvent())
-        self.assertEqual(len(received), 1)
+        widget.pause_requested.connect(lambda: received.append(True))
+        widget.set_activity("recording")
+        widget.pill_btn_pause.click()
+        self.assertEqual(received, [True])
         widget.close()
 
-    def test_drag_at_exactly_threshold_emits_restore_not_position(self):
+    def test_click_resume_from_paused_emits_resume_requested(self):
         widget = ActivityIndicator()
-        restored = []
-        moved = []
-        widget.restore_requested.connect(lambda: restored.append(True))
-        widget.position_changed.connect(lambda x, y: moved.append((x, y)))
-        widget._press_pos = QPoint(10, 10)
-        widget._press_widget_pos = widget.pos()
-        widget._moved_distance = 4
-        widget.mouseReleaseEvent(_FakeLeftButtonEvent())
-        self.assertEqual(restored, [True])
-        self.assertEqual(moved, [])
+        received = []
+        widget.resume_requested.connect(lambda: received.append(True))
+        widget.set_activity("paused")
+        widget.pill_btn_pause.click()
+        self.assertEqual(received, [True])
         widget.close()
 
-    def test_pulse_phase_preserved_across_same_state_calls(self):
+    def test_update_meters(self):
         widget = ActivityIndicator()
-        widget.set_activity("recording", elapsed_seconds=1)
-        # Simulate a pulse tick by toggling the dot visibility
-        widget._dot_visible = False
-        # Refresh with the same state (e.g., updating elapsed time)
-        widget.set_activity("recording", elapsed_seconds=2)
-        # Verify pulse phase was preserved (dot still hidden)
-        self.assertFalse(widget._dot_visible)
+        widget.update_meters(45, 80)
+        self.assertEqual(widget.pill_mic_meter.value(), 45)
+        self.assertEqual(widget.pill_sys_meter.value(), 80)
         widget.close()
 
 

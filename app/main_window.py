@@ -157,6 +157,10 @@ class MainWindow(QMainWindow):
         self._current_transcription_percent = None
         self._activity_widget = ActivityIndicator()
         self._activity_widget.restore_requested.connect(self._restore_from_tray)
+        self._activity_widget.stop_requested.connect(self._stop_recording)
+        self._activity_widget.pause_requested.connect(self._toggle_pause)
+        self._activity_widget.resume_requested.connect(self._toggle_pause)
+        self._activity_widget.record_requested.connect(self._start_recording)
         self._activity_widget.position_changed.connect(self._on_activity_widget_moved)
 
         self._compact_strip_done = False
@@ -1082,7 +1086,10 @@ class MainWindow(QMainWindow):
         total = max(0, int(seconds))
         h, rem = divmod(total, 3600)
         m, s = divmod(rem, 60)
-        self.compact_strip.update_timer(f"{h:02d}:{m:02d}:{s:02d}")
+        timer_str = f"{h:02d}:{m:02d}:{s:02d}"
+        self.compact_strip.update_timer(timer_str)
+        if hasattr(self, "_activity_widget") and self._activity_widget.isVisible():
+            self._activity_widget.update_timer(timer_str)
 
     def _check_silent_capture(self, seconds):
         """Warn once if per-app capture has produced zero audio.
@@ -3162,27 +3169,28 @@ class MainWindow(QMainWindow):
             self._pending_transcriptions,
         ))
         busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
-        # When TalkTrack is minimized/hidden while recording or busy, show
-        # the CompactStrip in pill mode (with live REC indicator, timer, level
-        # meters, pause, and stop controls).
-        should_show_auto_pill = (
+        # Compact/pill mode is a minimized window, so without the strip check
+        # both floating widgets would stack on screen while recording — and
+        # the strip already renders the busy states itself.
+        should_show = (
             busy_state is not None
             and (self.isMinimized() or self.isHidden())
             and not self.compact_strip.isVisible()
         )
-        if should_show_auto_pill:
-            self.compact_strip.set_variant("pill")
-            x, y = self._compact_strip_position()
-            self.compact_strip.move(x, y)
-            self._auto_shown_minimized_pill = True
-            self.compact_strip.show()
-            self._update_compact_strip_state()
-        elif getattr(self, "_auto_shown_minimized_pill", False):
-            if not (self.isMinimized() or self.isHidden()) or busy_state is None:
-                self.compact_strip.hide()
-                self._auto_shown_minimized_pill = False
-
-        if hasattr(self, "_activity_widget") and self._activity_widget.isVisible():
+        if should_show:
+            elapsed = (
+                int(self.recorder.get_elapsed_time())
+                if busy_state in ("recording", "paused") else None
+            )
+            percent = (
+                self._current_transcription_percent
+                if busy_state == "transcribing" else None
+            )
+            if not self._activity_widget.isVisible():
+                x, y = self._activity_widget_position()
+                self._activity_widget.show_at(x, y)
+            self._activity_widget.set_activity(busy_state, elapsed, percent)
+        elif self._activity_widget.isVisible():
             self._activity_widget.hide()
 
     def _on_compact_strip_toggled(self, checked):
@@ -3273,10 +3281,14 @@ class MainWindow(QMainWindow):
     def _on_compact_strip_mic_level(self, audio_chunk):
         pct = int(db_to_fraction(compute_rms_db(audio_chunk)) * 100)
         self.compact_strip.update_meters(pct, self.compact_strip.sys_meter.value())
+        if hasattr(self, "_activity_widget") and self._activity_widget.isVisible():
+            self._activity_widget.update_meters(pct, self._activity_widget.pill_sys_meter.value())
 
     def _on_compact_strip_system_level(self, audio_chunk):
         pct = int(db_to_fraction(compute_rms_db(audio_chunk)) * 100)
         self.compact_strip.update_meters(self.compact_strip.mic_meter.value(), pct)
+        if hasattr(self, "_activity_widget") and self._activity_widget.isVisible():
+            self._activity_widget.update_meters(self._activity_widget.pill_mic_meter.value(), pct)
 
     def _activity_widget_position(self):
         saved = self.config.get("ui", "activity_widget_position")

@@ -3,11 +3,15 @@
 Pure helpers are module-level and unit-testable, mirroring tray_icon.py's
 pattern. ActivityIndicator (below) is the Qt widget that composes them.
 """
-from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QColor, QIcon, QMouseEvent
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QFrame, QHBoxLayout, QVBoxLayout,
+    QLabel, QPushButton, QProgressBar, QGraphicsOpacityEffect,
+)
 
 from app.recording.recorder import RecordingState
+from app.utils.icons import colored_pixmap
 
 
 def resolve_activity_state(recording_state, transcription_busy):
@@ -28,17 +32,13 @@ def resolve_activity_state(recording_state, transcription_busy):
 
 
 def format_activity_label(state, elapsed_seconds=None, progress_percent=None):
-    """"MM:SS" for "recording"/"paused"; "NN%" for "transcribing".
-
-    progress_percent=None means no percent is available yet — e.g. diarization
-    (speaker labeling), which runs as a second phase after transcription but
-    reports no progress fraction. That must render as "…", not "0%": 0% reads
-    as "just started transcribing," which is wrong once diarization has taken
-    over.
-    """
+    """"MM:SS" or "HH:MM:SS" for "recording"/"paused"; "NN%" for "transcribing"."""
     if state in ("recording", "paused"):
         total = max(0, int(elapsed_seconds or 0))
-        minutes, seconds = divmod(total, 60)
+        hours, rem = divmod(total, 3600)
+        minutes, seconds = divmod(rem, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         return f"{minutes:02d}:{seconds:02d}"
     if state == "transcribing":
         if progress_percent is None:
@@ -53,26 +53,48 @@ def resolve_dot_color(state):
         "recording": "#f38ba8",
         "paused": "#f9e2af",
         "transcribing": "#9184d9",
+        "muted": "#f38ba8",
     }.get(state)
 
 
-_WIDTH = 130
-_HEIGHT = 36
-_DRAG_THRESHOLD = 4
-_PULSE_INTERVAL_MS = 800
-_DOT_DIAMETER = 10
-_DOT_MARGIN = 12
+_METER_STYLE = """
+    QProgressBar { background-color: #23252f; border: none; border-radius: 3px; }
+    QProgressBar::chunk { background-color: #a6e3a1; border-radius: 3px; }
+"""
+
+_STATE_EDGE_COLORS = {
+    "idle": "rgba(63,66,77,0.9)",
+    "recording": "rgba(243,139,168,0.35)",
+    "paused": "rgba(249,226,175,0.45)",
+    "muted": "rgba(243,139,168,0.35)",
+    "transcribing": "rgba(145,132,217,0.30)",
+    "done": "rgba(166,227,161,0.35)",
+}
+
+_BTN_STYLE = """
+    QPushButton {
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+    }
+    QPushButton:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+    QPushButton:pressed {
+        background: rgba(255, 255, 255, 0.14);
+    }
+"""
 
 
 class ActivityIndicator(QWidget):
-    """Floating always-on-top pill shown while minimized and busy.
-
-    MainWindow owns one instance and is the sole place that decides when
-    it shows, hides, or updates (see MainWindow._update_activity_visibility).
-    """
+    """Floating always-on-top interactive pill widget shown while minimized/busy."""
 
     restore_requested = pyqtSignal()
     position_changed = pyqtSignal(int, int)
+    stop_requested = pyqtSignal()
+    pause_requested = pyqtSignal()
+    resume_requested = pyqtSignal()
+    record_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -81,101 +103,225 @@ class ActivityIndicator(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
-        self.setFixedSize(_WIDTH, _HEIGHT)
+        self.setFixedSize(282, 46)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._state = None
         self._label = ""
-        self._dot_color = None
-        self._dot_visible = True
-
-        self._pulse_timer = QTimer(self)
-        self._pulse_timer.setInterval(_PULSE_INTERVAL_MS)
-        self._pulse_timer.timeout.connect(self._toggle_pulse)
-
-        self._press_pos = None
-        self._press_widget_pos = None
+        self._drag_start_pos = None
         self._moved_distance = 0
 
-    def set_activity(self, state, elapsed_seconds=None, progress_percent=None):
-        prev_state = self._state
-        self._state = state
-        self._label = format_activity_label(state, elapsed_seconds, progress_percent)
-        self._dot_color = resolve_dot_color(state)
+        self._setup_ui()
 
-        # Only reset pulse phase when transitioning into "recording", not on same-state refreshes
-        if state == "recording":
-            if prev_state != "recording":
-                self._dot_visible = True
-                self._pulse_timer.start()
+    def _setup_ui(self):
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(1, 1, 1, 1)
+
+        self.pill_frame = QFrame(self)
+        self.pill_frame.setObjectName("compactPillFrame")
+        self._apply_frame_style("idle")
+
+        pill_layout = QHBoxLayout(self.pill_frame)
+        pill_layout.setContentsMargins(10, 4, 10, 4)
+        pill_layout.setSpacing(8)
+
+        # Pulsing mark dot
+        self.pill_mark_icon = QLabel()
+        self.pill_mark_icon.setFixedSize(11, 11)
+        self._mark_opacity_effect = QGraphicsOpacityEffect(self.pill_mark_icon)
+        self._mark_opacity_effect.setOpacity(1.0)
+        self.pill_mark_icon.setGraphicsEffect(self._mark_opacity_effect)
+        self._mark_pulse_anim = QPropertyAnimation(self._mark_opacity_effect, b"opacity", self)
+        self._mark_pulse_anim.setDuration(1600)
+        self._mark_pulse_anim.setKeyValueAt(0.0, 1.0)
+        self._mark_pulse_anim.setKeyValueAt(0.5, 0.35)
+        self._mark_pulse_anim.setKeyValueAt(1.0, 1.0)
+        self._mark_pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._mark_pulse_anim.setLoopCount(-1)
+        pill_layout.addWidget(self.pill_mark_icon)
+
+        # Status text ("REC", "PAUSED", etc.)
+        self.pill_status_label = QLabel("Ready")
+        self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
+        pill_layout.addWidget(self.pill_status_label)
+
+        # Timer ("00:00:00")
+        self.pill_timer = QLabel("00:00:00")
+        self.pill_timer.setStyleSheet(
+            "font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #e9e9ed;"
+        )
+        pill_layout.addWidget(self.pill_timer)
+
+        # Audio level meters
+        pill_meters = QVBoxLayout()
+        pill_meters.setSpacing(3)
+        self.pill_mic_meter = QProgressBar()
+        self.pill_mic_meter.setFixedSize(30, 4)
+        self.pill_mic_meter.setTextVisible(False)
+        self.pill_mic_meter.setStyleSheet(_METER_STYLE)
+        self.pill_sys_meter = QProgressBar()
+        self.pill_sys_meter.setFixedSize(30, 4)
+        self.pill_sys_meter.setTextVisible(False)
+        self.pill_sys_meter.setStyleSheet(_METER_STYLE)
+        pill_meters.addWidget(self.pill_mic_meter)
+        pill_meters.addWidget(self.pill_sys_meter)
+        pill_layout.addLayout(pill_meters)
+
+        pill_layout.addStretch(1)
+
+        # Control buttons
+        self.pill_btn_record = QPushButton()
+        self.pill_btn_record.setFixedSize(28, 28)
+        self.pill_btn_record.setIconSize(QSize(14, 14))
+        self.pill_btn_record.setStyleSheet(_BTN_STYLE)
+        self._set_btn_icon(self.pill_btn_record, "record", "#f38ba8")
+        self.pill_btn_record.clicked.connect(self.record_requested.emit)
+        pill_layout.addWidget(self.pill_btn_record)
+
+        self.pill_btn_pause = QPushButton()
+        self.pill_btn_pause.setFixedSize(28, 28)
+        self.pill_btn_pause.setIconSize(QSize(14, 14))
+        self.pill_btn_pause.setStyleSheet(_BTN_STYLE)
+        self._set_btn_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+        self.pill_btn_pause.clicked.connect(self._on_pause_clicked)
+        pill_layout.addWidget(self.pill_btn_pause)
+
+        self.pill_btn_stop = QPushButton()
+        self.pill_btn_stop.setFixedSize(28, 28)
+        self.pill_btn_stop.setIconSize(QSize(14, 14))
+        self.pill_btn_stop.setStyleSheet(_BTN_STYLE)
+        self._set_btn_icon(self.pill_btn_stop, "stop-fill", "#f38ba8")
+        self.pill_btn_stop.clicked.connect(self.stop_requested.emit)
+        pill_layout.addWidget(self.pill_btn_stop)
+
+        main_layout.addWidget(self.pill_frame)
+
+    def _apply_frame_style(self, state):
+        edge_color = _STATE_EDGE_COLORS.get(state, _STATE_EDGE_COLORS["idle"])
+        self.pill_frame.setStyleSheet(f"""
+            QFrame#compactPillFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1d2c, stop:1 #14161f);
+                border: 1px solid {edge_color};
+                border-radius: 22px;
+            }}
+        """)
+
+    def _set_btn_icon(self, btn, name, color):
+        btn.setIcon(QIcon(colored_pixmap(name, color, 16)))
+
+    def _on_pause_clicked(self):
+        if self._state == "paused":
+            self.resume_requested.emit()
         else:
-            self._pulse_timer.stop()
-            self._dot_visible = True
-        self.update()
+            self.pause_requested.emit()
 
-    def _toggle_pulse(self):
-        self._dot_visible = not self._dot_visible
-        self.update()
+    def set_activity(self, state, elapsed_seconds=None, progress_percent=None):
+        self._state = state
+        self._apply_frame_style(state)
+
+        if elapsed_seconds is not None:
+            total = max(0, int(elapsed_seconds))
+            h, rem = divmod(total, 3600)
+            m, s = divmod(rem, 60)
+            self.pill_timer.setText(f"{h:02d}:{m:02d}:{s:02d}")
+
+        if state == "recording":
+            self.pill_status_label.setText("REC")
+            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
+            self.pill_timer.setStyleSheet("font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #e9e9ed;")
+            self.pill_mark_icon.setPixmap(colored_pixmap("record", "#f38ba8", 11))
+            self._set_btn_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+            self.pill_timer.show()
+            self.pill_btn_pause.show()
+            self.pill_btn_stop.show()
+            self.pill_btn_record.hide()
+            self.pill_mic_meter.show()
+            self.pill_sys_meter.show()
+            if self._mark_pulse_anim.state() != QPropertyAnimation.State.Running:
+                self._mark_pulse_anim.start()
+        elif state == "paused":
+            self.pill_status_label.setText("PAUSED")
+            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f9e2af;")
+            self.pill_timer.setStyleSheet("font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #f9e2af;")
+            self.pill_mark_icon.setPixmap(colored_pixmap("pause", "#f9e2af", 11))
+            self._set_btn_icon(self.pill_btn_pause, "play-fill", "#e9e9ed")
+            self.pill_timer.show()
+            self.pill_btn_pause.show()
+            self.pill_btn_stop.show()
+            self.pill_btn_record.hide()
+            self.pill_mic_meter.hide()
+            self.pill_sys_meter.hide()
+            self._mark_pulse_anim.stop()
+            self._mark_opacity_effect.setOpacity(1.0)
+        elif state == "transcribing":
+            label_text = f"Transcribing {int(progress_percent)}%" if progress_percent is not None else "Transcribing…"
+            self.pill_status_label.setText(label_text)
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
+            self.pill_mark_icon.setPixmap(colored_pixmap("transcribe", "#9184d9", 11))
+            self.pill_timer.hide()
+            self.pill_btn_pause.hide()
+            self.pill_btn_stop.hide()
+            self.pill_btn_record.hide()
+            self.pill_mic_meter.hide()
+            self.pill_sys_meter.hide()
+            if self._mark_pulse_anim.state() != QPropertyAnimation.State.Running:
+                self._mark_pulse_anim.start()
+        else:
+            self.pill_status_label.setText("Ready")
+            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
+            self.pill_mark_icon.setPixmap(colored_pixmap("record", "#a6adc8", 11))
+            self.pill_timer.hide()
+            self.pill_btn_pause.hide()
+            self.pill_btn_stop.hide()
+            self.pill_btn_record.show()
+            self.pill_mic_meter.hide()
+            self.pill_sys_meter.hide()
+            self._mark_pulse_anim.stop()
+            self._mark_opacity_effect.setOpacity(1.0)
+
+    def update_timer(self, text):
+        self.pill_timer.setText(text)
+
+    def update_meters(self, mic_value, sys_value):
+        self.pill_mic_meter.setValue(max(0, min(100, int(mic_value))))
+        self.pill_sys_meter.setValue(max(0, min(100, int(sys_value))))
 
     def show_at(self, x, y):
-        # Clamp against whichever screen actually contains (x, y) — not
-        # always the primary — so a position saved on a secondary monitor
-        # doesn't get yanked back to the primary display on every show.
         screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
         if screen is None:
             self.move(x, y)
             self.show()
             return
         geo = screen.availableGeometry()
-        clamped_x = min(max(x, geo.left()), geo.right() - _WIDTH)
-        clamped_y = min(max(y, geo.top()), geo.bottom() - _HEIGHT)
+        clamped_x = min(max(x, geo.left()), geo.right() - 282)
+        clamped_y = min(max(y, geo.top()), geo.bottom() - 46)
         self.move(clamped_x, clamped_y)
         self.show()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#161826"))
-        painter.drawRoundedRect(self.rect(), _HEIGHT / 2, _HEIGHT / 2)
-
-        if self._dot_color and self._dot_visible:
-            painter.setBrush(QColor(self._dot_color))
-            dot_y = (_HEIGHT - _DOT_DIAMETER) // 2
-            painter.drawEllipse(_DOT_MARGIN, dot_y, _DOT_DIAMETER, _DOT_DIAMETER)
-
-        painter.setPen(QColor("#e9e9ed"))
-        text_rect = self.rect().adjusted(_DOT_MARGIN + _DOT_DIAMETER + 8, 0, -10, 0)
-        painter.drawText(
-            text_rect,
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            self._label,
-        )
-        painter.end()
-
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._press_pos = event.globalPosition().toPoint()
-            self._press_widget_pos = self.pos()
+            self._drag_start_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self._moved_distance = 0
-            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            event.accept()
 
-    def mouseMoveEvent(self, event):
-        if self._press_pos is not None:
-            delta = event.globalPosition().toPoint() - self._press_pos
-            self._moved_distance = max(
-                self._moved_distance, abs(delta.x()) + abs(delta.y())
-            )
-            self.move(self._press_widget_pos + delta)
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_start_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_start_pos - self.pos()
+            self._moved_distance += abs(delta.x()) + abs(delta.y())
+            self.move(event.globalPosition().toPoint() - self._drag_start_pos)
+            event.accept()
 
-    def mouseReleaseEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton or self._press_pos is None:
-            return
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        if self._moved_distance <= _DRAG_THRESHOLD:
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._drag_start_pos is not None:
+            if self._moved_distance <= 4:
+                self.restore_requested.emit()
+            else:
+                self.position_changed.emit(self.x(), self.y())
+        self._drag_start_pos = None
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
             self.restore_requested.emit()
-        else:
-            self.position_changed.emit(self.x(), self.y())
-        self._press_pos = None
-        self._press_widget_pos = None
+            event.accept()
