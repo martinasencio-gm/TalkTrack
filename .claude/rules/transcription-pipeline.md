@@ -109,3 +109,10 @@ cope with two dialects.
   GUI. The batch runner records it as a warning on a successful outcome.
 - **Never log `diarization.hf_token` or `ai.api_key`.** The runner logs the
   settings *path* only. `tests/` do not cover this — the rule is the guard.
+
+## Diarization progress percent
+
+- `DiarizationWorker.progress_percent` mirrors `TranscriptionWorker.progress_percent` — same signal shape, wired the same way (`.connect(transcript_viewer.set_progress_percent)` + `.connect(_on_transcription_percent)` in `MainWindow._start_diarization`). Before this it only had text status (`progress`), so a long diarization looked hung.
+- Driven by `DiarizationWorker._pipeline_hook`, passed as `hook=` to the pyannote `pipeline(...)` call. pyannote invokes it per major step; the two chunked stages (`"segmentation"`, `"embeddings"`) call it repeatedly with real `total`/`completed` because each scans the whole recording, everything else (`"speaker_counting"`, `"discrete_diarization"`) fires once with neither.
+- The 50/50 split between the two chunked stages (`_SEGMENTATION_SPAN`, `_EMBEDDING_SPAN`) is an approximation, not a measured cost ratio — it's the only structure pyannote's hook contract exposes. Don't read it as more precise than that.
+- `_pipeline_hook` clamps to 99 and returns early on unknown/marker step names; 100 is emitted explicitly right before `finished`, once the diarization-to-transcript merge is done — matching how `TranscriptionWorker` only reaches 100 on `progress_percent.emit(100)` at actual completion, not from the hook itself.

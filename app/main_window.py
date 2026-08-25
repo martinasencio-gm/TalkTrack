@@ -1892,6 +1892,8 @@ class MainWindow(QMainWindow):
         )
         self._diarization_worker.session = session
         self._diarization_worker.progress.connect(self._on_transcription_progress)
+        self._diarization_worker.progress_percent.connect(self.transcript_viewer.set_progress_percent)
+        self._diarization_worker.progress_percent.connect(self._on_transcription_percent)
         self._diarization_worker.finished.connect(self._on_diarization_finished)
         self._diarization_worker.error.connect(self._on_diarization_error)
         self._diarization_worker.cancelled.connect(self._on_diarization_cancelled)

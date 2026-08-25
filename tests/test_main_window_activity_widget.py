@@ -119,9 +119,10 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             window = MainWindow()
             try:
                 window.isMinimized = lambda: True
-                # A just-finished transcription leaves a stale percent behind;
-                # diarization has no percent of its own, so it must be cleared
-                # rather than carried over and shown as if it were live.
+                # A just-finished transcription leaves a stale percent behind
+                # and must not be carried over and shown as if it were live —
+                # diarization's own progress_percent signal (wired below)
+                # replaces it once the new job actually reports progress.
                 window._current_transcription_percent = 87
                 window._start_diarization(
                     transcript_result=object(),
@@ -129,6 +130,29 @@ class TestMainWindowActivityWidget(unittest.TestCase):
                 )
                 self.assertIsNone(window._current_transcription_percent)
                 MockDiarizationWorker.return_value.start.assert_called_once()
+            finally:
+                window._really_quit = True
+                window.close()
+
+    def test_start_diarization_wires_progress_percent_to_the_bar(self):
+        # Diarization used to show only status text ("Running speaker
+        # diarization...") with no percent, unlike transcription's real
+        # progress bar — pyannote's per-chunk hook now drives the same bar.
+        with patch("app.main_window.DiarizationWorker") as MockDiarizationWorker:
+            from app.main_window import MainWindow
+            window = MainWindow()
+            try:
+                window._start_diarization(
+                    transcript_result=object(),
+                    session={"audio_files": {"combined": "/fake/path.wav"}},
+                )
+                worker = MockDiarizationWorker.return_value
+                worker.progress_percent.connect.assert_any_call(
+                    window.transcript_viewer.set_progress_percent
+                )
+                worker.progress_percent.connect.assert_any_call(
+                    window._on_transcription_percent
+                )
             finally:
                 window._really_quit = True
                 window.close()

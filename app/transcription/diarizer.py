@@ -37,10 +37,23 @@ class SpeakerSegment:
 class DiarizationWorker(QThread):
     """Runs speaker diarization in a background thread using pyannote.audio."""
 
+    # Real percentages, not just status text — see _pipeline_hook.
     progress = pyqtSignal(str)
+    progress_percent = pyqtSignal(int)
     finished = pyqtSignal(TranscriptResult)
     error = pyqtSignal(str)
     cancelled = pyqtSignal()
+
+    # Segmentation and embedding extraction are pyannote's two chunked,
+    # genuinely time-consuming stages (each scans the whole recording);
+    # everything else (speaker counting, clustering, discrete diarization)
+    # is comparatively instant. Splitting the bar 50/50 between them is an
+    # approximation — the two stages are not proven to cost exactly the
+    # same — but it is far closer to reality than the flat "no progress at
+    # all" the UI showed before, and it is the only place pyannote's hook
+    # contract gives per-chunk totals to work with.
+    _SEGMENTATION_SPAN = 50
+    _EMBEDDING_SPAN = 45
 
     def __init__(self, audio_path, transcript_result, hf_token="",
                  min_speakers=None, max_speakers=None, full_cpu=False):
@@ -64,6 +77,28 @@ class DiarizationWorker(QThread):
             self.error.emit(f"Diarization dependency missing: {e}")
         except Exception as e:
             self.error.emit(f"Diarization failed: {e}")
+
+    def _pipeline_hook(self, step_name, step_artifact, file=None, total=None, completed=None):
+        """pyannote calls this per major step; the two chunked stages
+        (segmentation, embeddings) call it many times with real
+        `total`/`completed`, everything else once with neither — matching
+        the same contract as pyannote's own ProgressHook/ArtifactHook.
+        """
+        if self._cancel_requested:
+            return
+        if step_name == "segmentation":
+            fraction = (completed / total) if total else 1.0
+            percent = fraction * self._SEGMENTATION_SPAN
+        elif step_name == "embeddings":
+            fraction = (completed / total) if total else 1.0
+            percent = self._SEGMENTATION_SPAN + fraction * self._EMBEDDING_SPAN
+        elif step_name == "speaker_counting":
+            percent = self._SEGMENTATION_SPAN + self._EMBEDDING_SPAN + 2
+        elif step_name == "discrete_diarization":
+            percent = self._SEGMENTATION_SPAN + self._EMBEDDING_SPAN + 4
+        else:
+            return
+        self.progress_percent.emit(min(99, int(percent)))
 
     def _run_pyannote(self):
         if self._cancel_requested:
@@ -125,7 +160,7 @@ class DiarizationWorker(QThread):
         if self.max_speakers is not None:
             diarization_params["max_speakers"] = self.max_speakers
 
-        result = pipeline(audio_input, **diarization_params)
+        result = pipeline(audio_input, hook=self._pipeline_hook, **diarization_params)
         if self._cancel_requested:
             self.cancelled.emit()
             return
@@ -173,6 +208,7 @@ class DiarizationWorker(QThread):
             self.cancelled.emit()
             return
 
+        self.progress_percent.emit(100)
         self.finished.emit(result)
 
     def _merge_diarization_with_transcript(self, transcript, speaker_segments):
