@@ -1799,6 +1799,33 @@ class MainWindow(QMainWindow):
             pass
         self.transcript_viewer.set_diarization_enabled(enabled)
 
+    def _apply_diarization_default_for_session(self, attendees):
+        """Reset the checkbox to the config baseline, then override it off
+        for a calendar-tagged 1:1 call.
+
+        A 1:1 (you + exactly one other attendee) is exactly what
+        SimpleDiarizer's mic-vs-system energy split already handles well —
+        there is only one possible "Remote" speaker, so pyannote's
+        clustering buys nothing over it. With 0 or 2+ attendees the
+        baseline is left alone (0 isn't a call with anyone else to
+        identify; 2+ is a group call SimpleDiarizer's binary split can't
+        resolve, so pyannote still earns its keep).
+
+        Call this whenever a session's attendee list becomes known — on
+        selection and on (re-)tagging — not from `_sync_diarization_controls`
+        itself: that function also runs when Settings closes, and unlike
+        this one-shot default, re-applying the override there would
+        silently undo a manual re-check made for the recording on screen.
+
+        Resetting to the baseline first (rather than only acting on the
+        1-attendee case) matters too: without it, this recording's
+        auto-uncheck would leak into the next, unrelated recording selected
+        afterwards.
+        """
+        self._sync_diarization_controls()
+        if len(attendees) == 1:
+            self.transcript_viewer.set_diarization_enabled(False)
+
     def _on_diarize_toggled(self, enabled):
         self.config.set("diarization", "enabled", enabled)
         self._update_preflight()
@@ -2192,6 +2219,7 @@ class MainWindow(QMainWindow):
         # already-tagged recording shows its calendar line and attendee
         # dropdowns too.
         calendar_event, calendar_attendees = self._load_calendar_event(metadata)
+        self._apply_diarization_default_for_session(calendar_attendees)
 
         # Load existing transcript if available
         transcript_path = Path(metadata["directory"]) / "transcript.json"
@@ -2810,6 +2838,7 @@ class MainWindow(QMainWindow):
         )
         self._calendar_attendees = event_to_save.get("attendees", [])
         self.transcript_viewer.set_calendar_attendees(self._calendar_attendees)
+        self._apply_diarization_default_for_session(self._calendar_attendees)
         return event_to_save
 
     def _maybe_suggest_rename(self, session, event):

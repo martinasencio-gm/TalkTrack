@@ -213,5 +213,107 @@ class TestMainWindowWiring(unittest.TestCase):
         self.assertFalse(self.window.transcript_viewer._elapsed_timer.isActive())
 
 
+class TestOneOnOneCallDiarizationDefault(unittest.TestCase):
+    """A calendar-tagged 1:1 call (you + exactly one other attendee) is
+    exactly what SimpleDiarizer's mic-vs-system energy split already
+    handles well: there is only one possible "Remote" speaker, so
+    pyannote's clustering buys nothing. 'Identify speakers' should default
+    off for such a recording, without touching the persisted global
+    preference (see test_toggling_the_checkbox_persists_the_preference
+    above for why that distinction matters)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from app.main_window import MainWindow
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_dir = Path(self._tmp.name)
+
+        self.window = MainWindow()
+        self.addCleanup(self._close)
+
+    def _close(self):
+        self.window._really_quit = True
+        self.window.close()
+
+    def _session(self, name, attendees=None):
+        import json
+        session_dir = self.tmp_dir / name
+        session_dir.mkdir()
+        if attendees is not None:
+            (session_dir / "calendar_event.json").write_text(
+                json.dumps({"subject": "Sync", "attendees": attendees}),
+                encoding="utf-8",
+            )
+        return {"directory": str(session_dir), "audio_files": {}}
+
+    def test_one_attendee_unchecks_identify_speakers(self):
+        session = self._session("one_on_one", attendees=["alice@example.com"])
+        self.window._on_recording_selected(session)
+        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_two_attendees_keeps_the_default_checked(self):
+        # Group call: SimpleDiarizer's binary You/Remote split can't tell
+        # two remote attendees apart, so pyannote still earns its keep here.
+        session = self._session("group_call", attendees=["alice@example.com", "bob@example.com"])
+        self.window._on_recording_selected(session)
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_zero_attendees_keeps_the_default_checked(self):
+        session = self._session("solo", attendees=[])
+        self.window._on_recording_selected(session)
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_untagged_recording_keeps_the_default_checked(self):
+        session = self._session("untagged", attendees=None)
+        self.window._on_recording_selected(session)
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_switching_from_one_on_one_to_group_restores_the_default(self):
+        # Regression guard: the auto-uncheck for a 1:1 call must not leak
+        # into the next, unrelated recording selected afterwards.
+        one_on_one = self._session("one_on_one2", attendees=["alice@example.com"])
+        group = self._session("group_call2", attendees=["alice@example.com", "bob@example.com"])
+
+        self.window._on_recording_selected(one_on_one)
+        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+
+        self.window._on_recording_selected(group)
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_manual_recheck_for_a_one_on_one_survives_settings_resync(self):
+        # _sync_diarization_controls() also runs when Settings closes (it
+        # pushes the token/enabled flag the dialog owns back into the
+        # checkbox). That must not re-apply the 1:1 override on top of a
+        # manual choice the user already made for the recording on screen.
+        session = self._session("one_on_one3", attendees=["alice@example.com"])
+        self.window._on_recording_selected(session)
+        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+
+        self.window.transcript_viewer.diarize_cb.setChecked(True)
+        self.window._sync_diarization_controls()
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+    def test_tagging_an_already_open_recording_as_one_on_one_unchecks_it(self):
+        # The other place attendees become known: tagging a recording
+        # that's already on screen (calendar banner / manual tag), not just
+        # selecting a pre-tagged one.
+        session = self._session("to_be_tagged", attendees=None)
+        self.window._on_recording_selected(session)
+        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+
+        self.window._apply_calendar_event({
+            "subject": "1:1 sync", "attendees": ["alice@example.com"],
+            "start": "2026-01-01T10:00:00", "end": "2026-01-01T10:30:00",
+        })
+        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+
+
 if __name__ == "__main__":
     unittest.main()
