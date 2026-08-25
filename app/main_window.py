@@ -2191,6 +2191,18 @@ class MainWindow(QMainWindow):
         self._transcript = None
         self.inspector.set_empty_state(False)
 
+        # The rest of this method is synchronous file I/O and widget
+        # rebuilding with no natural yield points. Left alone, that stretch
+        # of unresponsiveness is long enough that Windows repeatedly shows
+        # its own "not responding" ghost-window overlay (the app icon
+        # flashing on its own) instead of anything TalkTrack controls.
+        # Showing our own loading state up front, then pumping the event
+        # loop between each heavy step below, keeps the window responsive
+        # so the hourglass here is the only "loading" indicator the user
+        # ever sees.
+        self.transcript_viewer.show_loading("Loading recording...")
+        QApplication.processEvents()
+
         audio_files = metadata.get("audio_files", {})
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
         if audio_path and not Path(audio_path).exists():
@@ -2233,8 +2245,6 @@ class MainWindow(QMainWindow):
         loaded_transcribe_seconds = 0.0
         if transcript_path.exists():
             try:
-                self.transcript_viewer.show_loading("Loading transcript...")
-                QApplication.processEvents()
                 with open(transcript_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 from app.transcription.transcriber import TranscriptSegment
@@ -2253,6 +2263,7 @@ class MainWindow(QMainWindow):
                 loaded_transcribe_seconds = result.transcribe_seconds
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
+            QApplication.processEvents()
 
         # Update recording header
         self.recording_header.set_recording(
@@ -2268,6 +2279,7 @@ class MainWindow(QMainWindow):
         self.notes_panel.save_notes()
         self._export_transcript(previous_session)
         self.notes_panel.set_session_dir(metadata["directory"])
+        QApplication.processEvents()
 
         # Load saved summary and action items
         session_dir = Path(metadata["directory"])
@@ -2292,6 +2304,8 @@ class MainWindow(QMainWindow):
             self.summary_panel.set_ready()
             self.action_items_panel.set_ready()
             self.inspector.set_ai_configured(self._ai_provider_configured())
+
+        QApplication.processEvents()
 
         # Update chat panel context for loaded recording
         self.chat_panel.set_session_dir(metadata["directory"])
