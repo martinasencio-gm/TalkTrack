@@ -103,6 +103,10 @@ DEFAULT_CONFIG = {
         "audio_sources_collapsed": False,
         "recordings_collapsed": False,
         "activity_widget_position": None,
+        # Full window rect [x, y, w, h] and whether it was maximized, saved
+        # on quit and restored (clamped to connected screens) on next launch.
+        "window_geometry": None,
+        "window_maximized": False,
         "compact_strip_visible": False,
         "compact_strip_position": None,
         "strip_variant": "full",

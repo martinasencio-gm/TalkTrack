@@ -127,6 +127,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1180, 720)
         self.resize(1360, 860)
+        self._restore_window_geometry()
 
         self._setup_menu()
         self._setup_ui()
@@ -3173,6 +3174,54 @@ class MainWindow(QMainWindow):
                         )
         super().changeEvent(event)
 
+    def _restore_window_geometry(self):
+        """Move/resize to the rect saved on the last quit, clamped so an
+        unplugged monitor can't strand the window off-screen. A saved
+        maximized state is applied on first show (see showEvent)."""
+        self._restore_maximized = bool(self.config.get("ui", "window_maximized"))
+        saved = self.config.get("ui", "window_geometry")
+        if not (isinstance(saved, (list, tuple)) and len(saved) == 4):
+            return
+        try:
+            x, y, w, h = (int(v) for v in saved)
+        except (TypeError, ValueError):
+            return
+        from app.utils.screen_utils import fit_geometry_to_screens
+        screens = [
+            (g.x(), g.y(), g.width(), g.height())
+            for g in (s.availableGeometry() for s in QApplication.screens())
+        ]
+        x, y, w, h = fit_geometry_to_screens(
+            x, y, w, h, screens,
+            min_size=(self.minimumWidth(), self.minimumHeight()),
+        )
+        self.resize(w, h)
+        self.move(x, y)
+
+    def _save_window_geometry(self):
+        """Persist the full window's normal rect + maximized state for the
+        next launch. Called from closeEvent's real-quit path."""
+        if QApplication.platformName() == "offscreen":
+            return  # headless test run — don't stamp a fake rect into config
+        is_max = self.isMaximized()
+        rect = self.normalGeometry()
+        if rect.isEmpty():
+            rect = self.geometry()
+        if rect.width() > 0 and rect.height() > 0:
+            self.config.set(
+                "ui", "window_geometry",
+                [rect.x(), rect.y(), rect.width(), rect.height()],
+            )
+        self.config.set("ui", "window_maximized", is_max)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_restore_maximized", False) and not getattr(
+            self, "_maximized_applied", False
+        ):
+            self._maximized_applied = True
+            self.showMaximized()
+
     def closeEvent(self, event):
         if not self._really_quit:
             outcome = self._confirm_exit()
@@ -3229,6 +3278,7 @@ class MainWindow(QMainWindow):
         if self.recorder.state != RecordingState.IDLE:
             self.recorder.stop_recording()
         self._shutdown_workers()
+        self._save_window_geometry()
         self.config.save()
         if hasattr(self, "tray"):
             self.tray.hide()
@@ -3341,6 +3391,10 @@ class MainWindow(QMainWindow):
         another window. Routed through the same checkable action the View
         menu uses, so both stay in sync and the choice persists.
         """
+        # Remember a maximized window so expanding back from the strip
+        # restores it maximized — _restore_from_tray()'s showNormal() would
+        # otherwise silently drop it to the default size.
+        self._was_maximized_before_strip = self.isMaximized()
         self.compact_strip.set_variant(variant)
         self.compact_strip_action.setChecked(True)
         # After setChecked: _on_compact_strip_toggled clears the flag when it
@@ -3356,6 +3410,9 @@ class MainWindow(QMainWindow):
         self.compact_strip_action.setChecked(False)
         self.compact_strip.hide()
         self._restore_from_tray()
+        if getattr(self, "_was_maximized_before_strip", False):
+            self._was_maximized_before_strip = False
+            self.showMaximized()
 
     def _compact_strip_position(self):
         from app.utils.screen_utils import get_active_screen, ensure_within_screens

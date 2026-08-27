@@ -13,6 +13,7 @@ from app.utils.screen_utils import (
     center_on_active_screen,
     position_corner_on_active_screen,
     ensure_within_screens,
+    fit_geometry_to_screens,
 )
 
 _app = None
@@ -134,6 +135,50 @@ class TestScreenUtils(unittest.TestCase):
         import_dlg = ImportTimestampDialog(datetime.now())
         self.assertTrue(bool(import_dlg.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
         import_dlg.close()
+
+
+class TestFitGeometryToScreens(unittest.TestCase):
+    ONE = [(0, 0, 1920, 1040)]
+    TWO = [(0, 0, 1920, 1040), (1920, 0, 2560, 1400)]
+
+    def test_rect_fully_inside_is_unchanged(self):
+        self.assertEqual(
+            fit_geometry_to_screens(100, 80, 1360, 860, self.ONE),
+            (100, 80, 1360, 860),
+        )
+
+    def test_rect_off_right_edge_is_pulled_in(self):
+        x, y, w, h = fit_geometry_to_screens(1700, 80, 1360, 860, self.ONE)
+        self.assertEqual((w, h), (1360, 860))
+        self.assertEqual(x, 1920 - 1360)
+        self.assertEqual(y, 80)
+
+    def test_rect_on_disconnected_screen_recovers_to_first(self):
+        # Saved on a monitor at x=5000 that is no longer present.
+        x, y, w, h = fit_geometry_to_screens(5200, 200, 1360, 860, self.ONE)
+        self.assertGreaterEqual(x, 0)
+        self.assertLessEqual(x + w, 1920)
+        self.assertLessEqual(y + h, 1040)
+
+    def test_oversized_rect_is_capped_to_target_screen(self):
+        x, y, w, h = fit_geometry_to_screens(0, 0, 4000, 3000, self.ONE)
+        self.assertEqual((w, h), (1920, 1040))
+        self.assertEqual((x, y), (0, 0))
+
+    def test_tiny_rect_is_floored_to_min_size(self):
+        _, _, w, h = fit_geometry_to_screens(10, 10, 200, 150, self.ONE)
+        self.assertEqual((w, h), (1180, 720))
+
+    def test_empty_screen_list_returns_input(self):
+        self.assertEqual(
+            fit_geometry_to_screens(10, 20, 300, 400, []),
+            (10, 20, 300, 400),
+        )
+
+    def test_rect_on_second_screen_stays_on_second_screen(self):
+        x, y, w, h = fit_geometry_to_screens(2000, 100, 1360, 860, self.TWO)
+        self.assertGreaterEqual(x, 1920)
+        self.assertLessEqual(x + w, 1920 + 2560)
 
 
 if __name__ == "__main__":

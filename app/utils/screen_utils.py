@@ -117,6 +117,47 @@ def position_corner_on_active_screen(widget, corner="bottom-right", margin=20, r
         pass
 
 
+def fit_geometry_to_screens(x, y, w, h, screens, min_size=(1180, 720)):
+    """Clamp a restored window rect so it lands fully on a connected screen.
+
+    Pure (Qt-free): ``screens`` is a list of ``(sx, sy, sw, sh)`` available-
+    geometry tuples. Returns a new ``(x, y, w, h)``.
+
+    The target screen is the one containing the saved top-left, else the one
+    the saved rect overlaps most, else the first screen — so a window saved
+    on a monitor that is now unplugged is recovered rather than stranded
+    off-screen. Size is capped to that screen and floored at ``min_size``,
+    then the origin is pulled in so the whole window is visible.
+    """
+    if not screens:
+        return x, y, w, h
+
+    min_w, min_h = min_size
+
+    def _contains(s):
+        sx, sy, sw, sh = s
+        return sx <= x < sx + sw and sy <= y < sy + sh
+
+    def _overlap(s):
+        sx, sy, sw, sh = s
+        ox = max(0, min(x + w, sx + sw) - max(x, sx))
+        oy = max(0, min(y + h, sy + sh) - max(y, sy))
+        return ox * oy
+
+    target = next((s for s in screens if _contains(s)), None)
+    if target is None:
+        target = max(screens, key=_overlap)
+        if _overlap(target) == 0:
+            target = screens[0]
+
+    sx, sy, sw, sh = target
+    w = min(max(w, min_w), sw)
+    h = min(max(h, min_h), sh)
+    x = min(max(x, sx), sx + sw - w)
+    y = min(max(y, sy), sy + sh - h)
+    return x, y, w, h
+
+
 def ensure_within_screens(x, y, width=100, height=40, reference_widget=None):
     """Ensure coordinates (x, y) fall within one of the connected screens.
 
