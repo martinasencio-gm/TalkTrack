@@ -1,11 +1,13 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import multiprocessing
 import queue
 import time
 import unittest
 from unittest import mock
 
+from app.utils import com_session_worker as m
 from app.utils.com_session_worker import ComSessionPoller
 
 
@@ -214,6 +216,91 @@ class TestComSessionPoller(unittest.TestCase):
             poller.get_snapshot()
             # start() should NOT be called a second time due to backoff
             self.assertEqual(call_count[0], 1)
+
+
+class TestSuppressCrashDialog(unittest.TestCase):
+    def test_sets_the_no_gpf_error_mode_flags(self):
+        fake_windll = mock.MagicMock()
+        with mock.patch("ctypes.windll", fake_windll, create=True):
+            m._suppress_crash_dialog()
+        # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+        fake_windll.kernel32.SetErrorMode.assert_called_once_with(0x0001 | 0x0002 | 0x8000)
+
+    def test_never_raises_even_if_kernel32_unavailable(self):
+        with mock.patch("ctypes.windll", side_effect=AttributeError, create=True):
+            m._suppress_crash_dialog()  # must not raise
+
+    def test_worker_loop_suppresses_dialog_before_polling(self):
+        stop = multiprocessing.Event()
+        stop.set()  # loop body never runs; we only want the pre-loop call
+        interval = multiprocessing.Value("d", 2.0)
+        q = multiprocessing.Queue(maxsize=1)
+        with mock.patch.object(m, "_suppress_crash_dialog") as suppress:
+            m._worker_loop(q, interval, stop, os.getpid())
+        suppress.assert_called_once()
+
+
+class TestRestartBackoff(unittest.TestCase):
+    def test_effective_backoff_grows_with_recent_restart_count_and_caps(self):
+        now = 1000.0
+        self.assertEqual(m._effective_backoff([], now), m._RESTART_BACKOFF_MIN)
+        self.assertEqual(
+            m._effective_backoff([now - 1], now), m._RESTART_BACKOFF_MIN * 2
+        )
+        self.assertEqual(
+            m._effective_backoff([now - 1, now - 2, now - 3], now),
+            m._RESTART_BACKOFF_MIN * 8,
+        )
+        # Many rapid restarts -> capped, never above the ceiling.
+        self.assertEqual(
+            m._effective_backoff([now - i for i in range(20)], now),
+            m._RESTART_BACKOFF_MAX,
+        )
+
+    def test_effective_backoff_ignores_restarts_older_than_the_window(self):
+        now = 1000.0
+        old = [now - m._RESTART_WINDOW_SECONDS - 10 for _ in range(5)]
+        self.assertEqual(m._effective_backoff(old, now), m._RESTART_BACKOFF_MIN)
+        self.assertEqual(
+            m._effective_backoff(old + [now - 1], now), m._RESTART_BACKOFF_MIN * 2
+        )
+
+    def test_repeated_crashes_fill_the_window_and_stretch_the_respawn_gap(self):
+        poller = ComSessionPoller(
+            main_pid=os.getpid(), worker_target=_fake_worker_dies_immediately
+        )
+        self.addCleanup(poller.stop)
+        with mock.patch.object(m, "_RESTART_BACKOFF_MIN", 0.05), \
+             mock.patch.object(m, "_RESTART_BACKOFF_MAX", 0.4), \
+             mock.patch.object(m, "_RESTART_WINDOW_SECONDS", 10.0):
+            poller.start()
+            deadline = time.monotonic() + 4.0
+            while time.monotonic() < deadline and len(poller._recent_restarts) < 4:
+                poller.get_snapshot()
+                time.sleep(0.02)
+        self.assertGreaterEqual(len(poller._recent_restarts), 3)
+        self.assertGreater(
+            m._effective_backoff(poller._recent_restarts, time.monotonic()),
+            0.05,
+        )
+
+    def test_healthy_run_then_death_still_respawns_promptly(self):
+        # A generation that lived a long time (empty restart window) is not
+        # penalised: backoff is back at the floor.
+        poller = ComSessionPoller(
+            main_pid=os.getpid(), worker_target=_fake_worker_dies_immediately
+        )
+        self.addCleanup(poller.stop)
+        poller.start()
+        _wait_until(lambda: True if not poller._process.is_alive() else None)
+        poller._recent_restarts = []  # window aged out
+        poller._last_restart_ts = time.monotonic() - m._RESTART_BACKOFF_MIN - 1
+        first_pid = poller._process.pid
+        poller.get_snapshot()
+        respawned = _wait_until(
+            lambda: poller._process if poller._process.pid != first_pid else None
+        )
+        self.assertIsNotNone(respawned)
 
 
 if __name__ == "__main__":

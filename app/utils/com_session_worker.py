@@ -15,12 +15,54 @@ from app.utils.render_activity import pick_output_index, update_activity
 
 logger = logging.getLogger(__name__)
 
-_RESTART_BACKOFF_SECONDS = 5.0
+# Respawn throttle. The worker crashes natively (comtypes proxy finalization)
+# often enough that a flat backoff never engages during a crash storm — see
+# the escalation observed in talktrack.log. Backoff doubles per restart still
+# inside a sliding window, capped, and decays on its own once the window
+# clears.
+_RESTART_BACKOFF_MIN = 5.0
+_RESTART_BACKOFF_MAX = 120.0
+_RESTART_WINDOW_SECONDS = 120.0
 _JOIN_TIMEOUT_SECONDS = 2.0
+
+
+def _effective_backoff(recent_restarts, now):
+    """Seconds to wait before the next respawn, given restart timestamps.
+
+    One restart in the window → 2×min, two → 4×min, … capped at max.
+    Timestamps older than the window don't count, so a worker that stays up
+    is back to the floor.
+    """
+    live = sum(1 for t in recent_restarts if now - t < _RESTART_WINDOW_SECONDS)
+    return min(_RESTART_BACKOFF_MIN * (2 ** live), _RESTART_BACKOFF_MAX)
+
+
+def _suppress_crash_dialog():
+    """Stop Windows from popping a GPF / "Application Error" dialog when this
+    process crashes natively.
+
+    The worker exists to absorb comtypes' access-violation crashes; the
+    parent respawns it. Without this, each crash also blocks the user behind
+    a modal WER dialog (the child runs under pythonw.exe and a spawn-start
+    child does not inherit the parent's error mode).
+    """
+    try:
+        import ctypes
+
+        SEM_FAILCRITICALERRORS = 0x0001
+        SEM_NOGPFAULTERRORBOX = 0x0002
+        SEM_NOOPENFILEERRORBOX = 0x8000
+        ctypes.windll.kernel32.SetErrorMode(
+            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+        )
+    except Exception:
+        # Non-Windows, or kernel32 unavailable — nothing to suppress.
+        pass
 
 
 def _worker_loop(result_queue, interval, stop_event, main_pid):
     """Entry point for the child process. Loops until stop_event is set."""
+    _suppress_crash_dialog()
     from app.utils.audio_session_monitor import get_active_audio_apps, get_app_active_devices
     from app.utils.meeting_signals import get_mic_capture_pids
     from app.utils.render_activity import sample_render_peaks
@@ -75,6 +117,9 @@ class ComSessionPoller:
         self._cached_snapshot = {"audio_apps": [], "mic_pids": set(),
                                  "render_peaks": {}, "app_devices": {}}
         self._last_restart_ts = float("-inf")
+        # Monotonic timestamps of respawns (not the initial start), pruned to
+        # _RESTART_WINDOW_SECONDS. Feeds _effective_backoff.
+        self._recent_restarts = []
         self._render_history = {}
 
     def start(self):
@@ -114,10 +159,21 @@ class ComSessionPoller:
 
         if self._process is not None and not self._process.is_alive():
             now = time.monotonic()
-            if now - self._last_restart_ts >= _RESTART_BACKOFF_SECONDS:
-                logger.error("COM session worker process died - restarting")
+            self._recent_restarts = [
+                t for t in self._recent_restarts
+                if now - t < _RESTART_WINDOW_SECONDS
+            ]
+            backoff = _effective_backoff(self._recent_restarts, now)
+            if now - self._last_restart_ts >= backoff:
+                logger.error(
+                    "COM session worker process died - restarting "
+                    "(restart #%d within %.0fs, next backoff %.0fs)",
+                    len(self._recent_restarts) + 1,
+                    _RESTART_WINDOW_SECONDS, backoff,
+                )
                 try:
                     self.start()
+                    self._recent_restarts.append(time.monotonic())
                 except Exception:
                     logger.exception("Failed to respawn worker process; returning cached snapshot")
                     self._last_restart_ts = time.monotonic()
