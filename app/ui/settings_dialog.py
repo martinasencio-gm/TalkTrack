@@ -755,9 +755,8 @@ class SettingsDialog(QDialog):
         self.config.set("ai", "model", active.get("model", ""))
         local_name = active.get("local_model_name", "")
         local_path = active.get("local_model_path", "")
-        if provider_type == "local" and local_name and not local_path:
-            from app.ai.model_catalog import local_path_for
-            local_path = str(local_path_for(local_name))
+        if provider_type == "local":
+            local_path, local_name = self._effective_local_model_path_and_name()
         self.config.set("ai", "local_model_path", local_path)
         self.config.set("ai", "local_model_name",
                         local_name if provider_type == "local" else "")
@@ -973,6 +972,26 @@ class SettingsDialog(QDialog):
             )
             return False
 
+    def _effective_local_model_path_and_name(self):
+        """Resolve the Local provider's GGUF path + catalog key from the live
+        widgets.
+
+        A non-empty custom path in the Advanced field wins; otherwise a
+        catalog selection is resolved to its on-disk path the same way
+        ``_apply_settings`` persists it. Returns ``("", name)`` when the path
+        is empty and the catalog key is unset or unknown/stale (so a bad
+        cached key never crashes the dialog).
+        """
+        path = self.ai_local_path.text().strip()
+        name = self.model_catalog_widget.selected_key()
+        if path or not name:
+            return path, name
+        try:
+            from app.ai.model_catalog import local_path_for
+            return str(local_path_for(name)), name
+        except KeyError:
+            return "", name
+
     def _browse_local_model(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Model File", "", "GGUF Files (*.gguf);;All Files (*)"
@@ -990,12 +1009,14 @@ class SettingsDialog(QDialog):
         if not self._install_provider_package(provider_type):
             return
 
+        local_path, local_name = self._effective_local_model_path_and_name()
         from app.ai.provider_factory import create_provider
         config = {
             "provider": provider_type,
             "api_key": self.ai_api_key.text(),
             "model": self.ai_model.currentText(),
-            "local_model_path": self.ai_local_path.text(),
+            "local_model_path": local_path,
+            "local_model_name": local_name,
         }
         try:
             provider = create_provider(config)
