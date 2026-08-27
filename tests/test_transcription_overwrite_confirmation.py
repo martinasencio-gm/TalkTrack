@@ -92,7 +92,7 @@ class TestTranscriptionOverwriteConfirmation(unittest.TestCase):
             mock_q.assert_not_called()
             mock_start.assert_called_once_with(rec["audio_files"]["combined"], session=rec)
 
-    def test_recordings_list_set_queued_prompts_and_aborts_on_no(self):
+    def test_recordings_list_queue_transcription_prompts_and_aborts_on_no(self):
         from app.ui.recordings_list import RecordingsList
         from app.utils import batch_queue
 
@@ -102,12 +102,12 @@ class TestTranscriptionOverwriteConfirmation(unittest.TestCase):
         rec = self._create_recording("rec_transcribed", has_transcript=True)
 
         with patch("PyQt6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.No) as mock_q:
-            list_widget._set_queued([rec], True)
+            list_widget._toggle_batch_op([rec], "transcription", True)
             mock_q.assert_called_once()
 
         self.assertFalse(batch_queue.is_queued(rec))
 
-    def test_recordings_list_set_queued_prompts_and_proceeds_on_yes(self):
+    def test_recordings_list_queue_transcription_prompts_and_proceeds_on_yes(self):
         from app.ui.recordings_list import RecordingsList
         from app.utils import batch_queue
 
@@ -117,13 +117,14 @@ class TestTranscriptionOverwriteConfirmation(unittest.TestCase):
         rec = self._create_recording("rec_transcribed", has_transcript=True)
 
         with patch("PyQt6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes) as mock_q:
-            list_widget._set_queued([rec], True)
+            list_widget._toggle_batch_op([rec], "transcription", True)
             mock_q.assert_called_once()
 
         updated_meta = json.loads((Path(rec["directory"]) / "metadata.json").read_text(encoding="utf-8"))
         self.assertTrue(batch_queue.is_queued(updated_meta))
+        self.assertEqual(batch_queue.queued_ops(updated_meta), ["transcription"])
 
-    def test_recordings_list_set_queued_untranscribed_does_not_prompt(self):
+    def test_recordings_list_queue_transcription_untranscribed_does_not_prompt(self):
         from app.ui.recordings_list import RecordingsList
         from app.utils import batch_queue
 
@@ -133,11 +134,27 @@ class TestTranscriptionOverwriteConfirmation(unittest.TestCase):
         rec = self._create_recording("rec_untranscribed", has_transcript=False)
 
         with patch("PyQt6.QtWidgets.QMessageBox.question") as mock_q:
-            list_widget._set_queued([rec], True)
+            list_widget._toggle_batch_op([rec], "transcription", True)
             mock_q.assert_not_called()
 
         updated_meta = json.loads((Path(rec["directory"]) / "metadata.json").read_text(encoding="utf-8"))
         self.assertTrue(batch_queue.is_queued(updated_meta))
+
+    def test_recordings_list_queue_summarization_over_transcript_does_not_prompt(self):
+        from app.ui.recordings_list import RecordingsList
+        from app.utils import batch_queue
+
+        list_widget = RecordingsList(recordings_dir=self.tmp_dir)
+        self.addCleanup(list_widget.deleteLater)
+
+        rec = self._create_recording("rec_transcribed", has_transcript=True)
+
+        with patch("PyQt6.QtWidgets.QMessageBox.question") as mock_q:
+            list_widget._toggle_batch_op([rec], "summarization", True)
+            mock_q.assert_not_called()
+
+        updated_meta = json.loads((Path(rec["directory"]) / "metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual(batch_queue.queued_ops(updated_meta), ["summarization"])
 
 
 if __name__ == "__main__":

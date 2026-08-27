@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
         diarize_action.triggered.connect(self._on_diarize_requested)
         transcribe_menu.addAction(diarize_action)
 
-        batch_action = QAction("Run &Batch Transcription...", self)
+        batch_action = QAction("Run &Batch Processing...", self)
         batch_action.triggered.connect(self._open_batch_run_dialog)
         transcribe_menu.addAction(batch_action)
 
@@ -565,6 +565,7 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.summarize_toggled.connect(self._on_summarize_toggled)
         self._sync_diarization_controls()
         self._sync_summarize_control()
+        self._push_batch_capabilities()
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
@@ -1415,15 +1416,25 @@ class MainWindow(QMainWindow):
             return
 
         mode = dialog.execution_mode()
-        diarize = dialog.diarize_enabled()
+        # The dialog's checkboxes are "also do this" globals: checked forces
+        # the op onto every queued recording for this run; unchecked leaves
+        # each recording's own batch_ops alone (it never strips one). So
+        # map checked -> True, unchecked -> None.
+        diarize = True if dialog.diarize_enabled() else None
+        summarize = True if dialog.summarize_enabled() else None
         limit = dialog.limit()
+        op_overrides = {"diarization": diarize, "summarization": summarize}
 
         if mode == MODE_IN_APP:
-            self._start_in_app_batch(diarize=diarize, limit=limit)
+            self._start_in_app_batch(
+                diarize=diarize, limit=limit, op_overrides=op_overrides
+            )
         else:
-            self._launch_detached_batch(diarize=diarize, limit=limit)
+            self._launch_detached_batch(
+                diarize=diarize, summarize=summarize, limit=limit
+            )
 
-    def _start_in_app_batch(self, diarize=None, limit=None):
+    def _start_in_app_batch(self, diarize=None, limit=None, op_overrides=None):
         """Run batch transcription asynchronously in a background QThread."""
         if self._closing or (self._batch_worker is not None and self._batch_worker.isRunning()):
             return
@@ -1437,7 +1448,8 @@ class MainWindow(QMainWindow):
 
         self._batch_worker_start_time = time.time()
         self._batch_worker = BatchRunnerWorker(
-            recordings_dir, settings=settings, limit=limit, parent=self
+            recordings_dir, settings=settings, limit=limit,
+            op_overrides=op_overrides, parent=self,
         )
         self._batch_worker.job_started.connect(self._on_batch_job_started)
         self._batch_worker.job_progress.connect(self._on_batch_job_progress)
@@ -1458,13 +1470,15 @@ class MainWindow(QMainWindow):
         self._update_activity_visibility()
         self._poll_batch_processes()
 
-    def _launch_detached_batch(self, diarize=None, limit=None):
+    def _launch_detached_batch(self, diarize=None, summarize=None, limit=None):
         """Spawn batch_transcribe.py as a detached background OS process."""
         from app.batch.launcher import launch_detached_batch
         from app.ui.notification_region import PRIORITY_CONFIRMATION, PRIORITY_BLOCKING_ERROR
 
         try:
-            proc = launch_detached_batch(diarize=diarize, limit=limit)
+            proc = launch_detached_batch(
+                diarize=diarize, summarize=summarize, limit=limit
+            )
             self._poll_batch_processes()
             self.notification_region.enqueue(
                 priority=PRIORITY_CONFIRMATION,
@@ -1866,6 +1880,20 @@ class MainWindow(QMainWindow):
 
     def _on_summarize_toggled(self, enabled):
         self.config.set("ai", "auto_summarize", enabled)
+
+    def _push_batch_capabilities(self):
+        """Tell the recordings list whether its batch context sub-menu may
+        offer Speaker Recognition and Summarization — gated on an HF token
+        and a configured AI provider respectively. MainWindow owns the
+        config; the widget only renders the menu."""
+        hf_token = ""
+        try:
+            hf_token = self.config.get("diarization", "hf_token")
+        except Exception:
+            pass
+        self.recordings_list.set_batch_capabilities(
+            bool(hf_token), self._ai_provider_configured()
+        )
 
     def _update_preflight(self):
         """Recompute the capture bar's pre-flight verdict from real state.
@@ -2585,6 +2613,7 @@ class MainWindow(QMainWindow):
             # auto_summarize flag and provider the Summarize checkbox does.
             self._sync_diarization_controls()
             self._sync_summarize_control()
+            self._push_batch_capabilities()
             self._update_preflight()
             self.inspector.set_ai_configured(self._ai_provider_configured())
 

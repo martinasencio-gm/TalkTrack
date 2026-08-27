@@ -28,6 +28,10 @@ class TestBatchRunDialog(unittest.TestCase):
         dialog = BatchRunDialog(queued_count=0)
         self.assertFalse(hasattr(dialog, "_in_app_radio"))
 
+    def test_window_title_is_run_batch_processing(self):
+        dialog = BatchRunDialog(queued_count=0)
+        self.assertEqual(dialog.windowTitle(), "Run Batch Processing")
+
     def test_dialog_queued_defaults_and_options(self):
         mock_config = MagicMock()
         mock_config.get.side_effect = lambda sec, key: {
@@ -59,6 +63,39 @@ class TestBatchRunDialog(unittest.TestCase):
         dialog = BatchRunDialog(queued_count=2, config=mock_config)
         self.assertFalse(dialog.diarize_enabled())
         self.assertFalse(dialog._diarize_cb.isEnabled())
+
+    def test_summarize_group_disabled_without_a_provider(self):
+        mock_config = MagicMock()
+        mock_config.get.side_effect = lambda sec, key: {
+            ("diarization", "hf_token"): "hf",
+            ("diarization", "enabled"): False,
+            ("ai", "provider"): "none",
+        }.get((sec, key))
+
+        dialog = BatchRunDialog(queued_count=2, config=mock_config)
+        self.assertFalse(dialog._summarize_cb.isEnabled())
+        self.assertFalse(dialog.summarize_enabled())
+
+    def test_summarize_group_enabled_with_a_cloud_provider(self):
+        mock_config = MagicMock()
+        mock_config.get.side_effect = lambda sec, key: {
+            ("diarization", "hf_token"): "hf",
+            ("diarization", "enabled"): False,
+            ("ai", "provider"): "claude",
+        }.get((sec, key))
+
+        dialog = BatchRunDialog(queued_count=2, config=mock_config)
+        self.assertTrue(dialog._summarize_cb.isEnabled())
+        # Opt-in: unchecked by default (it spends against the API key).
+        self.assertFalse(dialog._summarize_cb.isChecked())
+        self.assertFalse(dialog.summarize_enabled())
+        dialog._summarize_cb.setChecked(True)
+        self.assertTrue(dialog.summarize_enabled())
+
+    def test_zero_queued_dialog_has_no_summarize_accessor_crash(self):
+        dialog = BatchRunDialog(queued_count=0)
+        # No groups are built, but the accessor is still safe to call.
+        self.assertFalse(dialog.summarize_enabled())
 
 
 if __name__ == "__main__":

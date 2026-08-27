@@ -47,7 +47,8 @@ def find_pythonw_executable(repo_root=None):
     return sys.executable
 
 
-def launch_detached_batch(repo_root=None, until=None, diarize=None, limit=None):
+def launch_detached_batch(repo_root=None, until=None, diarize=None, summarize=None,
+                          limit=None):
     """Launch batch_transcribe.py as a detached background OS process.
 
     Returns the spawned subprocess.Popen instance.
@@ -74,6 +75,11 @@ def launch_detached_batch(repo_root=None, until=None, diarize=None, limit=None):
         cmd.append("--diarize")
     elif diarize is False:
         cmd.append("--no-diarize")
+
+    if summarize is True:
+        cmd.append("--summarize")
+    elif summarize is False:
+        cmd.append("--no-summarize")
 
     if limit and int(limit) > 0:
         cmd.extend(["--limit", str(int(limit))])

@@ -50,13 +50,19 @@ with `batch_pending: true` and no `batch_ops` — the pre-`batch_ops` layout
 
 You can run batch transcription on demand directly inside TalkTrack:
 
-- Click **File > Run Batch Transcription...** in the menu bar.
+- Click **File > Run Batch Processing...** in the menu bar.
 - Or click the **Run Batch (N)** button above the recordings list when queued items exist.
 - Or right-click in the recordings list and choose **Process Batch Queue Now...**.
 
 The launch dialog offers two execution modes:
 1. **Process inside app (recommended):** Runs as a background task in TalkTrack with live status bar progress and model caching in memory.
 2. **Run as independent background process:** Spawns a detached `pythonw.exe` process that continues running even if TalkTrack is closed.
+
+It also has **Diarization** and **Summarization** checkboxes: ticking either
+adds that operation to *every* queued recording for this run (the same as
+`--diarize` / `--summarize` on the command line). Leaving one unticked does
+not remove it — a recording queued with that operation still gets it.
+Summarization is disabled when no AI provider is configured.
 
 ## Running it from the command line
 

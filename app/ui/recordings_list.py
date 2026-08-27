@@ -62,6 +62,61 @@ def partition_by_queue_state(metadatas):
     return unqueued, queued
 
 
+# Batch operations in canonical order, paired with their user-facing labels.
+# "diarization" is surfaced to users as "Speaker Recognition".
+BATCH_OP_LABELS = (
+    ("transcription", "Transcription"),
+    ("diarization", "Speaker Recognition"),
+    ("summarization", "Summarization"),
+)
+
+
+def queued_batch_tooltip(metadata):
+    """Tooltip for a row's "Queued" pill: the operations actually queued,
+    in canonical order. A legacy tag with no ``batch_ops`` falls back to
+    the old caption."""
+    ops = batch_queue.queued_ops(metadata)
+    named = [label for key, label in BATCH_OP_LABELS if key in ops]
+    if not named:
+        return "Queued for batch transcription"
+    return "Queued for batch: " + ", ".join(named)
+
+
+def batch_ops_menu_state(metadatas, can_diarize, can_summarize):
+    """`(checked, enabled)` per batch operation for a context sub-menu over
+    a selection, keyed by operation name. Pure, so the menu logic is
+    testable without a ``QMenu``.
+
+    - **Transcription** — checked when every selected recording already
+      carries it; always enabled.
+    - **Speaker Recognition / Summarization** — checked when every selected
+      recording carries it; enabled only when a transcript will be present
+      for the run (one already on disk for *every* selected recording, or
+      Transcription is checked so the run produces one) **and** the backing
+      credential is configured (HF token / AI provider).
+    """
+    metas = [m for m in (metadatas or []) if m and m.get("directory")]
+    if not metas:
+        return {}
+
+    def all_carry(op):
+        return all(op in batch_queue.queued_ops(m) for m in metas)
+
+    transcription_checked = all_carry("transcription")
+    every_transcribed = all(
+        (Path(m["directory"]) / "transcript.json").exists() for m in metas
+    )
+    downstream_ok = every_transcribed or transcription_checked
+
+    return {
+        "transcription": (transcription_checked, True),
+        "diarization": (all_carry("diarization"),
+                        bool(downstream_ok and can_diarize)),
+        "summarization": (all_carry("summarization"),
+                          bool(downstream_ok and can_summarize)),
+    }
+
+
 def format_relative_date(dt, now=None):
     """"Today, 09:02" / "Yesterday, 14:30" / "19 Aug, 15:20".
 
@@ -388,6 +443,11 @@ class RecordingsList(QWidget):
         self._transcribing = set()
         self._summarizing = set()
         self._batch_running = False
+        # Whether the batch context sub-menu may offer Speaker Recognition /
+        # Summarization — pushed from MainWindow, which owns the config
+        # (HF token / AI provider).
+        self._batch_can_diarize = False
+        self._batch_can_summarize = False
         try:
             from app.batch.process_monitor import find_running_batch_processes
             self._batch_running = bool(find_running_batch_processes())
@@ -486,6 +546,13 @@ class RecordingsList(QWidget):
         """Update whether a batch transcription process is currently active."""
         self._batch_running = running
         self._update_batch_btn_visibility()
+
+    def set_batch_capabilities(self, can_diarize: bool, can_summarize: bool):
+        """Whether the batch context sub-menu may offer Speaker Recognition
+        and Summarization (an HF token / a configured AI provider). Pushed
+        from MainWindow."""
+        self._batch_can_diarize = bool(can_diarize)
+        self._batch_can_summarize = bool(can_summarize)
 
     def most_recent_recording(self):
         """Metadata dict for the newest recording, or None if there are
@@ -688,7 +755,7 @@ class RecordingsList(QWidget):
         if batch_queue.is_queued(metadata):
             self._add_status_pill(
                 meta_row, "hourglass", "#fab387", "queued",
-                "Queued for batch transcription", "recordingBadgeQueued",
+                queued_batch_tooltip(metadata), "recordingBadgeQueued",
             )
 
         # Assigned tags badges
@@ -954,80 +1021,80 @@ class RecordingsList(QWidget):
             self._toggle_tag_on_recordings(metadatas, tag_name, True)
 
     def _add_batch_queue_actions(self, menu, metadatas):
-        """Queue / unqueue entries for the scheduled batch transcription run.
+        """Sub-menu for choosing which batch operations each selected
+        recording gets on the next scheduled run.
 
-        Both directions are always offered when they apply: a mixed
-        selection can be pushed either way in one click rather than making
-        the user work out which recordings are in which state.
+        Toggling an operation rewrites ``batch_ops`` for every selected
+        recording; clearing all three removes it from the queue. A
+        recording currently transcribing is not offered for *new* queueing
+        (it will have a transcript by the time a run reaches it, and the
+        tag is auto-cleared on completion — see
+        MainWindow._display_final_transcript), but one that is already
+        queued still appears so its operations can be changed or removed.
         """
-        unqueued, queued = partition_by_queue_state(metadatas)
-        # A recording actively being transcribed will already have a
-        # transcript by the time any batch run reaches it (and the tag gets
-        # cleared automatically the moment that transcription finishes —
-        # see MainWindow._display_final_transcript), so offering to queue it
-        # now would only ever be a no-op at best.
-        unqueued = [m for m in unqueued if m.get("directory") not in self._transcribing]
-        if not unqueued and not queued:
+        valid = [m for m in metadatas if m and m.get("directory")]
+        targets = [
+            m for m in valid
+            if m.get("directory") not in self._transcribing
+            or batch_queue.is_queued(m)
+        ]
+        anything_queued = any(batch_queue.is_queued(m) for m in valid)
+        if not targets and not anything_queued:
             return
 
         menu.addSeparator()
 
-        if unqueued:
-            label = ("Queue for Batch Transcription" if len(unqueued) == 1
-                     else f"Queue {len(unqueued)} for Batch Transcription")
-            action = QAction(label, self)
-            action.setToolTip(
-                "Transcribe these on the next scheduled batch run instead of now"
+        if targets:
+            state = batch_ops_menu_state(
+                targets, self._batch_can_diarize, self._batch_can_summarize
             )
-            action.triggered.connect(lambda: self._set_queued(unqueued, True))
-            menu.addAction(action)
+            sub = menu.addMenu("Batch Transcription/Summarization")
+            for key, label in BATCH_OP_LABELS:
+                checked, enabled = state.get(key, (False, False))
+                action = QAction(label, self)
+                action.setCheckable(True)
+                action.setChecked(checked)
+                action.setEnabled(enabled)
+                action.triggered.connect(
+                    lambda _checked, k=key, was=checked:
+                    self._toggle_batch_op(targets, k, not was)
+                )
+                sub.addAction(action)
 
-        if queued:
-            label = ("Remove from Batch Queue" if len(queued) == 1
-                     else f"Remove {len(queued)} from Batch Queue")
-            action = QAction(label, self)
-            action.triggered.connect(lambda: self._set_queued(queued, False))
-            menu.addAction(action)
-
+        if anything_queued:
             run_batch_action = QAction("Process Batch Queue Now...", self)
             run_batch_action.triggered.connect(self.run_batch_requested.emit)
             menu.addAction(run_batch_action)
 
-    def _set_queued(self, metadatas, queued):
-        """Write the tag for each recording, then redraw the pills."""
-        if queued:
-            transcribed = [
-                m for m in metadatas
-                if m and m.get("directory") and (Path(m["directory"]) / "transcript.json").exists()
-            ]
-            if transcribed:
-                if len(transcribed) == 1:
-                    name = transcribed[0].get("name") or Path(transcribed[0]["directory"]).name
-                    msg = (
-                        f"The recording '{name}' already has a transcription.\n\n"
-                        "Queueing it for batch transcription will re-transcribe it and "
-                        "overwrite the existing transcript.\n\n"
-                        "Do you want to continue?"
-                    )
-                else:
-                    msg = (
-                        f"{len(transcribed)} of the selected recordings already have a transcription.\n\n"
-                        "Queueing them for batch transcription will re-transcribe them and "
-                        "overwrite existing transcripts.\n\n"
-                        "Do you want to continue?"
-                    )
-                reply = QMessageBox.question(
-                    self,
-                    "Overwrite Existing Transcription?",
-                    msg,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    return
+    def _toggle_batch_op(self, metadatas, op, turn_on):
+        """Add or remove one batch operation across every given recording,
+        then redraw the pills.
 
-        failures = [m for m in metadatas
-                    if not batch_queue.set_queued(m["directory"], queued)]
+        Turning Transcription *on* for a recording that already has a
+        transcript on disk prompts first — the run would overwrite it.
+        Speaker Recognition and Summarization run over an existing
+        transcript and never warn.
+        """
+        valid = [m for m in metadatas if m and m.get("directory")]
+        if op == "transcription" and turn_on:
+            overwrites = [
+                m for m in valid
+                if (Path(m["directory"]) / "transcript.json").exists()
+                and "transcription" not in batch_queue.queued_ops(m)
+            ]
+            if overwrites and not self._confirm_retranscribe(overwrites):
+                return
+
+        failures = []
+        for m in valid:
+            current = set(batch_queue.queued_ops(m))
+            if turn_on:
+                current.add(op)
+            else:
+                current.discard(op)
+            ops = [o for o in batch_queue.OPS_ORDER if o in current]
+            if not batch_queue.set_ops(m["directory"], ops):
+                failures.append(m)
         self.refresh()
         if failures:
             QMessageBox.warning(
@@ -1035,6 +1102,33 @@ class RecordingsList(QWidget):
                 f"Could not update {len(failures)} recording(s) — their "
                 "metadata.json is missing or unreadable.",
             )
+
+    def _confirm_retranscribe(self, metadatas):
+        """Confirm before queueing Transcription for recordings that already
+        have one on disk. Returns True to proceed."""
+        if len(metadatas) == 1:
+            name = metadatas[0].get("name") or Path(metadatas[0]["directory"]).name
+            msg = (
+                f"The recording '{name}' already has a transcription.\n\n"
+                "Queueing it for batch transcription will re-transcribe it and "
+                "overwrite the existing transcript.\n\n"
+                "Do you want to continue?"
+            )
+        else:
+            msg = (
+                f"{len(metadatas)} of the selected recordings already have a transcription.\n\n"
+                "Queueing them for batch transcription will re-transcribe them and "
+                "overwrite existing transcripts.\n\n"
+                "Do you want to continue?"
+            )
+        reply = QMessageBox.question(
+            self,
+            "Overwrite Existing Transcription?",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _is_safe_recording_path(self, target_path) -> bool:
         """Security check: ensure path is within self.recordings_dir."""

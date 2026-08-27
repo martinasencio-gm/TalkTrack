@@ -15,7 +15,7 @@ class BatchRunDialog(QDialog):
     def __init__(self, queued_count=0, config=None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.setWindowTitle("Run Batch Transcription")
+        self.setWindowTitle("Run Batch Processing")
         self.setMinimumWidth(450)
         self._queued_count = queued_count
         self._config = config
@@ -136,6 +136,32 @@ class BatchRunDialog(QDialog):
 
             layout.addWidget(diarize_group)
 
+            # Summarization options (a global "also do this" override, like
+            # the diarization group above — never a "don't").
+            summarize_group = QGroupBox("Summarization")
+            summarize_layout = QVBoxLayout(summarize_group)
+
+            self._summarize_cb = QCheckBox("Generate AI summary and action items")
+            self._summarize_cb.setChecked(False)
+            if self._ai_provider_ready():
+                summarize_layout.addWidget(self._summarize_cb)
+            else:
+                self._summarize_cb.setEnabled(False)
+                self._summarize_cb.setChecked(False)
+                self._summarize_cb.setToolTip(
+                    "Requires an AI provider in Settings > AI Assistant"
+                )
+                summarize_layout.addWidget(self._summarize_cb)
+                no_provider_label = QLabel(
+                    "<i>Summarization is disabled because no AI provider is configured "
+                    "in Settings &gt; AI Assistant.</i>"
+                )
+                no_provider_label.setStyleSheet("font-size: 10px; color: #fab387;")
+                no_provider_label.setWordWrap(True)
+                summarize_layout.addWidget(no_provider_label)
+
+            layout.addWidget(summarize_group)
+
             # Limit group
             limit_group = QGroupBox("Worklist Scope")
             limit_layout = QVBoxLayout(limit_group)
@@ -187,6 +213,29 @@ class BatchRunDialog(QDialog):
         bottom_row.addWidget(buttons)
         layout.addLayout(bottom_row)
 
+    def _ai_provider_ready(self):
+        """Whether an AI provider is configured well enough to summarize —
+        mirrors MainWindow._ai_provider_configured (provider set, and a
+        local provider has a usable model file)."""
+        if self._config is None:
+            return False
+        try:
+            provider = self._config.get("ai", "provider")
+        except Exception:
+            return False
+        if not provider or provider == "none":
+            return False
+        if provider == "local":
+            try:
+                from app.ai.provider_factory import local_model_available
+                return bool(local_model_available({
+                    "local_model_path": self._config.get("ai", "local_model_path"),
+                    "local_model_name": self._config.get("ai", "local_model_name"),
+                }))
+            except Exception:
+                return False
+        return True
+
     def _open_logs(self):
         from app.batch.logging_setup import open_batch_log
         open_batch_log()
@@ -201,6 +250,17 @@ class BatchRunDialog(QDialog):
         """Return True/False for diarization override."""
         if hasattr(self, "_diarize_cb") and self._diarize_cb.isEnabled():
             return self._diarize_cb.isChecked()
+        return False
+
+    def summarize_enabled(self):
+        """Return True/False for the summarization override.
+
+        A global "also do this" — checked adds summarization to every
+        queued recording for this run; unchecked leaves each recording's
+        own queued operations alone (it never strips one).
+        """
+        if hasattr(self, "_summarize_cb") and self._summarize_cb.isEnabled():
+            return self._summarize_cb.isChecked()
         return False
 
     def limit(self):

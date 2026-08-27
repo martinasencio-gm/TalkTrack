@@ -66,6 +66,23 @@ class TestBatchLauncher(unittest.TestCase):
         cmd = mock_popen.call_args[0][0]
         self.assertIn("--no-diarize", cmd)
 
+    @patch("app.batch.launcher.subprocess.Popen")
+    @patch("app.batch.launcher.find_pythonw_executable", return_value="pythonw.exe")
+    @patch.object(Path, "exists", return_value=True)
+    def test_launch_detached_batch_summarize_flags(self, mock_exists, mock_find, mock_popen):
+        mock_popen.return_value = MagicMock()
+
+        launch_detached_batch(repo_root="/fake/repo", until="07:00", summarize=True)
+        self.assertIn("--summarize", mock_popen.call_args[0][0])
+
+        launch_detached_batch(repo_root="/fake/repo", until="07:00", summarize=False)
+        self.assertIn("--no-summarize", mock_popen.call_args[0][0])
+
+        launch_detached_batch(repo_root="/fake/repo", until="07:00")
+        cmd = mock_popen.call_args[0][0]
+        self.assertNotIn("--summarize", cmd)
+        self.assertNotIn("--no-summarize", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()
