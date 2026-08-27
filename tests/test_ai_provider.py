@@ -117,10 +117,21 @@ class TestProviderInterface(unittest.TestCase):
         from app.ai.provider import AIProvider
         self.assertGreaterEqual(AIProvider.max_context_chars, 50000)
 
-    def test_local_provider_has_small_context_limit(self):
+    def test_local_provider_default_context_limit_unchanged(self):
         from app.ai.local_provider import LocalProvider
         provider = LocalProvider(model_path="x.gguf")
-        self.assertLessEqual(provider.max_context_chars, 10000)
+        self.assertEqual(provider.max_context_chars, 8_000)
+
+    def test_local_provider_scales_context_with_n_ctx(self):
+        from app.ai.local_provider import LocalProvider
+        provider = LocalProvider(model_path="x.gguf", n_ctx=8192)
+        self.assertEqual(provider.max_context_chars, (8192 - 2048) * 3)
+
+    def test_resolve_local_n_ctx_uses_catalog_context_capped_at_8192(self):
+        from app.ai.provider_factory import _resolve_local_n_ctx
+        self.assertEqual(_resolve_local_n_ctx({}), 4096)
+        self.assertEqual(_resolve_local_n_ctx({"local_model_name": "nope"}), 4096)
+        self.assertEqual(_resolve_local_n_ctx({"local_model_name": "qwen2.5-3b"}), 8192)
 
 
 class TestSentenceTransformerCache(unittest.TestCase):

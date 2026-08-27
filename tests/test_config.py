@@ -223,5 +223,10 @@ class TestTranscriptsSessionImportFlag(ConfigTestCase):
         self.assertTrue(cfg2.get("transcripts", "session_import_done"))
 
 
+class TestLocalModelNameDefault(ConfigTestCase):
+    def test_ai_block_has_local_model_name_default(self):
+        self.assertEqual(DEFAULT_CONFIG["ai"]["local_model_name"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
         "api_key": "",
         "model": "",
         "local_model_path": "",
+        "local_model_name": "",
         "embed_model": "all-MiniLM-L6-v2",
         "auto_summarize": True,
         "provider_settings": {},

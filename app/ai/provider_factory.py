@@ -3,6 +3,14 @@
 from app.ai.provider import AIProvider
 
 
+def _resolve_local_n_ctx(config: dict) -> int:
+    from app.ai.model_catalog import get
+    model = get(config.get("local_model_name") or "")
+    if model is None:
+        return 4096
+    return min(model.context_tokens, 8192)
+
+
 def create_provider(config: dict) -> AIProvider | None:
     provider_type = config.get("provider", "none")
 
@@ -49,6 +57,7 @@ def create_provider(config: dict) -> AIProvider | None:
         return LocalProvider(
             model_path=config.get("local_model_path") or config.get("model", ""),
             embed_model=config.get("embed_model", "all-MiniLM-L6-v2"),
+            n_ctx=_resolve_local_n_ctx(config),
         )
 
     raise ValueError(f"Unknown AI provider: {provider_type}")
