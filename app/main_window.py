@@ -562,7 +562,9 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.transcribe_requested.connect(self._on_viewer_transcribe_requested)
         self.transcript_viewer.diarize_toggled.connect(self._on_diarize_toggled)
         self.transcript_viewer.diarize_requested.connect(self._on_diarize_requested)
+        self.transcript_viewer.summarize_toggled.connect(self._on_summarize_toggled)
         self._sync_diarization_controls()
+        self._sync_summarize_control()
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
@@ -1846,6 +1848,25 @@ class MainWindow(QMainWindow):
         self.config.set("diarization", "enabled", enabled)
         self._update_preflight()
 
+    def _sync_summarize_control(self):
+        """Push the saved auto-summarize preference into the transcript viewer.
+
+        The checkbox is the live source of truth for the next job (see
+        _maybe_auto_summarize); this keeps it agreeing with Settings > AI
+        Assistant, in both directions (see _on_summarize_toggled). Disabled
+        without a configured provider, where it could only be a no-op.
+        """
+        self.transcript_viewer.set_summarize_available(self._ai_provider_configured())
+        enabled = False
+        try:
+            enabled = bool(self.config.get("ai", "auto_summarize"))
+        except Exception:
+            pass
+        self.transcript_viewer.set_summarize_enabled(enabled)
+
+    def _on_summarize_toggled(self, enabled):
+        self.config.set("ai", "auto_summarize", enabled)
+
     def _update_preflight(self):
         """Recompute the capture bar's pre-flight verdict from real state.
 
@@ -2560,8 +2581,10 @@ class MainWindow(QMainWindow):
             # Update mic2 visibility in case mic_count changed
             self.source_selector.update_mic_count(self.config.get("audio", "mic_count"))
             # The dialog owns the same diarization flag and token the
-            # transcript viewer's checkbox mirrors.
+            # transcript viewer's checkbox mirrors — and the same
+            # auto_summarize flag and provider the Summarize checkbox does.
             self._sync_diarization_controls()
+            self._sync_summarize_control()
             self._update_preflight()
             self.inspector.set_ai_configured(self._ai_provider_configured())
 
@@ -3006,7 +3029,10 @@ class MainWindow(QMainWindow):
     def _maybe_auto_summarize(self):
         if not self.config.get("general", "auto_transcribe"):
             return
-        if not self.config.get("ai", "auto_summarize"):
+        # The header checkbox is the live source of truth for the next job
+        # (it mirrors and writes ai.auto_summarize) — same pattern as the
+        # "Identify speakers" checkbox for diarization.
+        if not self.transcript_viewer.summarize_enabled():
             return
         if not self._ai_provider_configured():
             return

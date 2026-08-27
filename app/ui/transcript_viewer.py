@@ -71,6 +71,7 @@ class TranscriptViewer(QWidget):
     speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
     diarize_requested = pyqtSignal()        # run diarization on the loaded transcript
     diarize_toggled = pyqtSignal(bool)      # "Identify speakers" checkbox changed
+    summarize_toggled = pyqtSignal(bool)    # "Summarize" checkbox changed
     open_last_requested = pyqtSignal()      # "Open the last one" clicked in the empty state
 
     def __init__(self, config=None, parent=None, speaker_panel=None):
@@ -83,6 +84,7 @@ class TranscriptViewer(QWidget):
         self._segment_widgets = []
         self._audio_path = None
         self._diarization_available = False
+        self._summarize_available = False
         self._player = None
         self._playing_index = -1
         self._continuous_play = False
@@ -126,6 +128,20 @@ class TranscriptViewer(QWidget):
         )
         self.diarize_cb.toggled.connect(self.diarize_toggled)
         header.addWidget(self.diarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Same per-run opt-in shape as "Identify speakers": whether the AI
+        # summary + action items run automatically once the next
+        # transcription finishes. Mirrors config["ai"]["auto_summarize"].
+        self.summarize_cb = QCheckBox("Summarize")
+        self.summarize_cb.setToolTip(
+            "Generate an AI summary and action items after transcription."
+        )
+        # Inert until MainWindow reports a configured provider via
+        # set_summarize_available(); an un-synced viewer must not show an
+        # operative box.
+        self.summarize_cb.setEnabled(False)
+        self.summarize_cb.toggled.connect(self.summarize_toggled)
+        header.addWidget(self.summarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # On-demand diarization for a transcript that already exists, so a
         # fast unlabelled pass can be upgraded without transcribing again.
@@ -285,6 +301,34 @@ class TranscriptViewer(QWidget):
 
     def diarization_enabled(self):
         return self.diarize_cb.isChecked() and self.diarize_cb.isEnabled()
+
+    def set_summarize_available(self, available):
+        """Whether an AI provider is configured at all.
+
+        Without one the checkbox would silently do nothing, so it is
+        disabled rather than left looking operative — same treatment as
+        "Identify speakers" without a HuggingFace token.
+        """
+        self._summarize_available = bool(available)
+        self.summarize_cb.setEnabled(self._summarize_available)
+        if self._summarize_available:
+            self.summarize_cb.setToolTip(
+                "Generate an AI summary and action items after transcription."
+            )
+        else:
+            self.summarize_cb.setToolTip(
+                "Choose an AI provider in Settings > AI Assistant to enable "
+                "summaries."
+            )
+
+    def set_summarize_enabled(self, enabled):
+        """Set the checkbox without reporting it back as a user change."""
+        self.summarize_cb.blockSignals(True)
+        self.summarize_cb.setChecked(bool(enabled))
+        self.summarize_cb.blockSignals(False)
+
+    def summarize_enabled(self):
+        return self.summarize_cb.isChecked() and self.summarize_cb.isEnabled()
 
     def _update_diarize_button(self):
         """On-demand diarization needs a transcript to label and audio to
