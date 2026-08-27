@@ -592,6 +592,7 @@ class MainWindow(QMainWindow):
 
         # Summary / action items
         self.summary_panel.regenerate_requested.connect(self._regenerate_summary)
+        self.summary_panel.delete_requested.connect(self._delete_summary_and_actions)
         self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
         self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
@@ -2975,6 +2976,39 @@ class MainWindow(QMainWindow):
         if not getattr(self, '_transcript', None):
             return
         self._run_summarize()
+
+    def _delete_summary_and_actions(self):
+        """Wipe the generated summary and action items for the displayed
+        recording. User-initiated from the Summary panel's Delete button, so
+        the window is visible — a plain confirm dialog is fine."""
+        reply = QMessageBox.question(
+            self, "Delete summary and action items?",
+            "This removes the AI summary and the extracted action items for "
+            "this recording. The transcript and your notes are kept. You can "
+            "regenerate them at any time.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.summary_panel.clear()
+        self.action_items_panel.clear()
+
+        if self._current_session and self._current_session.get("directory"):
+            session_dir = Path(self._current_session["directory"])
+            for name in ("summary.md", "action_items.json"):
+                try:
+                    (session_dir / name).unlink()
+                except OSError:
+                    pass
+            self._export_transcript()
+
+        # Offer the generate buttons again if a transcript is still loaded.
+        if getattr(self, "_transcript", None) is not None:
+            self.summary_panel.set_ready()
+            self.action_items_panel.set_ready()
+        self.status_label.setText("Summary and action items deleted.")
 
     def _ai_provider_configured(self):
         provider = self.config.get("ai", "provider")

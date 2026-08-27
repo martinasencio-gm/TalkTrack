@@ -11,6 +11,7 @@ from app.ui.vertical_resize_grip import VerticalResizeGrip
 
 class SummaryPanel(QWidget):
     regenerate_requested = pyqtSignal()
+    delete_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,6 +56,13 @@ class SummaryPanel(QWidget):
         self._gen_btn.setVisible(False)
         btn_row.addWidget(self._gen_btn)
 
+        # Wipes both the summary and the action items for this recording.
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setObjectName("summaryDeleteBtn")
+        self._delete_btn.clicked.connect(self.delete_requested.emit)
+        self._delete_btn.setVisible(False)
+        btn_row.addWidget(self._delete_btn)
+
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -65,6 +73,7 @@ class SummaryPanel(QWidget):
         self._copy_btn.setVisible(True)
         self._gen_btn.setText("Regenerate")
         self._gen_btn.setVisible(True)
+        self._delete_btn.setVisible(True)
         self._instruction_input.setVisible(True)
         self._status.setVisible(False)
 
@@ -75,6 +84,7 @@ class SummaryPanel(QWidget):
         self._resize_grip.setVisible(False)
         self._copy_btn.setVisible(False)
         self._gen_btn.setVisible(False)
+        self._delete_btn.setVisible(False)
         self._instruction_input.clear()
         self._instruction_input.setVisible(False)
         self._status.setText("No summary generated yet.")
@@ -90,6 +100,7 @@ class SummaryPanel(QWidget):
         self._status.setText("Generating summary...")
         self._status.setVisible(True)
         self._gen_btn.setVisible(False)
+        self._delete_btn.setVisible(False)
         self._instruction_input.setVisible(False)
         self._text.setVisible(False)
         self._resize_grip.setVisible(False)
@@ -101,6 +112,7 @@ class SummaryPanel(QWidget):
             self._text.setVisible(True)
             self._resize_grip.setVisible(True)
             self._copy_btn.setVisible(True)
+            self._delete_btn.setVisible(True)
             self._instruction_input.setVisible(True)
             self._status.setVisible(False)
             self._gen_btn.setText("Regenerate")

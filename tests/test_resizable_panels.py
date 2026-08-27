@@ -39,6 +39,28 @@ class TestSummaryPanelResizable(unittest.TestCase):
         self.assertFalse(panel._resize_grip.isHidden())
 
 
+class TestSummaryPanelDelete(unittest.TestCase):
+    def test_delete_button_tracks_summary_visibility(self):
+        panel = SummaryPanel()
+        self.assertTrue(panel._delete_btn.isHidden())
+        panel.set_summary("a summary")
+        self.assertFalse(panel._delete_btn.isHidden())
+        panel.set_loading()
+        self.assertTrue(panel._delete_btn.isHidden())
+        panel.set_error()  # prior text -> summary restored, delete back
+        self.assertFalse(panel._delete_btn.isHidden())
+        panel.clear()
+        self.assertTrue(panel._delete_btn.isHidden())
+
+    def test_delete_button_emits_delete_requested(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        seen = []
+        panel.delete_requested.connect(lambda: seen.append(True))
+        panel._delete_btn.click()
+        self.assertEqual(seen, [True])
+
+
 class TestActionItemsPanelResizable(unittest.TestCase):
     def test_grip_shown_with_items_hidden_otherwise(self):
         panel = ActionItemsPanel()
