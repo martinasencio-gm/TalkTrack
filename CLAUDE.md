@@ -311,6 +311,7 @@ TalkTrack/
 - transcript.json: transcription/diarization source of truth
 - transcript.md: LLM-ready Markdown export (frontmatter + summary + action items + notes + transcript), regenerated alongside transcript.json on every save
 - summary.md: AI-generated meeting summary
+- summary_meta.json: summary provenance — `generated_by` ("talktrack-app" or an external tool like "talktrack-batch-summarize"), `model` (human label from `provider_factory.describe_ai_model`), `seconds` (app only), `generated_at`. Written next to summary.md, shown under the summary in the panel, removed by the Delete button. Absent for summaries produced before this was added.
 - action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history
 - embeddings.npz: Cached segment embeddings for semantic search (auto-invalidated on edit)

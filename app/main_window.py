@@ -3077,6 +3077,10 @@ class MainWindow(QMainWindow):
                     t0 = time.monotonic()
                     summary = self._provider.complete(summary_prompt)
                     meta = {
+                        # Provenance for summary_meta.json. "generated_by"
+                        # lets external tooling (the batch-summarize skill)
+                        # tell an app-produced summary from its own.
+                        "generated_by": "talktrack-app",
                         "model": self._model_label,
                         "seconds": round(time.monotonic() - t0, 1),
                         "generated_at": datetime.now().isoformat(timespec="seconds"),
