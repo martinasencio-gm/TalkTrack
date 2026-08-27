@@ -83,6 +83,11 @@ class MainWindow(QMainWindow):
         self._calendar_lookup_workers = []
         self._calendar_banner_session = None
         self._calendar_banner_is_post_recording = False
+        # Ad-hoc meeting name detected from the Teams/Zoom window title, held
+        # while the suggestion banner is up so that *declining* the banner
+        # can still fall back to tagging the recording with it — see
+        # _on_calendar_dismissed.
+        self._calendar_banner_detected_name = None
         self._rename_candidate_events = []
         self._diarization_worker = None
         self._simple_diarize_worker = None
@@ -1280,6 +1285,7 @@ class MainWindow(QMainWindow):
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
         self._calendar_banner_is_post_recording = False
+        self._calendar_banner_detected_name = None
 
         self._current_session = session
         self._transcript = None
@@ -2188,6 +2194,7 @@ class MainWindow(QMainWindow):
         self.calendar_banner.hide_and_clear()
         self._calendar_banner_session = None
         self._calendar_banner_is_post_recording = False
+        self._calendar_banner_detected_name = None
         # Suggestions belong to the recording they were looked up for; a
         # leftover one must not tag the recording being opened now.
         self._rename_candidate_events = []
@@ -2834,6 +2841,11 @@ class MainWindow(QMainWindow):
         # as the recording header or transcript already sitting there.
         self._calendar_banner_session = session
         self._calendar_banner_is_post_recording = not manual
+        # Held so a dismissal of the automatic post-recording banner still
+        # tags an ad-hoc conversation with its detected name, instead of
+        # leaving it untagged just because an unrelated meeting happened to
+        # overlap. Cleared on tag/dismiss and on any session switch.
+        self._calendar_banner_detected_name = detected_name if not manual else None
         self.calendar_banner.show_matches(events)
 
     def _on_calendar_tag_requested(self, event):
@@ -2849,6 +2861,7 @@ class MainWindow(QMainWindow):
             return
         was_post_rec = getattr(self, "_calendar_banner_is_post_recording", False)
         self._calendar_banner_is_post_recording = False
+        self._calendar_banner_detected_name = None
         event_to_save = self._apply_calendar_event(event)
         self._maybe_suggest_rename(self._current_session, event_to_save)
         self._export_transcript()
@@ -2907,6 +2920,18 @@ class MainWindow(QMainWindow):
             return
         was_post_rec = getattr(self, "_calendar_banner_is_post_recording", False)
         self._calendar_banner_is_post_recording = False
+        detected_name = getattr(self, "_calendar_banner_detected_name", None)
+        self._calendar_banner_detected_name = None
+
+        # Declining the automatic post-recording banner is not "this
+        # recording has no meeting" — the banner may have offered only an
+        # unrelated meeting that overlapped an ad-hoc call. Fall back to the
+        # same detected-name tag the no-calendar-match path uses.
+        # _maybe_tag_detected_meeting no-ops on a falsy/generic name or when
+        # calendar_event.json already exists, so this is safe unconditionally.
+        if was_post_rec:
+            self._maybe_tag_detected_meeting(self._current_session, detected_name)
+
         self._current_session["calendar_prompt_dismissed"] = True
         session_dir = Path(self._current_session["directory"])
         meta_path = session_dir / "metadata.json"
