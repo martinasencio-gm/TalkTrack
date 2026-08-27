@@ -844,7 +844,7 @@ class RecordingsList(QWidget):
             menu.addSeparator()
 
             count = len(selected_items)
-            delete_action = QAction(f"Delete {count} Recordings", self)
+            delete_action = QAction(f"Delete {count}", self)
             delete_action.triggered.connect(
                 lambda: self._delete_selected_recordings(selected_items)
             )
@@ -872,7 +872,7 @@ class RecordingsList(QWidget):
 
             menu.addSeparator()
 
-            delete_action = QAction("Delete Recording", self)
+            delete_action = QAction("Delete", self)
             delete_action.triggered.connect(lambda: self._delete_recording(metadata))
             menu.addAction(delete_action)
 
