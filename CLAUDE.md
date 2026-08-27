@@ -201,6 +201,7 @@ TalkTrack/
 - **Searchable history:** text and semantic search across all past recordings
 - **Chat with transcript:** ask AI questions about the current recording
 - **AI provider choice:** Claude, OpenAI, Grok, Gemini, Mistral, or local models via Settings > AI Assistant
+- **Built-in model catalog (local provider):** Settings ▸ AI Assistant ▸ Local Model shows a curated list of downloadable GGUF models (Qwen2.5 3B/7B, Phi-3.5 Mini) with size / context / RAM / licence, a download manager (progress, cancel, remove), and one-click selection. Models land in `APP_DATA_DIR/models/` with a `manifest.json`; the manual GGUF path moves to an "Advanced" section and still wins when set. `llama-cpp-python` installs from the prebuilt CPU wheel index.
 - **Hidden devices filter:** hide unwanted audio devices (e.g., Voicemeeter) from dropdowns
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
@@ -299,7 +300,7 @@ TalkTrack/
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
 - Device selections persist by **name** (indices shift as hardware comes and goes): `last_mic`, `last_mic2`, `last_loopback`. System-audio selection priority is **saved choice → endpoint actually rendering audio → `get_default_output()` → first device**. The Windows default output is frequently not the endpoint the meeting app renders to, and capturing the wrong one yields a silent track that `ChunkWriter` then deletes. Capture mode and selected apps are persisted too
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
-- AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
+- AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), local_model_name (catalog key of the selected built-in model), auto_summarize
 - General settings: min_recording_length, silence_auto_stop, silence_duration, `batch_auto_queue` (tag recordings the app doesn't transcribe itself for the batch run), `close_to_tray` (the close button's "minimize instead" choice hides to the tray rather than the taskbar)
 - Window presentation: the minimize button always minimizes to the taskbar. Double-click walks a fixed chain — full → compact bar → pill → full — and `ui.double_click_target` ("compact_bar"/"pill") picks which shrunken state a double-click from the full window lands on. `app/utils/config_migration.py` maps the removed `general.minimize_behavior`/`minimize_to_tray` keys onto `close_to_tray` on first load after upgrade.
 - Meeting detection settings (`meeting_detection`): mode ("off"/"suggest"/"auto"), threshold_seconds, detect_end, end_grace_seconds, end_action ("stop"/"pause"), use_mic_capture, use_calendar, use_window_title, apps. Replaces the old `general.auto_record` flag, which `app/utils/config_migration.py` migrates into `mode` ("auto" or "off") on first load after upgrade — `silence_auto_stop` is unaffected and still applies as an independent backstop.

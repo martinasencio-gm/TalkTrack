@@ -7,6 +7,22 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 - Local provider model path lives in `config["ai"]["local_model_path"]` — the `model` key holds the settings-combo placeholder `"(set path below)"` for local. `provider_factory` reads `local_model_path` first (#13); keep that precedence.
 - Per-provider API keys/models live in `provider_settings` keyed by provider name.
 
+## Local model catalog
+
+- `app/ai/model_catalog.py` — hard-coded `CATALOG` of `CatalogModel`
+  (ungated HF GGUF repos, Q4_K_M). Adding a model is one entry.
+- `app/ai/model_store.py` — `models/manifest.json` under `APP_DATA_DIR`.
+  "Downloaded" = manifest entry AND file on disk within 20% of the recorded
+  size. `is_downloaded` never trusts the manifest alone.
+- `app/ai/model_downloader.py` — wraps `hf_hub_download`; progress via a
+  `tqdm_class` shim, cancel via a `cancel_check` polled from that shim.
+- Selecting a catalog model writes BOTH `ai.local_model_name` (the key) and
+  `ai.local_model_path` (resolved absolute path). `provider_factory` still
+  reads `local_model_path` first (#13); `local_model_name` only feeds
+  `_resolve_local_n_ctx` → `LocalProvider(n_ctx=...)`.
+- A non-empty custom `local_model_path` (Advanced section) always wins over
+  the catalog selection.
+
 ## Context limits
 
 - `AIProvider.max_context_chars` (class attr): 100k default (cloud), `LocalProvider` overrides to 8k (n_ctx=4096 tokens + instruction/completion headroom).
