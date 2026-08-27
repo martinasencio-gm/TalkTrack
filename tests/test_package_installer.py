@@ -73,5 +73,39 @@ class ProviderInfoTest(unittest.TestCase):
         self.assertIsNone(get_package_info("nonexistent"))
 
 
+class ExtraIndexUrlTest(unittest.TestCase):
+    def test_local_provider_has_a_prebuilt_cpu_wheel_index(self):
+        from app.utils.package_installer import extra_index_url_for
+        url = extra_index_url_for("local")
+        self.assertIn("llama-cpp-python", url)
+        self.assertIn("cpu", url)
+
+    def test_api_providers_have_no_extra_index(self):
+        from app.utils.package_installer import extra_index_url_for
+        for p in ("claude", "openai", "grok", "gemini", "mistral"):
+            self.assertIsNone(extra_index_url_for(p))
+
+    def test_install_command_pip_form_inserts_extra_index_before_package(self):
+        with patch.object(package_installer.importlib.util, "find_spec", return_value=object()):
+            cmd = _install_command("llama-cpp-python>=0.3.0",
+                                   extra_index_url="https://example/whl/cpu")
+        self.assertEqual(cmd, [
+            sys.executable, "-m", "pip", "install",
+            "--extra-index-url", "https://example/whl/cpu",
+            "llama-cpp-python>=0.3.0",
+        ])
+
+    def test_install_command_uv_form_inserts_extra_index_before_package(self):
+        with patch.object(package_installer.importlib.util, "find_spec", return_value=None), \
+             patch.object(package_installer.shutil, "which", return_value="uv"):
+            cmd = _install_command("llama-cpp-python>=0.3.0",
+                                   extra_index_url="https://example/whl/cpu")
+        self.assertEqual(cmd, [
+            "uv", "pip", "install", "--python", sys.executable,
+            "--extra-index-url", "https://example/whl/cpu",
+            "llama-cpp-python>=0.3.0",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

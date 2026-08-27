@@ -16,6 +16,13 @@ PROVIDER_PACKAGES = {
     "local": ("llama_cpp", "llama-cpp-python>=0.3.0", "llama.cpp Python bindings"),
 }
 
+# llama-cpp-python publishes no wheel on PyPI for many Windows/Python combos,
+# so a plain `pip install` compiles from source (needs CMake + MSVC). Point
+# it at the maintainer's prebuilt CPU wheel index instead.
+PREBUILT_INDEX_URLS = {
+    "local": "https://abetlen.github.io/llama-cpp-python/whl/cpu",
+}
+
 
 def is_package_installed(provider_type: str) -> bool:
     """Check if the required package for a provider is installed."""
@@ -38,7 +45,12 @@ def get_package_info(provider_type: str) -> tuple[str, str] | None:
     return info[1], info[2]
 
 
-def _install_command(pip_package: str) -> list[str] | None:
+def extra_index_url_for(provider_type: str) -> str | None:
+    """Return the extra index URL for a provider, or None if not needed."""
+    return PREBUILT_INDEX_URLS.get(provider_type)
+
+
+def _install_command(pip_package: str, extra_index_url: str | None = None) -> list[str] | None:
     """Build the install command for the *current* interpreter.
 
     Always targets ``sys.executable`` so optional SDKs land in the active
@@ -48,18 +60,20 @@ def _install_command(pip_package: str) -> list[str] | None:
     uv-created virtualenvs ship WITHOUT pip, so when pip is missing fall back to
     ``uv pip install --python <sys.executable>``, which installs into this same
     interpreter. Returns ``None`` if neither installer is available.
+    An ``extra_index_url`` is inserted right before the package for both forms.
     """
+    extra = ["--extra-index-url", extra_index_url] if extra_index_url else []
     if importlib.util.find_spec("pip") is not None:
-        return [sys.executable, "-m", "pip", "install", pip_package]
+        return [sys.executable, "-m", "pip", "install", *extra, pip_package]
     uv = shutil.which("uv")
     if uv:
-        return [uv, "pip", "install", "--python", sys.executable, pip_package]
+        return [uv, "pip", "install", "--python", sys.executable, *extra, pip_package]
     return None
 
 
-def install_package(pip_package: str) -> tuple[bool, str]:
+def install_package(pip_package: str, extra_index_url: str | None = None) -> tuple[bool, str]:
     """Install a package into the current environment. Returns (success, output)."""
-    cmd = _install_command(pip_package)
+    cmd = _install_command(pip_package, extra_index_url)
     if cmd is None:
         return False, (
             "Neither pip nor uv is available to install packages. "

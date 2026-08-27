@@ -29,3 +29,13 @@
 
 - `uv sync --extra cuda` can fail with `failed to rename ... Access is denied (os error 5)` — antivirus (Defender) locking the ~2.4GB torch wheel in uv's cache during extraction. Retry, `uv cache clean`, exclude `%LOCALAPPDATA%\uv\cache`, or use the pip cu126 path. (issue #5)
 - An **interrupted** `uv sync` can gut a package's dist-info while leaving it importable: `importlib.metadata.version()` returns None and the app fails transcription with "Unable to compare versions … found=None" (raised in transformers via the faster-whisper import chain). Repair: close the app, `uv pip install --python .venv\Scripts\python.exe --force-reinstall <pkg>` — touches only that package. The System Status panel detects this (`check_package_metadata`, #41).
+
+## llama-cpp-python (local AI provider)
+
+`llama-cpp-python` is NOT in base deps — it's installed on demand when the
+user picks the Local Model provider. The ad-hoc installer
+(`package_installer.install_package`) passes
+`--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`
+(`extra_index_url_for("local")`) so pip pulls a prebuilt CPU wheel instead
+of compiling from source (which needs CMake + MSVC Build Tools). GPU wheels
+are a separate opt-in and out of scope for now.
