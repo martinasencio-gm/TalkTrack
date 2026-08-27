@@ -446,17 +446,30 @@ class SettingsDialog(QDialog):
 
         self.ai_model = QComboBox()
         self.ai_model.setEditable(True)
-        ai_form.addRow("Model:", self.ai_model)
+        self.ai_model_label = QLabel("Model:")
+        ai_form.addRow(self.ai_model_label, self.ai_model)
 
-        self.ai_local_label = QLabel("Local Model:")
         self.ai_local_path = QLineEdit()
         self.ai_local_path.setPlaceholderText("Path to GGUF model file...")
         self.ai_local_browse = QPushButton("Browse...")
         self.ai_local_browse.clicked.connect(self._browse_local_model)
-        local_row = QHBoxLayout()
-        local_row.addWidget(self.ai_local_path)
-        local_row.addWidget(self.ai_local_browse)
-        ai_form.addRow(self.ai_local_label, local_row)
+
+        # Built-in model catalog (primary control for the Local provider)
+        from app.ui.model_catalog_widget import ModelCatalogWidget
+        from app.ui.collapsible_section import CollapsibleSection
+
+        self.model_catalog_widget = ModelCatalogWidget(
+            token_getter=lambda: self.hf_token_edit.text().strip()
+        )
+        self.model_catalog_widget.selection_changed.connect(self._on_catalog_selection_changed)
+        self.model_catalog_widget.download_active_changed.connect(self._on_catalog_download_active)
+        ai_form.addRow(self.model_catalog_widget)
+
+        self.ai_advanced_section = CollapsibleSection("Advanced: use a custom GGUF file")
+        self.ai_advanced_section.content_layout().addWidget(self.ai_local_path)
+        self.ai_advanced_section.content_layout().addWidget(self.ai_local_browse)
+        ai_form.addRow(self.ai_advanced_section)
+        self.ai_local_path.textChanged.connect(self._on_custom_path_changed)
 
         self.ai_test_btn = QPushButton("Test Connection")
         self.ai_test_btn.clicked.connect(self._test_ai_connection)
@@ -506,7 +519,7 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
 
-        ok_btn = QPushButton("Save")
+        ok_btn = self._ok_btn = QPushButton("Save")
         ok_btn.clicked.connect(self._save_and_close)
         btn_row.addWidget(ok_btn)
 
@@ -620,6 +633,7 @@ class SettingsDialog(QDialog):
                 "api_key": self.config.get("ai", "api_key") or "",
                 "model": self.config.get("ai", "model") or "",
                 "local_model_path": self.config.get("ai", "local_model_path") or "",
+                "local_model_name": self.config.get("ai", "local_model_name") or "",
             }
 
         idx = self.ai_provider_combo.findData(provider)
@@ -631,6 +645,11 @@ class SettingsDialog(QDialog):
         # Calendar
         self.calendar_enabled_cb.setChecked(self.config.get("calendar", "enabled"))
 
+    def reject(self):
+        if self.model_catalog_widget.is_download_active():
+            self.model_catalog_widget.abort_active_download()
+        super().reject()
+
     def _save_and_close(self):
         """Persist every setting in one write, then close.
 
@@ -640,6 +659,12 @@ class SettingsDialog(QDialog):
         the dialog's edits lost. Report it and stay open so the user can
         retry without retyping.
         """
+        if self.model_catalog_widget.is_download_active():
+            QMessageBox.information(
+                self, "Settings",
+                "A model is still downloading. Wait for it to finish or cancel it first.",
+            )
+            return
         try:
             with self.config.batch():
                 if not self._apply_settings():
@@ -728,7 +753,14 @@ class SettingsDialog(QDialog):
         active = self._provider_settings.get(provider_type, {})
         self.config.set("ai", "api_key", active.get("api_key", ""))
         self.config.set("ai", "model", active.get("model", ""))
-        self.config.set("ai", "local_model_path", active.get("local_model_path", ""))
+        local_name = active.get("local_model_name", "")
+        local_path = active.get("local_model_path", "")
+        if provider_type == "local" and local_name and not local_path:
+            from app.ai.model_catalog import local_path_for
+            local_path = str(local_path_for(local_name))
+        self.config.set("ai", "local_model_path", local_path)
+        self.config.set("ai", "local_model_name",
+                        local_name if provider_type == "local" else "")
         self.config.set("ai", "auto_summarize", self.auto_summarize_cb.isChecked())
         # Persist all provider settings so switching back restores them
         self.config.set("ai", "provider_settings", self._provider_settings)
@@ -757,9 +789,10 @@ class SettingsDialog(QDialog):
         is_local = provider == "local"
         self.ai_api_key.setVisible(is_api)
         self.ai_api_key_label.setVisible(is_api)
-        self.ai_local_path.setVisible(is_local)
-        self.ai_local_browse.setVisible(is_local)
-        self.ai_local_label.setVisible(is_local)
+        self.ai_model.setVisible(not is_local and provider != "none")
+        self.ai_model_label.setVisible(not is_local and provider != "none")
+        self.model_catalog_widget.setVisible(is_local)
+        self.ai_advanced_section.setVisible(is_local)
         self.ai_model.clear()
         if provider == "claude":
             self.ai_model.addItems(["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-6"])
@@ -771,14 +804,29 @@ class SettingsDialog(QDialog):
             self.ai_model.addItems(["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
         elif provider == "mistral":
             self.ai_model.addItems(["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"])
-        elif provider == "local":
-            self.ai_model.addItem("(set path below)")
 
         # Restore this provider's saved settings
         self._restore_provider_settings(provider)
 
         # Check if package is installed
         self._check_provider_package(provider)
+
+    def _on_catalog_selection_changed(self, key: str):
+        # Selecting a catalog model clears any custom path so it takes effect.
+        if key:
+            self.ai_local_path.blockSignals(True)
+            self.ai_local_path.clear()
+            self.ai_local_path.blockSignals(False)
+            self.model_catalog_widget.set_custom_path_active(False)
+
+    def _on_custom_path_changed(self, text: str):
+        active = bool(text.strip())
+        self.model_catalog_widget.set_custom_path_active(active)
+
+    def _on_catalog_download_active(self, active: bool):
+        # Block Save + provider switching while a model downloads.
+        self.ai_provider_combo.setEnabled(not active)
+        self._ok_btn.setEnabled(not active)
 
     def _save_current_provider_settings(self):
         """Save the current provider's API key, model, and local path to the in-memory cache."""
@@ -789,6 +837,7 @@ class SettingsDialog(QDialog):
             "api_key": self.ai_api_key.text(),
             "model": self.ai_model.currentText(),
             "local_model_path": self.ai_local_path.text(),
+            "local_model_name": self.model_catalog_widget.selected_key(),
         }
 
     def _restore_provider_settings(self, provider):
@@ -796,6 +845,7 @@ class SettingsDialog(QDialog):
         saved = self._provider_settings.get(provider, {})
         self.ai_api_key.setText(saved.get("api_key", ""))
         self.ai_local_path.setText(saved.get("local_model_path", ""))
+        self.model_catalog_widget.set_selected_key(saved.get("local_model_name", ""))
         saved_model = saved.get("model", "")
         if saved_model:
             idx = self.ai_model.findText(saved_model)
