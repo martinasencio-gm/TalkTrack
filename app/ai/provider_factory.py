@@ -26,6 +26,31 @@ def local_model_available(config: dict) -> bool:
         return False
 
 
+def describe_ai_model(config: dict) -> str:
+    """Human-readable label for the model a given ``ai`` config resolves to.
+
+    Used to record which model produced a summary. Qt-free so the summarize
+    worker can call it off the UI thread. Cloud providers read as
+    ``provider/model``; the local provider prefers its catalog key, then the
+    GGUF filename.
+    """
+    import os
+
+    provider = config.get("provider", "none")
+    if provider == "none":
+        return ""
+    if provider == "local":
+        name = (config.get("local_model_name") or "").strip()
+        if name:
+            return name
+        path = (config.get("local_model_path") or config.get("model") or "").strip()
+        if path:
+            return os.path.basename(path)
+        return "local model"
+    model = (config.get("model") or "").strip()
+    return f"{provider}/{model}" if model else provider
+
+
 def _resolve_local_n_ctx(config: dict) -> int:
     from app.ai.model_catalog import get
     model = get(config.get("local_model_name") or "")

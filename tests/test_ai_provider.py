@@ -169,6 +169,46 @@ class TestLocalModelAvailable(unittest.TestCase):
                 {"local_model_path": "", "local_model_name": "qwen2.5-3b"}))
 
 
+class TestDescribeAiModel(unittest.TestCase):
+    def test_none_provider_is_empty_string(self):
+        from app.ai.provider_factory import describe_ai_model
+        self.assertEqual(describe_ai_model({"provider": "none"}), "")
+        self.assertEqual(describe_ai_model({}), "")
+
+    def test_cloud_provider_is_provider_slash_model(self):
+        from app.ai.provider_factory import describe_ai_model
+        self.assertEqual(
+            describe_ai_model({"provider": "claude", "model": "claude-sonnet-4-6"}),
+            "claude/claude-sonnet-4-6",
+        )
+
+    def test_cloud_provider_without_model_is_bare_provider(self):
+        from app.ai.provider_factory import describe_ai_model
+        self.assertEqual(describe_ai_model({"provider": "openai", "model": ""}), "openai")
+
+    def test_local_prefers_catalog_name(self):
+        from app.ai.provider_factory import describe_ai_model
+        self.assertEqual(
+            describe_ai_model({
+                "provider": "local",
+                "local_model_name": "qwen2.5-3b",
+                "local_model_path": "/models/whatever.gguf",
+            }),
+            "qwen2.5-3b",
+        )
+
+    def test_local_falls_back_to_path_basename(self):
+        from app.ai.provider_factory import describe_ai_model
+        self.assertEqual(
+            describe_ai_model({
+                "provider": "local",
+                "local_model_name": "",
+                "local_model_path": "/models/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+            }),
+            "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+        )
+
+
 class TestLocalProviderCompletion(unittest.TestCase):
     """The local provider must drive the GGUF instruct model through the
     chat-completion API so the model's own chat template and EOS token are

@@ -2292,6 +2292,13 @@ class MainWindow(QMainWindow):
                     self.summary_panel.set_summary(f.read())
             except OSError:
                 pass
+            meta_path = session_dir / "summary_meta.json"
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                self.summary_panel.set_meta(meta.get("model", ""), meta.get("seconds"))
+            except (json.JSONDecodeError, OSError):
+                pass
 
         actions_path = session_dir / "action_items.json"
         if actions_path.exists():
@@ -2998,7 +3005,7 @@ class MainWindow(QMainWindow):
 
         if self._current_session and self._current_session.get("directory"):
             session_dir = Path(self._current_session["directory"])
-            for name in ("summary.md", "action_items.json"):
+            for name in ("summary.md", "summary_meta.json", "action_items.json"):
                 try:
                     (session_dir / name).unlink()
                 except OSError:
@@ -3025,13 +3032,14 @@ class MainWindow(QMainWindow):
 
     def _run_summarize(self):
         from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items
-        from app.ai.provider_factory import create_provider
+        from app.ai.provider_factory import create_provider, describe_ai_model
         from PyQt6.QtCore import QThread, pyqtSignal
 
         if self._summarize_worker is not None and self._summarize_worker.isRunning():
             return
 
         ai_config = self.config.data.get("ai", {})
+        model_label = describe_ai_model(ai_config)
         try:
             provider = create_provider(ai_config)
         except Exception as e:
@@ -3044,17 +3052,20 @@ class MainWindow(QMainWindow):
         self.action_items_panel.set_loading()
 
         class SummarizeWorker(QThread):
-            summary_ready = pyqtSignal(str)
+            # (summary_text, {"model": str, "seconds": float, "generated_at": iso})
+            summary_ready = pyqtSignal(str, dict)
             actions_ready = pyqtSignal(list)
             error = pyqtSignal(str)
 
-            def __init__(self, provider, segments, speaker_names, notes="", instruction=""):
+            def __init__(self, provider, segments, speaker_names, notes="",
+                         instruction="", model_label=""):
                 super().__init__()
                 self._provider = provider
                 self._segments = segments
                 self._names = speaker_names
                 self._notes = notes
                 self._instruction = instruction
+                self._model_label = model_label
 
             def run(self):
                 try:
@@ -3063,8 +3074,14 @@ class MainWindow(QMainWindow):
                         self._segments, self._names, self._notes, self._instruction,
                         max_transcript_chars=max_chars,
                     )
+                    t0 = time.monotonic()
                     summary = self._provider.complete(summary_prompt)
-                    self.summary_ready.emit(summary)
+                    meta = {
+                        "model": self._model_label,
+                        "seconds": round(time.monotonic() - t0, 1),
+                        "generated_at": datetime.now().isoformat(timespec="seconds"),
+                    }
+                    self.summary_ready.emit(summary, meta)
 
                     actions_prompt = build_action_items_prompt(
                         self._segments, self._names, self._notes, self._instruction,
@@ -3080,7 +3097,8 @@ class MainWindow(QMainWindow):
         notes = self.notes_panel.get_text()
         instruction = self.summary_panel.get_instruction()
         self._summarize_worker = SummarizeWorker(
-            provider, self._transcript.segments, speaker_names, notes, instruction
+            provider, self._transcript.segments, speaker_names, notes, instruction,
+            model_label,
         )
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
         self._summarize_worker.actions_ready.connect(self._on_actions_ready)
@@ -3092,15 +3110,22 @@ class MainWindow(QMainWindow):
         self.summary_panel.set_error()
         self.action_items_panel.set_error()
 
-    def _on_summary_ready(self, summary):
+    def _on_summary_ready(self, summary, meta=None):
+        meta = meta or {}
         self.summary_panel.set_summary(summary)
+        self.summary_panel.set_meta(meta.get("model", ""), meta.get("seconds"))
         if self._current_session:
-            path = Path(self._current_session["directory"]) / "summary.md"
+            session_dir = Path(self._current_session["directory"])
             try:
-                atomic_write_text(path, summary)
+                atomic_write_text(session_dir / "summary.md", summary)
             except OSError:
                 self.status_label.setText("Failed to save summary.")
                 return
+            if meta:
+                try:
+                    atomic_write_json(session_dir / "summary_meta.json", meta, indent=2)
+                except OSError:
+                    pass
             self._export_transcript()
 
     def _on_actions_ready(self, items):

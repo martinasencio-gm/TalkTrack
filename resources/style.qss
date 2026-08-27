@@ -206,6 +206,11 @@ QLabel#recordingRowDur {
     font-size: 11.5px;
     color: #75798c;
 }
+QLabel#summaryMetaLabel {
+    font-size: 11px;
+    color: #75798c;
+    font-style: italic;
+}
 
 /* Text areas */
 QTextEdit, QPlainTextEdit, QLineEdit {

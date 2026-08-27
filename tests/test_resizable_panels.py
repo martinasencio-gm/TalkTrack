@@ -61,6 +61,44 @@ class TestSummaryPanelDelete(unittest.TestCase):
         self.assertEqual(seen, [True])
 
 
+class TestSummaryPanelMeta(unittest.TestCase):
+    def test_set_meta_shows_model_and_time(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        panel.set_meta("claude/claude-sonnet-4-6", 4.2)
+        self.assertFalse(panel._meta_label.isHidden())
+        text = panel._meta_label.text()
+        self.assertIn("claude/claude-sonnet-4-6", text)
+        self.assertIn("4.2s", text)
+
+    def test_set_meta_formats_minutes(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        panel.set_meta("local-model", 95)
+        self.assertIn("1m 35s", panel._meta_label.text())
+
+    def test_empty_meta_hides_label(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        panel.set_meta("m", 1.0)
+        panel.set_meta()
+        self.assertTrue(panel._meta_label.isHidden())
+
+    def test_loading_hides_meta(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        panel.set_meta("m", 1.0)
+        panel.set_loading()
+        self.assertTrue(panel._meta_label.isHidden())
+
+    def test_clear_hides_meta(self):
+        panel = SummaryPanel()
+        panel.set_summary("a summary")
+        panel.set_meta("m", 1.0)
+        panel.clear()
+        self.assertTrue(panel._meta_label.isHidden())
+
+
 class TestActionItemsPanelResizable(unittest.TestCase):
     def test_grip_shown_with_items_hidden_otherwise(self):
         panel = ActionItemsPanel()
