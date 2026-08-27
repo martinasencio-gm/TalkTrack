@@ -13,7 +13,7 @@ import shutil
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMenu, QMessageBox, QFileDialog, QSizePolicy,
-    QButtonGroup
+    QButtonGroup, QFrame
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QAction, QFontMetrics, QColor, QIcon
@@ -82,6 +82,12 @@ def has_transcript(metadata):
     remove the transcript without updating metadata, and both the row badge
     and the Untranscribed filter chip need to reflect that immediately."""
     return (Path(metadata.get("directory", "")) / "transcript.json").exists()
+
+
+def has_summary(metadata):
+    """Live disk check for the row's Summarized stage step — a delete can
+    remove summary.md without touching metadata."""
+    return (Path(metadata.get("directory", "")) / "summary.md").exists()
 
 
 class _RecordingRow(QWidget):
@@ -380,6 +386,7 @@ class RecordingsList(QWidget):
         self._filter_query = ""
         self._active_chip_filter = "all"
         self._transcribing = set()
+        self._summarizing = set()
         self._batch_running = False
         try:
             from app.batch.process_monitor import find_running_batch_processes
@@ -498,7 +505,8 @@ class RecordingsList(QWidget):
         self.batch_btn.setVisible(queued_count > 0 and not self._batch_running)
 
     def set_transcribing(self, directories):
-        """Mark these session directories as having work in flight.
+        """Mark these session directories as having transcription/diarization
+        work in flight.
 
         Rebuilds only when the set actually changes: the caller polls this
         from the same place it updates the activity widget, which fires far
@@ -509,11 +517,24 @@ class RecordingsList(QWidget):
         if directories == self._transcribing:
             return
         self._transcribing = directories
-        if not self._showing_search_results:
-            selected = self.list_widget.currentRow()
-            self.refresh()
-            if 0 <= selected < self.list_widget.count():
-                self.list_widget.setCurrentRow(selected)
+        self._refresh_preserving_selection()
+
+    def set_summarizing(self, directories):
+        """Mark these session directories as having AI summary / action-item
+        generation in flight. Same change-gated rebuild as set_transcribing."""
+        directories = set(directories)
+        if directories == self._summarizing:
+            return
+        self._summarizing = directories
+        self._refresh_preserving_selection()
+
+    def _refresh_preserving_selection(self):
+        if self._showing_search_results:
+            return
+        selected = self.list_widget.currentRow()
+        self.refresh()
+        if 0 <= selected < self.list_widget.count():
+            self.list_widget.setCurrentRow(selected)
 
     def refresh(self):
         self._showing_search_results = False
@@ -628,33 +649,37 @@ class RecordingsList(QWidget):
             meta_row.addStretch(1)
 
         # Checked live against disk rather than trusting metadata — a delete
-        # can remove audio or transcript without the other, and the row needs
-        # to reflect that on the very next refresh() with no cached state.
+        # can remove audio, transcript, or summary without the others, and
+        # the row needs to reflect that on the next refresh() with no cached
+        # state.
         audio_files = metadata.get("audio_files", {}) or {}
         has_audio = any(p and Path(p).exists() for p in audio_files.values())
-        row_has_transcript = has_transcript(metadata)
 
-        # Neither pill ever shrinks — all shrink pressure lands on the
-        # elidable date label beside them, which is the only Ignored-policy
-        # item on this line.
-        if has_audio:
-            self._add_status_pill(
-                meta_row, "music-note", "#9397ab", "audio",
-                "Audio recording available", "recordingBadgeAudio",
-            )
+        # Icon-only lifecycle track — Recorded ▸ Transcribed ▸ Summarized.
+        # Replaces the old text-caption "audio"/"transcribed" pills, which
+        # crowded the row. Fixed width, never shrinks: all shrink pressure
+        # lands on the elidable date label, the only Ignored-policy item on
+        # this line.
+        meta_row.addWidget(
+            self._build_stage_track(
+                has_audio, has_transcript(metadata), has_summary(metadata)
+            ),
+            0,
+        )
 
-        # In-progress wins over Transcribed: a re-transcribe of an already
-        # transcribed recording would otherwise look like nothing was
-        # happening, which is exactly the ambiguity this pill removes.
-        if metadata.get("directory") in self._transcribing:
+        # Work-in-progress pills sit beside the track (the matching stage
+        # step stays unfilled until the job writes its file). Distinct
+        # colours: transcription/diarization yellow, AI summary the accent.
+        directory = metadata.get("directory")
+        if directory in self._transcribing:
             self._add_status_pill(
                 meta_row, "waveform", "#f9e2af", "transcribing",
                 "Transcription in progress...", "recordingBadgeWorking",
             )
-        elif row_has_transcript:
+        if directory in self._summarizing:
             self._add_status_pill(
-                meta_row, "file-text", "#a6e3a1", "transcribed",
-                "Transcript available", "recordingBadgeTranscribed",
+                meta_row, "sparkle", "#9184d9", "summarizing",
+                "Generating summary...", "recordingBadgeSummarizing",
             )
 
         # Peach rather than the in-progress yellow: waiting for a scheduled
@@ -717,6 +742,50 @@ class RecordingsList(QWidget):
         h.addWidget(text_label)
 
         row_layout.addWidget(container, 0)
+
+    _STAGE_REACHED = "#a6e3a1"
+    _STAGE_UNREACHED = "#3f424d"
+
+    @classmethod
+    def _build_stage_track(cls, recorded, transcribed, summarized):
+        """Icon-only 3-step lifecycle track: Recorded ▸ Transcribed ▸
+        Summarized. Each step's icon is tinted the reached colour when its
+        disk artifact exists, dim otherwise; the connector to a step takes
+        that step's colour. Each icon label carries a stable objectName plus
+        a dynamic `reached` bool property for the row tests.
+        """
+        steps = [
+            ("recordingStageRecorded", "music-note", bool(recorded), "Recorded"),
+            ("recordingStageTranscribed", "file-text", bool(transcribed), "Transcribed"),
+            ("recordingStageSummarized", "sparkle", bool(summarized), "Summarized"),
+        ]
+
+        container = QWidget()
+        h = QHBoxLayout(container)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        tip_parts = []
+        for i, (obj_name, icon_name, reached, label) in enumerate(steps):
+            colour = cls._STAGE_REACHED if reached else cls._STAGE_UNREACHED
+            if i > 0:
+                connector = QFrame()
+                connector.setFrameShape(QFrame.Shape.HLine)
+                connector.setFixedWidth(10)
+                connector.setFixedHeight(2)
+                connector.setStyleSheet(f"background-color: {colour}; border: none;")
+                h.addWidget(connector)
+
+            icon_label = QLabel()
+            icon_label.setObjectName(obj_name)
+            icon_label.setPixmap(colored_pixmap(icon_name, colour, 12))
+            icon_label.setProperty("reached", reached)
+            h.addWidget(icon_label)
+
+            tip_parts.append(label if reached else f"Not yet {label.lower()}")
+
+        container.setToolTip(" · ".join(tip_parts))
+        return container
 
     def _on_item_double_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)

@@ -118,7 +118,9 @@ class ActionItemsPanel(QWidget):
             self._gen_btn.setVisible(True)
 
     def set_loading(self):
-        self._status.setText("Extracting action items...")
+        # Neutral: the phase verb and elapsed clock live on the shared
+        # activity strip now (see SummaryPanel.set_loading).
+        self._status.setText("Working…")
         self._status.setVisible(True)
         self._gen_btn.setVisible(False)
         self._scroll.setVisible(False)

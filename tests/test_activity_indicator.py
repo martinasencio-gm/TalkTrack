@@ -30,6 +30,20 @@ class TestResolveActivityState(unittest.TestCase):
             resolve_activity_state(RecordingState.IDLE, True), "transcribing"
         )
 
+    def test_ai_busy_when_idle_shows_transcribing_state(self):
+        # AI work (summary / action items) rides the same visual state as
+        # transcription — "show it the same way".
+        self.assertEqual(
+            resolve_activity_state(RecordingState.IDLE, False, ai_busy=True),
+            "transcribing",
+        )
+
+    def test_recording_wins_over_ai_busy(self):
+        self.assertEqual(
+            resolve_activity_state(RecordingState.RECORDING, False, ai_busy=True),
+            "recording",
+        )
+
     def test_none_when_idle_and_not_busy(self):
         self.assertIsNone(resolve_activity_state(RecordingState.IDLE, False))
 
@@ -65,6 +79,31 @@ class TestFormatActivityLabel(unittest.TestCase):
     def test_transcribing_shows_zero_percent_explicitly(self):
         self.assertEqual(
             format_activity_label("transcribing", progress_percent=0), "0%"
+        )
+
+    def test_phase_label_overrides_the_transcribing_verb(self):
+        self.assertEqual(
+            format_activity_label(
+                "transcribing", phase_label="Generating summary"
+            ),
+            "Generating summary…",
+        )
+
+    def test_phase_label_with_percent(self):
+        self.assertEqual(
+            format_activity_label(
+                "transcribing", progress_percent=42,
+                phase_label="Identifying speakers",
+            ),
+            "Identifying speakers 42%",
+        )
+
+    def test_phase_label_ignored_for_recording(self):
+        self.assertEqual(
+            format_activity_label(
+                "recording", elapsed_seconds=65, phase_label="whatever"
+            ),
+            "01:05",
         )
 
 

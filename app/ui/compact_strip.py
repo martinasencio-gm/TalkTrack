@@ -33,7 +33,8 @@ _STATE_EDGE_COLORS = {
 }
 
 
-def resolve_compact_strip_state(recording_state, muted, transcription_busy, done, meeting_active=False):
+def resolve_compact_strip_state(recording_state, muted, transcription_busy, done,
+                                meeting_active=False, ai_busy=False):
     """Map recorder/mute/transcription/meeting state to one of CompactStrip's
     seven states: idle | armed | recording | paused | muted | transcribing | done.
 
@@ -42,6 +43,9 @@ def resolve_compact_strip_state(recording_state, muted, transcription_busy, done
     the mute and idle-terminal states CompactStrip also needs. `done` is a
     caller-tracked flag: True once the current recording's transcription
     has finished and hasn't yet been superseded by a new recording.
+    `ai_busy` (summary / action-item generation) rides the same
+    "transcribing" state and outranks `done` — a summary starting after the
+    transcript lands is still work in progress, not a finished recording.
     `meeting_active` distinguishes Idle (nothing detected, plain resting
     state) from Armed (a call is currently detected) per the design spec —
     Idle must not look like a degraded or waiting state.
@@ -50,7 +54,7 @@ def resolve_compact_strip_state(recording_state, muted, transcription_busy, done
         return "muted" if muted else "recording"
     if recording_state == RecordingState.PAUSED:
         return "paused"
-    if transcription_busy:
+    if transcription_busy or ai_busy:
         return "transcribing"
     if done:
         return "done"
@@ -80,6 +84,10 @@ class CompactStrip(QWidget):
         super().__init__(parent)
         self.drag_start_pos = None
         self._variant = "full"
+        # Verb shown in the "transcribing" state — "Transcribing",
+        # "Identifying speakers", "Generating summary", ... Reset on every
+        # set_state() so a stale phase can't leak into the next job.
+        self._phase_label = "Transcribing"
         self._setup_ui()
         
     def _setup_ui(self):
@@ -430,8 +438,14 @@ class CompactStrip(QWidget):
     def set_state(self, state: str, **kwargs):
         """
         States: armed, recording, paused, muted, transcribing, done
+
+        kwargs: phase_label — the verb for the "transcribing" state
+        ("Transcribing" default, or "Identifying speakers" / "Generating
+        summary" / "Extracting action items"). Reset to the default on
+        every call.
         """
         self.current_state = state
+        self._phase_label = kwargs.get("phase_label") or "Transcribing"
 
         if state == "idle":
             # The resting state: nothing is wrong, nothing is pending — a
@@ -613,7 +627,7 @@ class CompactStrip(QWidget):
             self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
             self.pill_status_label.show()
         elif state == "transcribing":
-            self.pill_status_label.setText("Transcribing…")
+            self.pill_status_label.setText(f"{self._phase_label}…")
             self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
             self.pill_status_label.show()
         elif state == "done":

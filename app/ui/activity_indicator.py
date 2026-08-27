@@ -14,25 +14,34 @@ from app.recording.recorder import RecordingState
 from app.utils.icons import colored_pixmap
 
 
-def resolve_activity_state(recording_state, transcription_busy):
+def resolve_activity_state(recording_state, transcription_busy, ai_busy=False):
     """Return "recording" | "paused" | "transcribing" | None.
 
     Recording/paused always wins over transcribing — if both are happening
     (e.g. auto-transcribe kicked off for a prior recording while a new one
     is being captured), the widget shows the recording, not the transcript
-    job. None means nothing to show.
+    job. `ai_busy` (summary / action-item generation) rides the same
+    "transcribing" visual state per the "show it the same way" design, and
+    sits below the real transcription workers in precedence. None means
+    nothing to show.
     """
     if recording_state == RecordingState.RECORDING:
         return "recording"
     if recording_state == RecordingState.PAUSED:
         return "paused"
-    if transcription_busy:
+    if transcription_busy or ai_busy:
         return "transcribing"
     return None
 
 
-def format_activity_label(state, elapsed_seconds=None, progress_percent=None):
-    """"MM:SS" or "HH:MM:SS" for "recording"/"paused"; "NN%" for "transcribing"."""
+def format_activity_label(state, elapsed_seconds=None, progress_percent=None,
+                          phase_label=None):
+    """"MM:SS" or "HH:MM:SS" for "recording"/"paused"; "NN%" for "transcribing".
+
+    `phase_label` (e.g. "Identifying speakers", "Generating summary") only
+    applies to "transcribing" — when given it prefixes the verb; when None
+    the bare percent/ellipsis form is kept.
+    """
     if state in ("recording", "paused"):
         total = max(0, int(elapsed_seconds or 0))
         hours, rem = divmod(total, 3600)
@@ -42,8 +51,9 @@ def format_activity_label(state, elapsed_seconds=None, progress_percent=None):
         return f"{minutes:02d}:{seconds:02d}"
     if state == "transcribing":
         if progress_percent is None:
-            return "…"
-        return f"{int(progress_percent)}%"
+            return f"{phase_label}…" if phase_label else "…"
+        pct = f"{int(progress_percent)}%"
+        return f"{phase_label} {pct}" if phase_label else pct
     return ""
 
 
@@ -216,7 +226,8 @@ class ActivityIndicator(QWidget):
         else:
             self.pause_requested.emit()
 
-    def set_activity(self, state, elapsed_seconds=None, progress_percent=None):
+    def set_activity(self, state, elapsed_seconds=None, progress_percent=None,
+                     phase_label="Transcribing"):
         self._state = state
         self._apply_frame_style(state)
 
@@ -255,7 +266,10 @@ class ActivityIndicator(QWidget):
             self._mark_pulse_anim.stop()
             self._mark_opacity_effect.setOpacity(1.0)
         elif state == "transcribing":
-            label_text = f"Transcribing {int(progress_percent)}%" if progress_percent is not None else "Transcribing…"
+            label_text = (
+                f"{phase_label} {int(progress_percent)}%"
+                if progress_percent is not None else f"{phase_label}…"
+            )
             self.pill_status_label.setText(label_text)
             self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
             self.pill_mark_icon.setPixmap(colored_pixmap("transcribe", "#9184d9", 11))

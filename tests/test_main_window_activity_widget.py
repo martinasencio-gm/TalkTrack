@@ -264,5 +264,117 @@ class TestMainWindowActivityWidget(unittest.TestCase):
             window.close()
 
 
+class TestMainWindowAiActivity(unittest.TestCase):
+    """AI summary / action-item generation drives the same progress
+    surfaces as transcription, without entering _transcription_busy()."""
+
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def _running_worker(self):
+        w = MagicMock()
+        w.isRunning.return_value = True
+        return w
+
+    def test_ai_busy_reflects_a_running_summarize_worker(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            self.assertFalse(window._ai_busy())
+            window._summarize_worker = self._running_worker()
+            self.assertTrue(window._ai_busy())
+            # ...but never the transcription-pipeline gate.
+            self.assertFalse(window._transcription_busy())
+        finally:
+            window._summarize_worker = None
+            window._really_quit = True
+            window.close()
+
+    def test_current_phase_label_maps_ai_phase(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window._summarize_worker = self._running_worker()
+            window._ai_phase = "summary"
+            self.assertEqual(window._current_phase_label(), "Generating summary")
+            window._ai_phase = "actions"
+            self.assertEqual(window._current_phase_label(), "Extracting action items")
+            window._ai_phase = None
+            self.assertEqual(window._current_phase_label(), "Generating summary")
+        finally:
+            window._summarize_worker = None
+            window._really_quit = True
+            window.close()
+
+    def test_transcription_worker_outranks_ai_phase_label(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            tw = self._running_worker()
+            tw.session = {"directory": "/fake/rec"}
+            window._transcription_worker = tw
+            window._summarize_worker = self._running_worker()
+            window._ai_phase = "summary"
+            self.assertEqual(window._current_phase_label(), "Transcribing")
+        finally:
+            window._transcription_worker = None
+            window._summarize_worker = None
+            window._really_quit = True
+            window.close()
+
+    def test_on_ai_phase_changed_restamps_clock_and_phase(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window._summarize_worker = self._running_worker()
+            window._ai_start_time = None
+            window._on_ai_phase_changed("actions")
+            self.assertEqual(window._ai_phase, "actions")
+            self.assertIsNotNone(window._ai_start_time)
+        finally:
+            window._summarize_worker = None
+            window._really_quit = True
+            window.close()
+
+    def test_update_activity_visibility_feeds_ai_phase_to_the_strip(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window._current_session = {"directory": "/fake/rec", "name": "Client call"}
+            window._summarize_worker = self._running_worker()
+            window._ai_phase = "summary"
+            window._ai_start_time = None
+            with patch.object(window.recording_controls, "set_transcribing") as mock_set, \
+                 patch.object(window.recordings_list, "set_summarizing") as mock_sum:
+                window._update_activity_visibility()
+            self.assertTrue(mock_set.call_args.args[0])  # visual_busy
+            self.assertEqual(
+                mock_set.call_args.kwargs.get("phase_label"), "Generating summary"
+            )
+            self.assertEqual(mock_set.call_args.kwargs.get("name"), "Client call")
+            self.assertIsNone(mock_set.call_args.args[1])  # no percent for AI
+            mock_sum.assert_called_once_with({"/fake/rec"})
+        finally:
+            window._summarize_worker = None
+            window._really_quit = True
+            window.close()
+
+    def test_end_ai_phase_clears_state_and_stops_tick(self):
+        from app.main_window import MainWindow
+        window = MainWindow()
+        try:
+            window._ai_phase = "actions"
+            window._ai_start_time = 123.0
+            window._ai_tick.start()
+            window._end_ai_phase()
+            self.assertIsNone(window._ai_phase)
+            self.assertIsNone(window._ai_start_time)
+            self.assertFalse(window._ai_tick.isActive())
+        finally:
+            window._really_quit = True
+            window.close()
+
+
 if __name__ == "__main__":
     unittest.main()

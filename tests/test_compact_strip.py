@@ -51,6 +51,30 @@ class TestResolveCompactStripState(unittest.TestCase):
             "transcribing",
         )
 
+    def test_ai_busy_when_idle_shows_transcribing_state(self):
+        self.assertEqual(
+            resolve_compact_strip_state(
+                RecordingState.IDLE, False, False, False, ai_busy=True
+            ),
+            "transcribing",
+        )
+
+    def test_recording_wins_over_ai_busy(self):
+        self.assertEqual(
+            resolve_compact_strip_state(
+                RecordingState.RECORDING, False, False, False, ai_busy=True
+            ),
+            "recording",
+        )
+
+    def test_ai_busy_wins_over_done(self):
+        self.assertEqual(
+            resolve_compact_strip_state(
+                RecordingState.IDLE, False, False, True, ai_busy=True
+            ),
+            "transcribing",
+        )
+
     def test_done_when_idle_not_busy_and_flagged(self):
         self.assertEqual(
             resolve_compact_strip_state(RecordingState.IDLE, False, False, True),
@@ -95,6 +119,23 @@ class TestCompactStripSetState(unittest.TestCase):
         self.assertEqual(strip.btn_primary.text(), "Stop")
         self.assertTrue(strip.mic_meter.isHidden())
         self.assertFalse(strip.sys_meter.isHidden())
+
+    def test_phase_label_drives_the_pill_verb(self):
+        strip = CompactStrip()
+        strip.set_state("transcribing", phase_label="Generating summary")
+        self.assertEqual(strip.pill_status_label.text(), "Generating summary…")
+
+    def test_transcribing_defaults_to_the_transcribing_verb(self):
+        strip = CompactStrip()
+        strip.set_state("transcribing")
+        self.assertEqual(strip.pill_status_label.text(), "Transcribing…")
+
+    def test_phase_label_resets_when_state_leaves_transcribing(self):
+        strip = CompactStrip()
+        strip.set_state("transcribing", phase_label="Extracting action items")
+        strip.set_state("recording")
+        strip.set_state("transcribing")
+        self.assertEqual(strip.pill_status_label.text(), "Transcribing…")
 
 
 class TestCompactStripMutePauseButtons(unittest.TestCase):

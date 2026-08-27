@@ -87,6 +87,15 @@ class MainWindow(QMainWindow):
         self._diarization_worker = None
         self._simple_diarize_worker = None
         self._summarize_worker = None
+        # AI summary / action-item progress — kept separate from the
+        # transcription workers so it never gates the serial queue / CPU
+        # caps / shutdown, only the shared progress surfaces. LLM calls emit
+        # no progress, so _ai_tick advances the elapsed clock on the strip.
+        self._ai_phase = None          # "summary" | "actions" | None
+        self._ai_start_time = None     # restamped per phase
+        self._ai_tick = QTimer(self)
+        self._ai_tick.setInterval(1000)
+        self._ai_tick.timeout.connect(self._update_activity_visibility)
         self._pending_transcriptions = []
         self._closing = False
         self._silent_capture_warned = False
@@ -3055,6 +3064,7 @@ class MainWindow(QMainWindow):
             # (summary_text, {"model": str, "seconds": float, "generated_at": iso})
             summary_ready = pyqtSignal(str, dict)
             actions_ready = pyqtSignal(list)
+            phase_changed = pyqtSignal(str)   # "summary" then "actions"
             error = pyqtSignal(str)
 
             def __init__(self, provider, segments, speaker_names, notes="",
@@ -3074,6 +3084,7 @@ class MainWindow(QMainWindow):
                         self._segments, self._names, self._notes, self._instruction,
                         max_transcript_chars=max_chars,
                     )
+                    self.phase_changed.emit("summary")
                     t0 = time.monotonic()
                     summary = self._provider.complete(summary_prompt)
                     meta = {
@@ -3087,6 +3098,7 @@ class MainWindow(QMainWindow):
                     }
                     self.summary_ready.emit(summary, meta)
 
+                    self.phase_changed.emit("actions")
                     actions_prompt = build_action_items_prompt(
                         self._segments, self._names, self._notes, self._instruction,
                         max_transcript_chars=max_chars,
@@ -3106,13 +3118,60 @@ class MainWindow(QMainWindow):
         )
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
         self._summarize_worker.actions_ready.connect(self._on_actions_ready)
+        self._summarize_worker.phase_changed.connect(self._on_ai_phase_changed)
         self._summarize_worker.error.connect(self._on_summarize_error)
         self._summarize_worker.start()
+
+        self._ai_phase = "summary"
+        self._ai_start_time = time.monotonic()
+        self._ai_tick.start()
+        self._update_activity_visibility()
+
+    def _ai_busy(self):
+        """Whether an AI summary / action-item job is running. Deliberately
+        NOT folded into _transcription_busy() — it must not gate the serial
+        transcription queue, CPU thread caps, or shutdown; it only drives
+        the shared progress surfaces."""
+        return self._summarize_worker is not None and self._summarize_worker.isRunning()
+
+    def _current_phase_label(self):
+        """Verb for whatever background job is running now — shared by the
+        capture-bar strip, compact strip, and activity pill so all three
+        name the same phase."""
+        if self._diarization_worker is not None and self._diarization_worker.isRunning():
+            return "Identifying speakers"
+        if self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning():
+            return "Identifying speakers"
+        if self._transcription_worker is not None and self._transcription_worker.isRunning():
+            return "Transcribing"
+        if self._ai_busy():
+            return {
+                "summary": "Generating summary",
+                "actions": "Extracting action items",
+            }.get(self._ai_phase, "Generating summary")
+        return "Transcribing"
+
+    def _on_ai_phase_changed(self, phase):
+        """Worker emits 'summary' then 'actions'. Each phase gets its own
+        elapsed clock, mirroring transcription -> diarization."""
+        self._ai_phase = phase
+        self._ai_start_time = time.monotonic()
+        self._update_activity_visibility()
+
+    def _end_ai_phase(self):
+        """Tear down the AI progress state once the whole run finishes
+        (both phases) or fails. Not called from _on_summary_ready — action
+        items are still to come there."""
+        self._ai_tick.stop()
+        self._ai_phase = None
+        self._ai_start_time = None
+        self._update_activity_visibility()
 
     def _on_summarize_error(self, error_msg):
         self.status_label.setText(f"AI error: {error_msg}")
         self.summary_panel.set_error()
         self.action_items_panel.set_error()
+        self._end_ai_phase()
 
     def _on_summary_ready(self, summary, meta=None):
         meta = meta or {}
@@ -3135,6 +3194,7 @@ class MainWindow(QMainWindow):
     def _on_actions_ready(self, items):
         self.action_items_panel.set_items(items)
         self._on_action_items_changed(items)
+        self._end_ai_phase()
 
     def _on_action_items_changed(self, items):
         if self._current_session:
@@ -3153,10 +3213,13 @@ class MainWindow(QMainWindow):
         The minimize button no longer consults this at all — it always
         performs an ordinary Windows minimize. The tray is a deliberate
         close-time destination, and only when nothing is in flight: while
-        recording or transcribing the activity pill needs a minimized (not
-        hidden) window to stand in for.
+        recording, transcribing, or generating an AI summary the activity
+        pill needs a minimized (not hidden) window to stand in for.
         """
-        busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
+        busy_state = resolve_activity_state(
+            self.recorder.state, self._transcription_busy(),
+            ai_busy=self._ai_busy(),
+        )
         return (
             busy_state is None
             and bool(self.config.get("general", "close_to_tray"))
@@ -3316,9 +3379,11 @@ class MainWindow(QMainWindow):
     def _update_activity_visibility(self):
         self._update_compact_strip_state()
         busy = self._transcription_busy()
+        ai_busy = self._ai_busy()
+        visual_busy = busy or ai_busy
+        phase_label = self._current_phase_label()
         job_name = None
         elapsed = None
-        phase_label = "Transcribing"
         if busy:
             # Which worker is actually running decides both the session
             # (name) and the verb shown — a finished-but-not-yet-replaced
@@ -3327,13 +3392,10 @@ class MainWindow(QMainWindow):
             active_worker = None
             if self._diarization_worker is not None and self._diarization_worker.isRunning():
                 active_worker = self._diarization_worker
-                phase_label = "Identifying speakers"
             elif self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning():
                 active_worker = self._simple_diarize_worker
-                phase_label = "Identifying speakers"
             elif self._transcription_worker is not None and self._transcription_worker.isRunning():
                 active_worker = self._transcription_worker
-                phase_label = "Transcribing"
             session = getattr(active_worker, "session", None)
             if session:
                 from app.ui.recording_header import _display_name_from_metadata
@@ -3341,8 +3403,16 @@ class MainWindow(QMainWindow):
             start_time = getattr(self.transcript_viewer, "_progress_start_time", None)
             if start_time is not None:
                 elapsed = time.monotonic() - start_time
+        elif ai_busy:
+            # AI always runs against the displayed recording.
+            if self._current_session:
+                from app.ui.recording_header import _display_name_from_metadata
+                job_name = _display_name_from_metadata(self._current_session)
+            if self._ai_start_time is not None:
+                elapsed = time.monotonic() - self._ai_start_time
         self.recording_controls.set_transcribing(
-            busy, self._current_transcription_percent,
+            visual_busy,
+            self._current_transcription_percent if busy else None,
             name=job_name, elapsed_seconds=elapsed,
             queued=len(self._pending_transcriptions),
             phase_label=phase_label,
@@ -3352,7 +3422,14 @@ class MainWindow(QMainWindow):
              self._simple_diarize_worker],
             self._pending_transcriptions,
         ))
-        busy_state = resolve_activity_state(self.recorder.state, self._transcription_busy())
+        self.recordings_list.set_summarizing(
+            {self._current_session["directory"]}
+            if ai_busy and self._current_session and self._current_session.get("directory")
+            else set()
+        )
+        busy_state = resolve_activity_state(
+            self.recorder.state, busy, ai_busy=ai_busy
+        )
         # Compact/pill mode is a minimized window, so without the strip check
         # both floating widgets would stack on screen while recording — and
         # the strip already renders the busy states itself.
@@ -3362,18 +3439,20 @@ class MainWindow(QMainWindow):
             and not self.compact_strip.isVisible()
         )
         if should_show:
-            elapsed = (
+            widget_elapsed = (
                 int(self.recorder.get_elapsed_time())
                 if busy_state in ("recording", "paused") else None
             )
             percent = (
                 self._current_transcription_percent
-                if busy_state == "transcribing" else None
+                if busy_state == "transcribing" and busy else None
             )
             if not self._activity_widget.isVisible():
                 x, y = self._activity_widget_position()
                 self._activity_widget.show_at(x, y)
-            self._activity_widget.set_activity(busy_state, elapsed, percent)
+            self._activity_widget.set_activity(
+                busy_state, widget_elapsed, percent, phase_label=phase_label
+            )
         elif self._activity_widget.isVisible():
             self._activity_widget.hide()
 
@@ -3467,8 +3546,9 @@ class MainWindow(QMainWindow):
         state = resolve_compact_strip_state(
             self.recorder.state, self._mic_muted, self._transcription_busy(),
             self._compact_strip_done, meeting_active=meeting_active,
+            ai_busy=self._ai_busy(),
         )
-        self.compact_strip.set_state(state)
+        self.compact_strip.set_state(state, phase_label=self._current_phase_label())
 
     def _on_compact_strip_mic_level(self, audio_chunk):
         pct = int(db_to_fraction(compute_rms_db(audio_chunk)) * 100)
@@ -3506,6 +3586,8 @@ class MainWindow(QMainWindow):
         """
         if hasattr(self, "_batch_monitor_timer") and self._batch_monitor_timer.isActive():
             self._batch_monitor_timer.stop()
+        if hasattr(self, "_ai_tick") and self._ai_tick.isActive():
+            self._ai_tick.stop()
 
         # Finalizing is writing the user's audio to disk. Interrupting it
         # loses the recording outright, so it gets a generous wait of its
