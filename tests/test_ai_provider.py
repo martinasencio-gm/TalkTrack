@@ -169,6 +169,61 @@ class TestLocalModelAvailable(unittest.TestCase):
                 {"local_model_path": "", "local_model_name": "qwen2.5-3b"}))
 
 
+class TestLocalProviderCompletion(unittest.TestCase):
+    """The local provider must drive the GGUF instruct model through the
+    chat-completion API so the model's own chat template and EOS token are
+    honored — a raw completion call runs to max_tokens every time, which on
+    CPU is minutes of wasted generation per summary."""
+
+    def _fake_llama_module(self):
+        module = MagicMock()
+        llm = MagicMock()
+        llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": "  a summary.  "}}]
+        }
+        module.Llama.return_value = llm
+        return module, llm
+
+    def test_get_llm_disables_verbose_logging(self):
+        module, llm = self._fake_llama_module()
+        with patch.dict(sys.modules, {"llama_cpp": module}):
+            from app.ai.local_provider import LocalProvider
+            LocalProvider(model_path="x.gguf")._get_llm()
+        _, kwargs = module.Llama.call_args
+        self.assertFalse(kwargs.get("verbose", True))
+
+    def test_complete_uses_chat_completion_not_raw_call(self):
+        module, llm = self._fake_llama_module()
+        with patch.dict(sys.modules, {"llama_cpp": module}):
+            from app.ai.local_provider import LocalProvider
+            out = LocalProvider(model_path="x.gguf").complete("summarize this")
+        self.assertEqual(out, "a summary.")
+        llm.assert_not_called()  # no raw __call__ / create_completion
+        llm.create_chat_completion.assert_called_once()
+        _, kwargs = llm.create_chat_completion.call_args
+        roles = [m["role"] for m in kwargs["messages"]]
+        self.assertEqual(roles, ["user"])
+        self.assertEqual(kwargs["messages"][0]["content"], "summarize this")
+
+    def test_complete_passes_context_as_system_message(self):
+        module, llm = self._fake_llama_module()
+        with patch.dict(sys.modules, {"llama_cpp": module}):
+            from app.ai.local_provider import LocalProvider
+            LocalProvider(model_path="x.gguf").complete("q", "the transcript")
+        _, kwargs = llm.create_chat_completion.call_args
+        self.assertEqual(kwargs["messages"][0], {"role": "system", "content": "the transcript"})
+        self.assertEqual(kwargs["messages"][1], {"role": "user", "content": "q"})
+
+    def test_complete_caps_output_tokens_well_below_the_old_2048(self):
+        module, llm = self._fake_llama_module()
+        with patch.dict(sys.modules, {"llama_cpp": module}):
+            from app.ai.local_provider import LocalProvider
+            LocalProvider(model_path="x.gguf").complete("q")
+        _, kwargs = llm.create_chat_completion.call_args
+        self.assertLessEqual(kwargs["max_tokens"], 1536)
+        self.assertGreaterEqual(kwargs["max_tokens"], 512)
+
+
 class TestSentenceTransformerCache(unittest.TestCase):
     def test_same_model_name_loads_once(self):
         mock_st_module = MagicMock()

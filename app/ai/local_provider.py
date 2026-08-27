@@ -2,6 +2,12 @@
 
 from app.ai.provider import AIProvider
 
+# Backstop only — the chat-completion path honors the model's EOS token, so a
+# normal summary stops well before this. It exists so a model that fails to
+# emit EOS can't grind out thousands of tokens on CPU (the old raw-completion
+# call used 2048 and hit it every time).
+_MAX_OUTPUT_TOKENS = 1536
+
 
 class LocalProvider(AIProvider):
     def __init__(self, model_path: str, embed_model: str = "all-MiniLM-L6-v2",
@@ -23,6 +29,10 @@ class LocalProvider(AIProvider):
                 model_path=self._model_path,
                 n_ctx=self._n_ctx,
                 n_threads=4,
+                # llama.cpp's own load/inference trace is otherwise dumped to
+                # stderr, which the app redirects into talktrack.log (~1.5 MB
+                # per load, tagged [ERROR]).
+                verbose=False,
             )
         return self._llm
 
@@ -32,9 +42,19 @@ class LocalProvider(AIProvider):
 
     def complete(self, prompt: str, context: str = "") -> str:
         llm = self._get_llm()
-        full_prompt = f"{context}\n\n{prompt}" if context else prompt
-        response = llm(full_prompt, max_tokens=2048)
-        return response["choices"][0]["text"].strip()
+        messages = []
+        if context:
+            messages.append({"role": "system", "content": context})
+        messages.append({"role": "user", "content": prompt})
+        # create_chat_completion applies the GGUF's own chat template
+        # (<|im_start|> framing for Qwen/Phi instruct models) and stops on the
+        # model's EOS token. Calling llm() directly does neither, so the model
+        # rambles to max_tokens every time.
+        response = llm.create_chat_completion(
+            messages=messages,
+            max_tokens=_MAX_OUTPUT_TOKENS,
+        )
+        return response["choices"][0]["message"]["content"].strip()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         model = self._get_embedder()
