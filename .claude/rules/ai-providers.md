@@ -4,7 +4,7 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 
 ## Config keys
 
-- Local provider model path lives in `config["ai"]["local_model_path"]` — the `model` key holds the settings-combo placeholder `"(set path below)"` for local. `provider_factory` reads `local_model_path` first (#13); keep that precedence.
+- Local provider model: `config["ai"]["local_model_name"]` holds the catalog key of the selected built-in model; `config["ai"]["local_model_path"]` holds a custom GGUF path and wins when set. The `model` combo carries no placeholder entry for local (the old `"(set path below)"` was removed). `provider_factory` reads `local_model_path` first (#13); keep that precedence.
 - Per-provider API keys/models live in `provider_settings` keyed by provider name.
 
 ## Local model catalog

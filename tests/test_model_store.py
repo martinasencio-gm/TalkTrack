@@ -51,6 +51,30 @@ class ModelStoreTest(unittest.TestCase):
         self.assertEqual(entry["size"], 500)
         self.assertEqual(entry["filename"], self.fname)
 
+    def test_is_downloaded_false_when_file_outside_size_tolerance(self):
+        self._write_fake_gguf(1000)
+        model_store.record_download(self.key, "abc123")  # records size=1000
+        # File grows/shrinks well past the 20% tolerance -> not a valid match.
+        (self._dir / self.fname).write_bytes(b"\0" * 5000)
+        self.assertFalse(model_store.is_downloaded(self.key))
+
+    def test_record_download_twice_updates_entry_without_duplicating(self):
+        self._write_fake_gguf(500)
+        model_store.record_download(self.key, "first")
+        self._write_fake_gguf(700)
+        model_store.record_download(self.key, "second")
+        manifest = model_store.load_manifest()
+        self.assertEqual(list(manifest.keys()), [self.key])
+        self.assertEqual(manifest[self.key]["sha256"], "second")
+        self.assertEqual(manifest[self.key]["size"], 700)
+
+    def test_record_download_persists_advertised_size(self):
+        self._write_fake_gguf(500)
+        model_store.record_download(self.key, "abc123", advertised_size=1234567)
+        self.assertEqual(
+            model_store.load_manifest()[self.key]["advertised_size"], 1234567
+        )
+
     def test_remove_deletes_file_and_entry_and_is_idempotent(self):
         self._write_fake_gguf(500)
         model_store.record_download(self.key, "abc123")

@@ -466,8 +466,10 @@ class SettingsDialog(QDialog):
         ai_form.addRow(self.model_catalog_widget)
 
         self.ai_advanced_section = CollapsibleSection("Advanced: use a custom GGUF file")
-        self.ai_advanced_section.content_layout().addWidget(self.ai_local_path)
-        self.ai_advanced_section.content_layout().addWidget(self.ai_local_browse)
+        _adv_row = QHBoxLayout()
+        _adv_row.addWidget(self.ai_local_path, 1)
+        _adv_row.addWidget(self.ai_local_browse)
+        self.ai_advanced_section.content_layout().addLayout(_adv_row)
         ai_form.addRow(self.ai_advanced_section)
         self.ai_local_path.textChanged.connect(self._on_custom_path_changed)
 
@@ -930,7 +932,9 @@ class SettingsDialog(QDialog):
 
     def _install_provider_package(self, provider):
         """Install the required package for a provider. Returns True if ready."""
-        from app.utils.package_installer import is_package_installed, get_package_info, install_package
+        from app.utils.package_installer import (
+            is_package_installed, get_package_info, install_package, extra_index_url_for,
+        )
         if is_package_installed(provider):
             return True
 
@@ -956,7 +960,7 @@ class SettingsDialog(QDialog):
         self.ai_package_label.setVisible(True)
         QApplication.processEvents()
 
-        success, output = install_package(pip_package)
+        success, output = install_package(pip_package, extra_index_url_for(provider))
         if success:
             self.ai_package_label.setText(
                 f'<span style="color: #a6e3a1;">{display_name} installed successfully.</span>'
@@ -984,8 +988,12 @@ class SettingsDialog(QDialog):
         """
         path = self.ai_local_path.text().strip()
         name = self.model_catalog_widget.selected_key()
-        if path or not name:
-            return path, name
+        if path:
+            # Custom GGUF wins for the model file — blank the catalog key so a
+            # stale name can't drive n_ctx for an unrelated model.
+            return path, ""
+        if not name:
+            return "", name
         try:
             from app.ai.model_catalog import local_path_for
             return str(local_path_for(name)), name

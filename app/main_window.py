@@ -2965,7 +2965,7 @@ class MainWindow(QMainWindow):
             return
         if not self.config.get("ai", "auto_summarize"):
             return
-        if self.config.get("ai", "provider") == "none":
+        if not self._ai_provider_configured():
             return
         if not getattr(self, '_transcript', None):
             return
@@ -2977,7 +2977,16 @@ class MainWindow(QMainWindow):
         self._run_summarize()
 
     def _ai_provider_configured(self):
-        return self.config.get("ai", "provider") != "none"
+        provider = self.config.get("ai", "provider")
+        if provider == "none":
+            return False
+        if provider == "local":
+            from app.ai.provider_factory import local_model_available
+            return local_model_available({
+                "local_model_path": self.config.get("ai", "local_model_path"),
+                "local_model_name": self.config.get("ai", "local_model_name"),
+            })
+        return True
 
     def _run_summarize(self):
         from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items

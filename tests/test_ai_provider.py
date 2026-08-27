@@ -134,6 +134,41 @@ class TestProviderInterface(unittest.TestCase):
         self.assertEqual(_resolve_local_n_ctx({"local_model_name": "qwen2.5-3b"}), 8192)
 
 
+class TestLocalModelAvailable(unittest.TestCase):
+    def test_empty_path_and_empty_name_is_not_available(self):
+        from app.ai.provider_factory import local_model_available
+        self.assertFalse(local_model_available(
+            {"local_model_path": "", "local_model_name": ""}))
+        self.assertFalse(local_model_available({}))
+
+    def test_existing_custom_path_is_available(self):
+        import tempfile
+        from pathlib import Path
+        from app.ai.provider_factory import local_model_available
+        with tempfile.TemporaryDirectory() as tmp:
+            gguf = Path(tmp) / "custom.gguf"
+            gguf.write_bytes(b"\0")
+            self.assertTrue(local_model_available(
+                {"local_model_path": str(gguf), "local_model_name": ""}))
+
+    def test_missing_custom_path_is_not_available(self):
+        from app.ai.provider_factory import local_model_available
+        self.assertFalse(local_model_available(
+            {"local_model_path": "/no/such/file.gguf", "local_model_name": ""}))
+
+    def test_downloaded_catalog_name_is_available(self):
+        from app.ai import provider_factory
+        with patch("app.ai.model_store.is_downloaded", return_value=True):
+            self.assertTrue(provider_factory.local_model_available(
+                {"local_model_path": "", "local_model_name": "qwen2.5-3b"}))
+
+    def test_undownloaded_catalog_name_is_not_available(self):
+        from app.ai import provider_factory
+        with patch("app.ai.model_store.is_downloaded", return_value=False):
+            self.assertFalse(provider_factory.local_model_available(
+                {"local_model_path": "", "local_model_name": "qwen2.5-3b"}))
+
+
 class TestSentenceTransformerCache(unittest.TestCase):
     def test_same_model_name_loads_once(self):
         mock_st_module = MagicMock()

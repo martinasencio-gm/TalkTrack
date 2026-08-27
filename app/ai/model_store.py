@@ -51,7 +51,7 @@ def is_downloaded(key: str) -> bool:
     return abs(actual - recorded) <= _SIZE_TOLERANCE * recorded
 
 
-def record_download(key: str, sha256: str) -> None:
+def record_download(key: str, sha256: str, advertised_size: int = 0) -> None:
     model = get(key)
     if model is None:
         raise KeyError(key)
@@ -61,6 +61,7 @@ def record_download(key: str, sha256: str) -> None:
         "filename": model.hf_filename,
         "sha256": sha256,
         "size": path.stat().st_size,
+        "advertised_size": advertised_size,
         "downloaded_at": datetime.now(timezone.utc).isoformat(),
     }
     _save_manifest(data)

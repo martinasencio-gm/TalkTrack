@@ -256,6 +256,13 @@ class ModelCatalogWidget(QWidget):
             self._worker.cancel()
 
     def _teardown_worker(self):
+        # This slot runs off the worker's own finished_ok signal, i.e. while
+        # _DownloadWorker.run() has not yet returned. Dropping the last
+        # reference here could GC a live QThread ("QThread: Destroyed while
+        # thread is still running"). Wait for run() to unwind first.
+        worker = self._worker
+        if worker is not None:
+            worker.wait(5000)
         self._worker = None
         self._downloading_key = ""
         for row in self._rows.values():

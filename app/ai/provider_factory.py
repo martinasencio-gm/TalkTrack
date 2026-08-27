@@ -3,6 +3,29 @@
 from app.ai.provider import AIProvider
 
 
+def local_model_available(config: dict) -> bool:
+    """True when the Local provider has a usable model file.
+
+    Either a custom ``local_model_path`` that exists on disk, or a
+    ``local_model_name`` that is a catalog key whose GGUF is downloaded.
+    Qt-free so callers outside the settings dialog (e.g. MainWindow's
+    ``_ai_provider_configured``) can share the check.
+    """
+    import os
+
+    path = (config.get("local_model_path") or "").strip()
+    if path and os.path.isfile(path):
+        return True
+    name = (config.get("local_model_name") or "").strip()
+    if not name:
+        return False
+    from app.ai import model_store
+    try:
+        return model_store.is_downloaded(name)
+    except KeyError:
+        return False
+
+
 def _resolve_local_n_ctx(config: dict) -> int:
     from app.ai.model_catalog import get
     model = get(config.get("local_model_name") or "")
