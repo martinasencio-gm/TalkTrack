@@ -107,6 +107,54 @@ def write_transcript(session, result, speaker_names=None):
     return True
 
 
+def load_transcript(session):
+    """Rebuild a TranscriptResult from transcript.json, or None.
+
+    None when the file is missing, unparseable, or has no ``segments`` —
+    every caller treats "no transcript" as an ordinary outcome. The
+    transcriber import is deferred so this module stays importable without
+    Qt for callers that only write.
+    """
+    directory = session.get("directory") if session else None
+    if not directory:
+        return None
+    data = _read_json(Path(directory) / "transcript.json")
+    if not isinstance(data, dict) or not isinstance(data.get("segments"), list):
+        return None
+    try:
+        from app.transcription.transcriber import TranscriptResult
+        return TranscriptResult.from_dict(data)
+    except Exception:
+        logger.exception("Could not rebuild the transcript for %s", directory)
+        return None
+
+
+def write_summary(session, summary_markdown, action_items, meta):
+    """Write summary.md + action_items.json + summary_meta.json, then refresh
+    transcript.md.
+
+    The Qt-free equivalent of what MainWindow._on_summary_ready,
+    _on_actions_ready, and _on_action_items_changed do together. Returns
+    True on success.
+    """
+    directory = session.get("directory") if session else None
+    if not directory:
+        return False
+    directory = Path(directory)
+    try:
+        atomic_write_text(directory / "summary.md", summary_markdown or "")
+        atomic_write_json(directory / "action_items.json",
+                          action_items or [], indent=2, ensure_ascii=False)
+        if meta:
+            atomic_write_json(directory / "summary_meta.json", meta, indent=2)
+    except OSError:
+        logger.exception("Failed to write the summary for %s", directory)
+        return False
+
+    export_session_markdown(session)
+    return True
+
+
 def load_tags(session):
     """The recording's tag list ([] when unset)."""
     if not session:

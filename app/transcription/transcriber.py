@@ -101,6 +101,22 @@ class TranscriptResult:
     model_size: str = ""
     transcribe_seconds: float = 0.0
 
+    @classmethod
+    def from_dict(cls, d):
+        """Rebuild a TranscriptResult from a transcript.json dict.
+
+        Mirrors ``TranscriptSegment.from_dict`` — the inverse of
+        ``to_dict``, tolerant of a file that predates a given field.
+        """
+        d = d or {}
+        return cls(
+            segments=[TranscriptSegment.from_dict(s) for s in d.get("segments", [])],
+            language=d.get("language", ""),
+            duration=d.get("duration", 0.0),
+            model_size=d.get("model_size", ""),
+            transcribe_seconds=d.get("transcribe_seconds", 0.0),
+        )
+
     def _display_speaker(self, seg, speaker_names=None):
         """Return the display name for a segment's speaker."""
         if not seg.speaker:

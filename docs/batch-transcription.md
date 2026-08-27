@@ -3,21 +3,48 @@
 Transcription is slow on CPU, and speaker diarization is slower still —
 often longer than the recording itself. `batch_transcribe.py` moves both to
 an unattended run, so recordings can pile up during the day and be worked
-through overnight.
+through overnight. A run can also generate the AI summary and action items.
+
+## Operations
+
+Each queued recording carries an ordered set of operations, a subset of:
+
+1. **Transcription** — produce `transcript.json` / `transcript.txt` / `transcript.md`.
+2. **Speaker Recognition** — run pyannote diarization (needs a HuggingFace
+   token). Internally `diarization`.
+3. **Summarization** — generate `summary.md` + `action_items.json` via the
+   configured AI provider. `summary_meta.json` is stamped
+   `generated_by: "talktrack-batch"`.
+
+They always run in that order, and a stage is skipped when its output is
+already on disk (`summary.md` present → summarization skipped; a transcript
+with more than one speaker → speaker recognition skipped).
+
+**Dependency rule:** Speaker Recognition and Summarization both need a
+transcript. If a recording has none *and* Transcription is not also queued,
+that operation is dropped at worklist time (logged, not counted as a
+failure). A summarization-only job needs `transcript.json` but no audio
+file.
 
 ## Queueing recordings
 
-Right-click one or more recordings in the Recordings list and choose
-**Queue for Batch Transcription**. A peach **Queued** pill appears on each
-row. The same menu offers **Remove from Batch Queue**.
+Right-click one or more recordings in the Recordings list and open the
+**Batch Transcription/Summarization** sub-menu. It has a checkable item per
+operation — Transcription, Speaker Recognition, Summarization. Speaker
+Recognition and Summarization are selectable once a transcript exists (or
+Transcription is checked) and the relevant credential is configured. A
+peach **Queued** pill appears on each row; its tooltip lists the queued
+operations. Unchecking all three removes the recording from the queue.
 
 Recordings the app declines to transcribe itself — auto-transcribe is off,
 or the recording is shorter than `transcription.min_duration` — are queued
-automatically. Turn that off with *Settings → General → "Queue skipped
-recordings for batch transcription"*.
+automatically for transcription. Turn that off with *Settings → General →
+"Queue skipped recordings for batch transcription"*.
 
-The tag lives in the recording's own `metadata.json` (`batch_pending`), so
-it travels with the folder.
+The tag lives in the recording's own `metadata.json`: `batch_pending`
+(bool) plus `batch_ops` (the operation list, canonical order). A recording
+with `batch_pending: true` and no `batch_ops` — the pre-`batch_ops` layout
+— reads as transcription only. The tag travels with the folder.
 
 ## Running it from the app
 
@@ -40,7 +67,8 @@ The launch dialog offers two execution modes:
 | Option | Meaning |
 | --- | --- |
 | `--until TIME` | **Required.** The latest time a *new* recording may be started. `HH:MM` means the next occurrence of that time, so a run launched at 23:00 with `--until 07:00` gets the whole night. `YYYY-MM-DDTHH:MM` is an absolute instant. A recording already in progress is allowed to finish. |
-| `--diarize` / `--no-diarize` | Override the app's saved diarization setting for this run. Defaults to whatever the app has, and is forced off when no HuggingFace token is configured. |
+| `--diarize` / `--no-diarize` | Add / remove Speaker Recognition on every queued recording for this run. Defaults to whatever each recording carries, and `--diarize` is ignored when no HuggingFace token is configured. |
+| `--summarize` / `--no-summarize` | Add / remove Summarization on every queued recording for this run. `--summarize` is ignored when no AI provider is configured. |
 | `--limit N` | Process at most N recordings. |
 | `--dry-run` | Print the worklist and exit without transcribing. |
 | `--verbose` | Log at DEBUG level. |
@@ -78,17 +106,22 @@ One file per run under `Documents\TalkTrack\batch Log\`, named
 `batch_<timestamp>.log`. The 30 most recent are kept.
 
 It records the settings **path** but never its contents — the HuggingFace
-token and AI API key must never reach a log file.
+token and AI API key must never reach a log file. The per-recording line
+shows the queued operations (`- Weekly sync  [transcription, summarization]`)
+but no AI configuration.
 
 ## What a run does, and doesn't
 
 Each recording goes through the same pipeline the app uses, writing
 `transcript.json`, `transcript.txt` and `transcript.md` into the
-recording's own folder.
+recording's own folder, plus `summary.md` / `action_items.json` when
+Summarization is queued.
 
-It does **not** generate AI summaries or action items: that would mean
-network calls and API spend in an unattended run. Generate those from the
-app afterwards.
+Summarization makes real network calls and spends against your AI API key,
+so it only runs for recordings explicitly queued with it (or a run passed
+`--summarize`). A summary that fails — provider error, timeout — is logged
+as a warning and leaves the transcript intact; the recording still counts
+as processed.
 
 ## Running alongside the app
 

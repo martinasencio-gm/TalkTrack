@@ -6,10 +6,10 @@ touching Whisper.
 """
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.utils.batch_queue import exhausted, is_queued, read_metadata
+from app.utils.batch_queue import exhausted, is_queued, queued_ops, read_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ class Job:
     directory: str
     session: dict
     label: str
-    audio_path: str
+    audio_path: str          # None for a summarization-only job
+    ops: list = field(default_factory=list)
 
 
 def _rebase(path, directory):
@@ -102,15 +103,41 @@ def build_worklist(recordings_dir, limit=None):
         if exhausted(session):
             logger.info("Skipping %s — too many failed attempts", directory.name)
             continue
+
+        ops = queued_ops(session)
+        if not ops:
+            continue
+
+        label = session.get("name") or directory.name
+        has_transcript = (directory / "transcript.json").exists()
+
+        # A downstream op needs a transcript. If none exists and no
+        # transcription is queued to produce one, that op can't run.
+        if not has_transcript and "transcription" not in ops:
+            kept = [op for op in ops if op == "transcription"]
+            for dropped in ops:
+                if dropped not in kept:
+                    logger.info(
+                        "%s: dropping %s — no transcript and transcription not queued",
+                        label, dropped,
+                    )
+            ops = kept
+            if not ops:
+                continue
+
+        # Audio is only the input for transcription and pyannote. A
+        # summarization-only job runs off transcript.json alone.
         audio_path = _pick_audio(session)
-        if not audio_path:
+        if ("transcription" in ops or "diarization" in ops) and not audio_path:
             logger.info("Skipping %s — no audio file on disk", directory.name)
             continue
+
         jobs.append(Job(
             directory=str(directory),
             session=session,
-            label=session.get("name") or directory.name,
+            label=label,
             audio_path=audio_path,
+            ops=ops,
         ))
 
     # Folder names are recording_<timestamp>, so the sorted() above is

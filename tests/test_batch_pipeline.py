@@ -6,6 +6,7 @@ which order and what reaches disk, not Whisper or pyannote themselves.
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -98,7 +99,7 @@ class _PipelineCase(unittest.TestCase):
         self.dir = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
-    def job(self, audio_files=None):
+    def job(self, audio_files=None, ops=None):
         from app.batch.worklist import Job
         session = {"directory": str(self.dir), "name": "Sync"}
         if audio_files:
@@ -110,7 +111,7 @@ class _PipelineCase(unittest.TestCase):
         combined = self.dir / "combined_audio.wav"
         combined.write_bytes(b"RIFF")
         return Job(directory=str(self.dir), session=session, label="Sync",
-                   audio_path=str(combined))
+                   audio_path=str(combined), ops=list(ops or ["transcription"]))
 
     def settings(self, **kwargs):
         from app.batch.pipeline import BatchSettings
@@ -192,12 +193,16 @@ class TestPerTrack(_PipelineCase):
         self.assertTrue(any("bleed" in w for w in outcome.warnings))
 
 
+_DIARIZE_OPS = ["transcription", "diarization"]
+
+
 class TestFullDiarization(_PipelineCase):
     def test_keeps_the_mix_intact_for_pyannote(self):
         from app.batch.pipeline import run_job
         recorder = _Recorder(diarization=_FakeResult(speaker="SPEAKER_00"))
-        job = self.job({"mic": "mic_audio.wav", "system": "system_audio.wav"})
-        run_job(job, self.settings(diarize=True, hf_token="t"), workers=recorder)
+        job = self.job({"mic": "mic_audio.wav", "system": "system_audio.wav"},
+                       ops=_DIARIZE_OPS)
+        run_job(job, self.settings(hf_token="t"), workers=recorder)
         # pyannote clusters voices across the whole file — splitting the
         # tracks for it would defeat the point.
         self.assertIsNone(recorder.transcription_kwargs["tracks"])
@@ -206,7 +211,7 @@ class TestFullDiarization(_PipelineCase):
     def test_saves_the_diarized_result(self):
         from app.batch.pipeline import run_job
         recorder = _Recorder(diarization=_FakeResult(speaker="SPEAKER_00"))
-        outcome = run_job(self.job(), self.settings(diarize=True, hf_token="t"),
+        outcome = run_job(self.job(ops=_DIARIZE_OPS), self.settings(hf_token="t"),
                           workers=recorder)
         self.assertTrue(outcome.diarized)
         self.assertEqual(self.transcript()["segments"][0]["speaker"], "SPEAKER_00")
@@ -214,7 +219,7 @@ class TestFullDiarization(_PipelineCase):
     def test_diarization_failure_still_saves_the_transcript(self):
         from app.batch.pipeline import run_job
         recorder = _Recorder(diarization="pyannote exploded")
-        outcome = run_job(self.job(), self.settings(diarize=True, hf_token="t"),
+        outcome = run_job(self.job(ops=_DIARIZE_OPS), self.settings(hf_token="t"),
                           workers=recorder)
         self.assertTrue(outcome.ok)
         self.assertFalse(outcome.diarized)
@@ -224,8 +229,8 @@ class TestFullDiarization(_PipelineCase):
     def test_passes_the_speaker_bounds(self):
         from app.batch.pipeline import run_job
         recorder = _Recorder(diarization=_FakeResult())
-        run_job(self.job(), self.settings(diarize=True, hf_token="t",
-                                          min_speakers=2, max_speakers=4),
+        run_job(self.job(ops=_DIARIZE_OPS),
+                self.settings(hf_token="t", min_speakers=2, max_speakers=4),
                 workers=recorder)
         self.assertEqual(recorder.diarization_kwargs["min_speakers"], 2)
         self.assertEqual(recorder.diarization_kwargs["max_speakers"], 4)
@@ -252,6 +257,145 @@ class TestSimpleFallback(_PipelineCase):
         outcome = run_job(job, self.settings(diarize=False), workers=recorder)
         self.assertTrue(outcome.ok)
         self.assertIn("rms comparison blew up", " ".join(outcome.warnings))
+
+
+class _FakeProvider:
+    """A stand-in AI provider that records the prompts it is handed."""
+
+    max_context_chars = 100_000
+
+    def __init__(self, raises=None):
+        self._raises = raises
+        self.prompts = []
+
+    def complete(self, prompt):
+        self.prompts.append(prompt)
+        if self._raises is not None:
+            raise self._raises
+        return "SUMMARY BODY" if len(self.prompts) == 1 else "- do the thing"
+
+
+class _SummaryCase(_PipelineCase):
+    def _seed_transcript(self, speaker=None):
+        (self.dir / "transcript.json").write_text(json.dumps({
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "hello", "speaker": speaker or ""},
+                {"start": 5.0, "end": 6.0, "text": "bye", "speaker": speaker or ""},
+            ],
+        }), encoding="utf-8")
+
+
+class TestSummarizationStage(_SummaryCase):
+    def test_writes_summary_files_with_batch_provenance(self):
+        import app.batch.pipeline as pipeline
+        from app.batch.pipeline import run_job
+        self._seed_transcript()
+        provider = _FakeProvider()
+        with unittest.mock.patch("app.ai.provider_factory.create_provider", return_value=provider), \
+             unittest.mock.patch("app.ai.provider_factory.describe_ai_model", return_value="fake-model"):
+            outcome = run_job(
+                self.job(ops=["summarization"]),
+                self.settings(ai_config={"provider": "claude", "api_key": "sk-SECRET"}),
+                workers=_Recorder(),
+            )
+        self.assertTrue(outcome.ok)
+        self.assertTrue(outcome.summarized)
+        self.assertTrue((self.dir / "summary.md").exists())
+        self.assertTrue((self.dir / "action_items.json").exists())
+        meta = json.loads((self.dir / "summary_meta.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["generated_by"], "talktrack-batch")
+        self.assertEqual(meta["model"], "fake-model")
+        self.assertIn("SUMMARY BODY", (self.dir / "transcript.md").read_text(encoding="utf-8"))
+        # The API key must never reach the outcome the runner logs.
+        self.assertNotIn("sk-SECRET", " ".join(outcome.warnings))
+
+    def test_skips_when_a_summary_already_exists(self):
+        import app.batch.pipeline as pipeline
+        from app.batch.pipeline import run_job
+        self._seed_transcript()
+        (self.dir / "summary.md").write_text("already summarised", encoding="utf-8")
+        called = []
+        with unittest.mock.patch.object(
+                pipeline, "_run_batch_summary",
+                lambda *a, **k: called.append(True) or True):
+            outcome = run_job(self.job(ops=["summarization"]), self.settings(),
+                              workers=_Recorder())
+        self.assertTrue(outcome.summarized)
+        self.assertEqual(called, [])
+
+    def test_no_transcript_records_a_warning_not_a_failure(self):
+        from app.batch.pipeline import run_job
+        outcome = run_job(self.job(ops=["summarization"]), self.settings(),
+                          workers=_Recorder())
+        self.assertTrue(outcome.ok)
+        self.assertFalse(outcome.summarized)
+        self.assertIn("no transcript", " ".join(outcome.warnings))
+
+    def test_a_raising_provider_leaves_the_transcript_untouched(self):
+        import app.batch.pipeline as pipeline
+        from app.batch.pipeline import run_job
+        self._seed_transcript()
+
+        def boom(session, settings, progress):
+            raise RuntimeError("rate limited")
+
+        with unittest.mock.patch.object(pipeline, "_run_batch_summary", boom):
+            outcome = run_job(self.job(ops=["summarization"]), self.settings(),
+                              workers=_Recorder())
+        self.assertTrue(outcome.ok)
+        self.assertFalse(outcome.summarized)
+        self.assertIn("rate limited", " ".join(outcome.warnings))
+        self.assertFalse((self.dir / "summary.md").exists())
+
+    def test_transcription_then_summarization_runs_both_in_order(self):
+        import app.batch.pipeline as pipeline
+        from app.batch.pipeline import run_job
+        order = []
+        recorder = _Recorder()
+
+        def fake_summary(session, settings, progress):
+            order.append("summary")
+            return True
+
+        with unittest.mock.patch.object(pipeline, "_run_batch_summary", fake_summary):
+            outcome = run_job(self.job(ops=["transcription", "summarization"]),
+                              self.settings(), workers=recorder)
+        self.assertTrue((self.dir / "transcript.json").exists())
+        self.assertEqual(order, ["summary"])
+        self.assertTrue(outcome.summarized)
+
+
+class TestSpeakerRecognitionStage(_SummaryCase):
+    def test_diarizes_an_existing_unlabelled_transcript(self):
+        from app.batch.pipeline import run_job
+        self._seed_transcript()
+        recorder = _Recorder(diarization=_FakeResult(speaker="SPEAKER_01"))
+        job = self.job(ops=["diarization"])
+        outcome = run_job(job, self.settings(hf_token="t"), workers=recorder)
+        self.assertTrue(outcome.ok)
+        self.assertTrue(recorder.diarization_ran)
+        self.assertTrue(outcome.diarized)
+
+    def test_skips_when_the_transcript_already_has_speakers(self):
+        from app.batch.pipeline import run_job
+        self._seed_transcript(speaker="SPEAKER_00")
+        # two distinct speakers
+        (self.dir / "transcript.json").write_text(json.dumps({
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "hi", "speaker": "SPEAKER_00"},
+                {"start": 2.0, "end": 3.0, "text": "yo", "speaker": "SPEAKER_01"},
+            ],
+        }), encoding="utf-8")
+        recorder = _Recorder(diarization=_FakeResult(speaker="X"))
+        run_job(self.job(ops=["diarization"]), self.settings(hf_token="t"),
+                workers=recorder)
+        self.assertFalse(recorder.diarization_ran)
+
+    def test_no_transcript_is_a_failure(self):
+        from app.batch.pipeline import run_job
+        outcome = run_job(self.job(ops=["diarization"]),
+                          self.settings(hf_token="t"), workers=_Recorder())
+        self.assertFalse(outcome.ok)
 
 
 class TestBatchSettings(unittest.TestCase):

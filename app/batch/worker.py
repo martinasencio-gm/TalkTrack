@@ -13,6 +13,7 @@ from app.batch.cutoff import may_start_another
 from app.batch.pipeline import BatchSettings, run_job
 from app.batch.worklist import build_worklist
 from app.utils import batch_queue
+from app.utils.batch_queue import OPS_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +27,44 @@ class BatchRunnerWorker(QThread):
     batch_finished = pyqtSignal(int, int, int) # (processed_count, failed_count, deferred_count)
     cancelled = pyqtSignal()
 
-    def __init__(self, recordings_dir, settings=None, limit=None, cutoff=None, parent=None):
+    def __init__(self, recordings_dir, settings=None, limit=None, cutoff=None,
+                 op_overrides=None, parent=None):
         super().__init__(parent)
         self.recordings_dir = Path(recordings_dir)
         self.settings = settings or BatchSettings()
         self.limit = limit
         self.cutoff = cutoff
+        # {"diarization": bool|None, "summarization": bool|None} from the
+        # Run Batch dialog — a global add/remove on top of each recording's
+        # own batch_ops, symmetric with the CLI's --diarize / --summarize.
+        self.op_overrides = op_overrides or {}
         self._is_cancelled = False
+
+    def _apply_op_overrides(self, jobs):
+        want_diar = self.op_overrides.get("diarization")
+        want_summ = self.op_overrides.get("summarization")
+        if want_diar is None and want_summ is None:
+            return jobs
+
+        can_summarize = bool(self.settings.ai_config.get("provider")
+                             and self.settings.ai_config.get("provider") != "none")
+        kept = []
+        for job in jobs:
+            present = set(job.ops)
+            if want_diar is True and self.settings.hf_token:
+                present.add("diarization")
+            elif want_diar is False:
+                present.discard("diarization")
+            if want_summ is True and can_summarize:
+                present.add("summarization")
+            elif want_summ is False:
+                present.discard("summarization")
+            job.ops = [o for o in OPS_ORDER if o in present]
+            if job.ops:
+                kept.append(job)
+            else:
+                logger.info("BatchRunnerWorker dropping %s — no operations left", job.label)
+        return kept
 
     def cancel(self):
         """Request cooperative cancellation between recordings."""
@@ -47,6 +79,7 @@ class BatchRunnerWorker(QThread):
     def run(self):
         self._is_cancelled = False
         jobs = build_worklist(self.recordings_dir, limit=self.limit)
+        jobs = self._apply_op_overrides(jobs)
         if not jobs:
             self.batch_finished.emit(0, 0, 0)
             return

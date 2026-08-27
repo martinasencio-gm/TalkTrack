@@ -111,6 +111,61 @@ class TestWriteTranscript(_SessionCase):
         self.assertFalse(write_transcript(None, _FakeResult(_segments())))
 
 
+class TestLoadTranscript(_SessionCase):
+    def test_missing_file_is_none(self):
+        from app.utils.session_io import load_transcript
+        self.assertIsNone(load_transcript(self.session))
+
+    def test_corrupt_file_is_none(self):
+        from app.utils.session_io import load_transcript
+        (self.dir / "transcript.json").write_text("{ truncated", encoding="utf-8")
+        self.assertIsNone(load_transcript(self.session))
+
+    def test_no_directory_is_none(self):
+        from app.utils.session_io import load_transcript
+        self.assertIsNone(load_transcript({}))
+        self.assertIsNone(load_transcript(None))
+
+    def test_round_trips_write_transcript(self):
+        from app.transcription.transcriber import TranscriptResult, TranscriptSegment
+        from app.utils.session_io import load_transcript, write_transcript
+        original = TranscriptResult(
+            segments=[TranscriptSegment(start=0.0, end=1.5, text="hello", speaker="You"),
+                      TranscriptSegment(start=2.0, end=3.0, text="hi there", speaker="Remote")],
+            language="en", duration=3.0, model_size="base",
+        )
+        write_transcript(self.session, original)
+        loaded = load_transcript(self.session)
+        self.assertEqual([s.text for s in loaded.segments], ["hello", "hi there"])
+        self.assertEqual([s.speaker for s in loaded.segments], ["You", "Remote"])
+        self.assertEqual(loaded.language, "en")
+        self.assertEqual(loaded.duration, 3.0)
+
+
+class TestWriteSummary(_SessionCase):
+    def test_writes_the_three_files_and_refreshes_the_markdown(self):
+        from app.utils.session_io import write_summary
+        (self.dir / "transcript.json").write_text(
+            json.dumps({"segments": _segments()}), encoding="utf-8")
+        meta = {"generated_by": "talktrack-batch", "model": "fake",
+                "seconds": 1.2, "generated_at": "2026-08-27T10:00:00"}
+        actions = [{"task": "do it", "assignee": "Ana", "deadline": ""}]
+        self.assertTrue(write_summary(self.session, "The summary.", actions, meta))
+        self.assertEqual((self.dir / "summary.md").read_text(encoding="utf-8"), "The summary.")
+        self.assertEqual(
+            json.loads((self.dir / "action_items.json").read_text(encoding="utf-8")),
+            actions)
+        self.assertEqual(
+            json.loads((self.dir / "summary_meta.json").read_text(encoding="utf-8"))["generated_by"],
+            "talktrack-batch")
+        self.assertIn("The summary.", (self.dir / "transcript.md").read_text(encoding="utf-8"))
+
+    def test_no_directory_is_a_no_op(self):
+        from app.utils.session_io import write_summary
+        self.assertFalse(write_summary({}, "x", [], {}))
+        self.assertFalse(write_summary(None, "x", [], {}))
+
+
 class TestExportSessionMarkdown(_SessionCase):
     def test_does_nothing_without_a_transcript(self):
         from app.utils.session_io import export_session_markdown

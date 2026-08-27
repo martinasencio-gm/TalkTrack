@@ -129,6 +129,78 @@ class TestParser(unittest.TestCase):
         self.assertTrue(parser.parse_args(["--until", "07:00", "--diarize"]).diarize)
         self.assertFalse(parser.parse_args(["--until", "07:00", "--no-diarize"]).diarize)
 
+    def test_summarize_defaults_to_none(self):
+        from app.batch.runner import build_parser
+        self.assertIsNone(build_parser().parse_args(["--until", "07:00"]).summarize)
+
+    def test_summarize_flags(self):
+        from app.batch.runner import build_parser
+        parser = build_parser()
+        self.assertTrue(parser.parse_args(["--until", "07:00", "--summarize"]).summarize)
+        self.assertFalse(parser.parse_args(["--until", "07:00", "--no-summarize"]).summarize)
+
+
+class TestOpOverrides(unittest.TestCase):
+    def _args(self, diarize=None, summarize=None):
+        from argparse import Namespace
+        return Namespace(diarize=diarize, summarize=summarize)
+
+    def _settings(self, hf_token="tok", provider="claude"):
+        from app.batch.pipeline import BatchSettings
+        return BatchSettings(hf_token=hf_token,
+                             ai_config={"provider": provider} if provider else {})
+
+    def _jobs(self, *op_lists):
+        from app.batch.worklist import Job
+        return [Job(directory=f"/d{i}", session={}, label=f"j{i}",
+                    audio_path=None, ops=list(ops))
+                for i, ops in enumerate(op_lists)]
+
+    def test_summarize_adds_the_op(self):
+        from app.batch.runner import _apply_op_overrides
+        jobs = self._jobs(["transcription"])
+        _apply_op_overrides(jobs, self._args(summarize=True), self._settings())
+        self.assertEqual(jobs[0].ops, ["transcription", "summarization"])
+
+    def test_no_summarize_removes_the_op(self):
+        from app.batch.runner import _apply_op_overrides
+        jobs = self._jobs(["transcription", "summarization"])
+        _apply_op_overrides(jobs, self._args(summarize=False), self._settings())
+        self.assertEqual(jobs[0].ops, ["transcription"])
+
+    def test_summarize_is_a_noop_without_a_provider(self):
+        from app.batch.runner import _apply_op_overrides
+        jobs = self._jobs(["transcription"])
+        _apply_op_overrides(jobs, self._args(summarize=True),
+                            self._settings(provider="none"))
+        self.assertEqual(jobs[0].ops, ["transcription"])
+
+    def test_diarize_is_a_noop_without_a_token(self):
+        from app.batch.runner import _apply_op_overrides
+        jobs = self._jobs(["transcription"])
+        _apply_op_overrides(jobs, self._args(diarize=True),
+                            self._settings(hf_token=""))
+        self.assertEqual(jobs[0].ops, ["transcription"])
+
+    def test_a_job_emptied_by_an_override_is_dropped(self):
+        from app.batch.runner import _apply_op_overrides
+        jobs = self._jobs(["summarization"])
+        kept = _apply_op_overrides(jobs, self._args(summarize=False), self._settings())
+        self.assertEqual(kept, [])
+
+
+class TestDescribe(unittest.TestCase):
+    def test_mentions_the_summary_when_one_was_written(self):
+        from app.batch.runner import _describe
+        from app.batch.pipeline import JobOutcome
+        text = _describe(JobOutcome(True, "ok", segments=4, summarized=True, elapsed=3))
+        self.assertIn("summary written", text)
+
+    def test_no_summary_mention_otherwise(self):
+        from app.batch.runner import _describe
+        from app.batch.pipeline import JobOutcome
+        self.assertNotIn("summary", _describe(JobOutcome(True, "ok", segments=4, elapsed=3)))
+
 
 class TestLogPruning(unittest.TestCase):
     def test_keeps_only_the_newest_runs(self):

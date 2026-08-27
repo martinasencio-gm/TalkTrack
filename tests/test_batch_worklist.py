@@ -130,6 +130,61 @@ class TestBuildWorklist(unittest.TestCase):
         )
 
 
+class TestOps(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def jobs(self):
+        from app.batch.worklist import build_worklist
+        return build_worklist(self.root)
+
+    def test_legacy_flag_yields_a_transcription_job(self):
+        _make_recording(self.root, "recording_20260101_000000", QUEUED)
+        self.assertEqual(self.jobs()[0].ops, ["transcription"])
+
+    def test_explicit_ops_are_carried_onto_the_job(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True,
+                         "batch_ops": ["transcription", "summarization"]})
+        self.assertEqual(self.jobs()[0].ops, ["transcription", "summarization"])
+
+    def test_summarization_only_job_needs_no_audio(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True, "batch_ops": ["summarization"]},
+                        audio=None, transcript=True)
+        jobs = self.jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].ops, ["summarization"])
+        self.assertIsNone(jobs[0].audio_path)
+
+    def test_summarization_only_without_a_transcript_is_dropped(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True, "batch_ops": ["summarization"]},
+                        transcript=False)
+        self.assertEqual(self.jobs(), [])
+
+    def test_diarization_only_without_a_transcript_is_dropped(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True, "batch_ops": ["diarization"]},
+                        transcript=False)
+        self.assertEqual(self.jobs(), [])
+
+    def test_downstream_op_survives_when_transcription_is_also_queued(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True,
+                         "batch_ops": ["transcription", "summarization"]},
+                        transcript=False)
+        self.assertEqual(self.jobs()[0].ops, ["transcription", "summarization"])
+
+    def test_transcription_in_ops_still_needs_audio(self):
+        _make_recording(self.root, "recording_20260101_000000",
+                        {"batch_pending": True, "batch_ops": ["transcription"]},
+                        audio=None)
+        self.assertEqual(self.jobs(), [])
+
+
 class TestJob(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

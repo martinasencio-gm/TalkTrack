@@ -14,6 +14,7 @@ from app.batch.logging_setup import setup_logging
 from app.batch.pipeline import BatchSettings, run_job
 from app.batch.worklist import build_worklist
 from app.utils import batch_queue
+from app.utils.batch_queue import OPS_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,15 @@ def build_parser():
         help="skip speaker identification even if the app has it enabled.",
     )
     parser.add_argument(
+        "--summarize", dest="summarize", action="store_true", default=None,
+        help="generate an AI summary and action items (needs an AI provider "
+             "configured in the app). Adds the step to every queued recording.",
+    )
+    parser.add_argument(
+        "--no-summarize", dest="summarize", action="store_false",
+        help="skip summarization even for recordings queued with it.",
+    )
+    parser.add_argument(
         "--limit", type=int, metavar="N",
         help="process at most N recordings this run.",
     )
@@ -81,8 +91,57 @@ def _describe(outcome):
         parts.append("per-track labels")
     elif outcome.diarized:
         parts.append("speakers identified")
+    if outcome.summarized:
+        parts.append("summary written")
     parts.append(f"{outcome.elapsed:.0f}s")
     return ", ".join(parts)
+
+
+def _apply_op_overrides(jobs, args, settings):
+    """Fold --diarize/--summarize (and their --no- forms) into each job's ops.
+
+    build_worklist takes the per-recording ``batch_ops`` at face value;
+    the CLI flags are a global "also do this / never do this" on top. A
+    step is only *added* when the app can actually run it — no HF token
+    means --diarize is a no-op, no AI provider means --summarize is.
+    """
+    can_diarize = bool(settings.hf_token)
+    can_summarize = bool(settings.ai_config.get("provider")
+                         and settings.ai_config.get("provider") != "none")
+    warned = set()
+
+    def add(job, op):
+        if op not in job.ops:
+            job.ops = [o for o in OPS_ORDER if o in set(job.ops) | {op}]
+
+    def remove(job, op):
+        job.ops = [o for o in job.ops if o != op]
+
+    kept = []
+    for job in jobs:
+        if args.diarize is True:
+            if can_diarize:
+                add(job, "diarization")
+            elif "diarize" not in warned:
+                logger.info("--diarize ignored — no HuggingFace token configured")
+                warned.add("diarize")
+        elif args.diarize is False:
+            remove(job, "diarization")
+
+        if args.summarize is True:
+            if can_summarize:
+                add(job, "summarization")
+            elif "summarize" not in warned:
+                logger.info("--summarize ignored — no AI provider configured")
+                warned.add("summarize")
+        elif args.summarize is False:
+            remove(job, "summarization")
+
+        if job.ops:
+            kept.append(job)
+        else:
+            logger.info("Dropping %s — no operations left to run", job.label)
+    return kept
 
 
 def run(argv=None):
@@ -118,13 +177,17 @@ def run(argv=None):
     logger.info("Cutoff:      %s (no new recording started after this)", cutoff)
 
     jobs = build_worklist(recordings_dir, limit=args.limit)
+    jobs = _apply_op_overrides(jobs, args, settings)
     if not jobs:
         logger.info("Nothing queued for batch processing — nothing to do.")
         return EXIT_OK
 
+    any_summary = any("summarization" in job.ops for job in jobs)
+    logger.info("AI summary:  %s", "on" if any_summary else "off")
+
     logger.info("Queued (%d):", len(jobs))
     for job in jobs:
-        logger.info("  - %s", job.label)
+        logger.info("  - %s  [%s]", job.label, ", ".join(job.ops))
 
     if args.dry_run:
         logger.info("Dry run — stopping before any transcription.")

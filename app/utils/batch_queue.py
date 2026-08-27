@@ -5,13 +5,17 @@ inside settings.json: it travels with the folder, so deleting or moving a
 recording outside the app can't leave a dangling entry behind, and there is
 no separate list for the GUI to keep in sync.
 
-Two keys, both optional — their absence means "not queued", so every
+Three keys, all optional — their absence means "not queued", so every
 recording that predates this feature stays valid and untouched:
 
 - ``batch_pending``  (bool) queued for the next run
 - ``batch_attempts`` (int)  consecutive failures; the runner gives up on a
   recording at MAX_ATTEMPTS so one unreadable file can't consume every
   future run.
+- ``batch_ops``      (list) which operations the run should perform, a
+  subset of OPS_ORDER stored in that canonical order. Absent alongside
+  ``batch_pending: true`` reads as ``["transcription"]`` (the behaviour
+  before this key existed).
 
 Qt-free on purpose: the GUI and the headless batch CLI both call this, and
 they must not end up with two implementations that drift.
@@ -26,7 +30,26 @@ logger = logging.getLogger(__name__)
 
 PENDING_KEY = "batch_pending"
 ATTEMPTS_KEY = "batch_attempts"
+OPS_KEY = "batch_ops"
 MAX_ATTEMPTS = 3
+
+# The operations a batch run can perform, in the only order they may run in:
+# a transcript before it can be diarized, a transcript before it can be
+# summarized. "diarization" is shown to users as "Speaker Recognition".
+OPS_ORDER = ("transcription", "diarization", "summarization")
+
+
+def _canonical_ops(ops):
+    """Filter to known ops, dedupe, and return them in OPS_ORDER.
+
+    metadata.json is exactly the kind of file people hand-edit, so a
+    misspelled or mis-ordered entry must degrade to "ignored" rather than
+    reach the pipeline.
+    """
+    if not isinstance(ops, (list, tuple)):
+        return []
+    present = set(ops)
+    return [op for op in OPS_ORDER if op in present]
 
 
 def is_queued(metadata):
@@ -89,15 +112,56 @@ def _update(directory, mutate):
     return True
 
 
+def queued_ops(metadata):
+    """Canonical-ordered batch operations for this recording.
+
+    ``[]`` when the recording is not queued. A legacy tag
+    (``batch_pending: true`` with no ``batch_ops``) reads as
+    ``["transcription"]``. Junk or mis-ordered ``batch_ops`` entries in a
+    hand-edited file are filtered out and re-sorted.
+    """
+    if not is_queued(metadata):
+        return []
+    ops = _canonical_ops(metadata.get(OPS_KEY))
+    return ops if ops else ["transcription"]
+
+
 def set_queued(directory, queued):
-    """Tag or untag a recording. Returns True when the write succeeded."""
+    """Tag or untag a recording. Returns True when the write succeeded.
+
+    Queuing this way means "just transcription" — the fine-grained op set
+    goes through :func:`set_ops`.
+    """
     def mutate(metadata):
         if queued:
             metadata[PENDING_KEY] = True
+            metadata[OPS_KEY] = ["transcription"]
             # Re-queuing by hand is the user saying "try this again", so a
             # recording parked at the attempt limit becomes eligible.
             metadata.pop(ATTEMPTS_KEY, None)
         else:
+            metadata.pop(PENDING_KEY, None)
+            metadata.pop(OPS_KEY, None)
+
+    return _update(directory, mutate)
+
+
+def set_ops(directory, ops):
+    """Set the exact operation set for a recording. Returns True on success.
+
+    Non-empty ops also sets ``batch_pending`` and clears ``batch_attempts``
+    (a re-queue is "try again"). Empty ops clears every batch key — that is
+    "remove from the queue".
+    """
+    canonical = _canonical_ops(ops)
+
+    def mutate(metadata):
+        metadata.pop(ATTEMPTS_KEY, None)
+        if canonical:
+            metadata[OPS_KEY] = canonical
+            metadata[PENDING_KEY] = True
+        else:
+            metadata.pop(OPS_KEY, None)
             metadata.pop(PENDING_KEY, None)
 
     return _update(directory, mutate)
@@ -121,9 +185,10 @@ def record_failure(directory):
 
 
 def clear(directory):
-    """Drop both keys after a successful run. Returns True on success."""
+    """Drop every batch key after a successful run. Returns True on success."""
     def mutate(metadata):
         metadata.pop(PENDING_KEY, None)
         metadata.pop(ATTEMPTS_KEY, None)
+        metadata.pop(OPS_KEY, None)
 
     return _update(directory, mutate)
