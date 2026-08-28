@@ -33,15 +33,84 @@ class TestSummaryPromptBuilder(unittest.TestCase):
         prompt = build_summary_prompt(segments, {"Alice": "Alice"}, notes="")
         self.assertNotIn("USER NOTES", prompt)
 
-    def test_build_action_items_prompt(self):
-        from app.ai.summarizer import build_action_items_prompt
+    def test_build_summary_prompt_asks_for_action_items_and_delimiter(self):
+        from app.ai.summarizer import build_summary_prompt, ACTION_ITEMS_DELIMITER
         from app.transcription.transcriber import TranscriptSegment
         segments = [
             TranscriptSegment(0.0, 5.0, "Bob, can you send the report by Friday?", speaker="Alice"),
         ]
-        prompt = build_action_items_prompt(segments, {"Alice": "Alice", "Bob": "Bob"})
+        prompt = build_summary_prompt(segments, {"Alice": "Alice", "Bob": "Bob"})
         self.assertIn("action item", prompt.lower())
         self.assertIn("report", prompt)
+        self.assertIn(ACTION_ITEMS_DELIMITER, prompt)
+        self.assertIn('"task"', prompt)
+        self.assertIn('"assignee"', prompt)
+        self.assertIn('"deadline"', prompt)
+
+    def test_build_summary_prompt_includes_instruction(self):
+        from app.ai.summarizer import build_summary_prompt
+        from app.transcription.transcriber import TranscriptSegment
+        segments = [TranscriptSegment(0.0, 5.0, "Hello.", speaker="Alice")]
+        prompt = build_summary_prompt(
+            segments, {"Alice": "Alice"}, instruction="Focus on risks"
+        )
+        self.assertIn("Focus on risks", prompt)
+
+
+class TestSplitSummaryResponse(unittest.TestCase):
+    def test_clean_split(self):
+        from app.ai.summarizer import split_summary_response, ACTION_ITEMS_DELIMITER
+        response = (
+            "- Discussed the budget\n- Agreed to hire\n"
+            f"{ACTION_ITEMS_DELIMITER}\n"
+            '[{"task": "Send report", "assignee": "Bob", "deadline": "Friday"}]'
+        )
+        summary, items = split_summary_response(response)
+        self.assertEqual(summary, "- Discussed the budget\n- Agreed to hire")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["task"], "Send report")
+        self.assertEqual(items[0]["assignee"], "Bob")
+
+    def test_missing_delimiter_is_all_summary(self):
+        from app.ai.summarizer import split_summary_response
+        response = "- Just a summary, model ignored the format"
+        summary, items = split_summary_response(response)
+        self.assertEqual(summary, "- Just a summary, model ignored the format")
+        self.assertEqual(items, [])
+
+    def test_garbage_after_delimiter_keeps_summary(self):
+        from app.ai.summarizer import split_summary_response, ACTION_ITEMS_DELIMITER
+        response = f"- Real summary\n{ACTION_ITEMS_DELIMITER}\nsorry, no action items found"
+        summary, items = split_summary_response(response)
+        self.assertEqual(summary, "- Real summary")
+        self.assertEqual(items, [])
+
+    def test_summary_body_with_brackets_and_trailing_delimiter(self):
+        from app.ai.summarizer import split_summary_response, ACTION_ITEMS_DELIMITER
+        response = (
+            "- We reviewed the array [1, 2, 3] in the code\n"
+            f"{ACTION_ITEMS_DELIMITER}\n"
+            '[{"task": "Refactor", "assignee": "", "deadline": ""}]'
+        )
+        summary, items = split_summary_response(response)
+        self.assertIn("[1, 2, 3]", summary)
+        self.assertNotIn(ACTION_ITEMS_DELIMITER, summary)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["task"], "Refactor")
+
+    def test_delimiter_with_surrounding_whitespace(self):
+        from app.ai.summarizer import split_summary_response, ACTION_ITEMS_DELIMITER
+        response = f"- Summary line\n\n   {ACTION_ITEMS_DELIMITER}   \n\n[]"
+        summary, items = split_summary_response(response)
+        self.assertEqual(summary, "- Summary line")
+        self.assertEqual(items, [])
+
+    def test_empty_array_after_delimiter(self):
+        from app.ai.summarizer import split_summary_response, ACTION_ITEMS_DELIMITER
+        response = f"- Summary\n{ACTION_ITEMS_DELIMITER}\n[]"
+        summary, items = split_summary_response(response)
+        self.assertEqual(summary, "- Summary")
+        self.assertEqual(items, [])
 
 
 class TestParseActionItems(unittest.TestCase):

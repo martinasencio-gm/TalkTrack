@@ -42,6 +42,12 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 - Search runs in `recordings_list._SearchWorker` (QThread, latest-query-wins).
 - **Per-recording embedding cache (#33)**: each recording dir gets `embeddings.npz` mapping sha1(segment text) → vector, keyed by `provider.embed_model_id`. `embedding_cache.get_corpus_vectors` embeds only cache misses and prunes stale hashes — transcript edits invalidate per segment automatically. Every provider must set `embed_model_id` (base default None = caching disabled); it MUST change whenever `embed()`'s vectors would (`st:<sentence-transformer name>` / `openai:<api model>` convention). A model-id mismatch or corrupt npz drops the whole file for that recording — never mix vectors across models.
 
+## Summary + action items — one combined call
+
+- `summarizer.build_summary_prompt(...)` asks for **both** the markdown summary and the action-items JSON in a single response, separated by a line equal to `summarizer.ACTION_ITEMS_DELIMITER` (`===ACTION_ITEMS_JSON===`). `summarizer.split_summary_response(response)` returns `(summary_markdown, action_items)` — summary is everything before the last delimiter line; items parse from the tail via `parse_action_items`. A missing delimiter (or garbage tail) degrades to summary-only + `[]`, never an error.
+- Both call sites make exactly one `provider.complete()` — `MainWindow.SummarizeWorker` (emits `summary_ready` then `actions_ready` back to back) and `app/batch/pipeline._run_batch_summary`. There is no separate action-items prompt; `build_action_items_prompt` was removed. Don't reintroduce a second call — the transcript is embedded once now, and two calls doubled the input tokens.
+- `meta["seconds"]` times the whole single call. `generated_by` stays `"talktrack-app"` (in-app) / `"talktrack-batch"` (batch run) / `"talktrack-batch-summarize"` (the Claude-session skill).
+
 ## Error surfacing
 
 - Summarize errors go through `_on_summarize_error` → panels' `set_error()` (restores prior content when it exists). Never leave panels in `set_loading` state on failure.

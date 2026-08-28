@@ -291,23 +291,18 @@ class TestMainWindowAiActivity(unittest.TestCase):
             window._really_quit = True
             window.close()
 
-    def test_current_phase_label_maps_ai_phase(self):
+    def test_current_phase_label_is_generating_summary_when_ai_busy(self):
         from app.main_window import MainWindow
         window = MainWindow()
         try:
             window._summarize_worker = self._running_worker()
-            window._ai_phase = "summary"
-            self.assertEqual(window._current_phase_label(), "Generating summary")
-            window._ai_phase = "actions"
-            self.assertEqual(window._current_phase_label(), "Extracting action items")
-            window._ai_phase = None
             self.assertEqual(window._current_phase_label(), "Generating summary")
         finally:
             window._summarize_worker = None
             window._really_quit = True
             window.close()
 
-    def test_transcription_worker_outranks_ai_phase_label(self):
+    def test_transcription_worker_outranks_ai_label(self):
         from app.main_window import MainWindow
         window = MainWindow()
         try:
@@ -315,7 +310,6 @@ class TestMainWindowAiActivity(unittest.TestCase):
             tw.session = {"directory": "/fake/rec"}
             window._transcription_worker = tw
             window._summarize_worker = self._running_worker()
-            window._ai_phase = "summary"
             self.assertEqual(window._current_phase_label(), "Transcribing")
         finally:
             window._transcription_worker = None
@@ -323,27 +317,12 @@ class TestMainWindowAiActivity(unittest.TestCase):
             window._really_quit = True
             window.close()
 
-    def test_on_ai_phase_changed_restamps_clock_and_phase(self):
-        from app.main_window import MainWindow
-        window = MainWindow()
-        try:
-            window._summarize_worker = self._running_worker()
-            window._ai_start_time = None
-            window._on_ai_phase_changed("actions")
-            self.assertEqual(window._ai_phase, "actions")
-            self.assertIsNotNone(window._ai_start_time)
-        finally:
-            window._summarize_worker = None
-            window._really_quit = True
-            window.close()
-
-    def test_update_activity_visibility_feeds_ai_phase_to_the_strip(self):
+    def test_update_activity_visibility_feeds_ai_label_to_the_strip(self):
         from app.main_window import MainWindow
         window = MainWindow()
         try:
             window._current_session = {"directory": "/fake/rec", "name": "Client call"}
             window._summarize_worker = self._running_worker()
-            window._ai_phase = "summary"
             window._ai_start_time = None
             with patch.object(window.recording_controls, "set_transcribing") as mock_set, \
                  patch.object(window.recordings_list, "set_summarizing") as mock_sum:
@@ -364,11 +343,9 @@ class TestMainWindowAiActivity(unittest.TestCase):
         from app.main_window import MainWindow
         window = MainWindow()
         try:
-            window._ai_phase = "actions"
             window._ai_start_time = 123.0
             window._ai_tick.start()
             window._end_ai_phase()
-            self.assertIsNone(window._ai_phase)
             self.assertIsNone(window._ai_start_time)
             self.assertFalse(window._ai_tick.isActive())
         finally:

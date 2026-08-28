@@ -96,8 +96,7 @@ class MainWindow(QMainWindow):
         # transcription workers so it never gates the serial queue / CPU
         # caps / shutdown, only the shared progress surfaces. LLM calls emit
         # no progress, so _ai_tick advances the elapsed clock on the strip.
-        self._ai_phase = None          # "summary" | "actions" | None
-        self._ai_start_time = None     # restamped per phase
+        self._ai_start_time = None
         self._ai_tick = QTimer(self)
         self._ai_tick.setInterval(1000)
         self._ai_tick.timeout.connect(self._update_activity_visibility)
@@ -3120,7 +3119,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _run_summarize(self):
-        from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items
+        from app.ai.summarizer import build_summary_prompt, split_summary_response
         from app.ai.provider_factory import create_provider, describe_ai_model
         from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -3144,7 +3143,6 @@ class MainWindow(QMainWindow):
             # (summary_text, {"model": str, "seconds": float, "generated_at": iso})
             summary_ready = pyqtSignal(str, dict)
             actions_ready = pyqtSignal(list)
-            phase_changed = pyqtSignal(str)   # "summary" then "actions"
             error = pyqtSignal(str)
 
             def __init__(self, provider, segments, speaker_names, notes="",
@@ -3160,13 +3158,15 @@ class MainWindow(QMainWindow):
             def run(self):
                 try:
                     max_chars = self._provider.max_context_chars
-                    summary_prompt = build_summary_prompt(
+                    prompt = build_summary_prompt(
                         self._segments, self._names, self._notes, self._instruction,
                         max_transcript_chars=max_chars,
                     )
-                    self.phase_changed.emit("summary")
                     t0 = time.monotonic()
-                    summary = self._provider.complete(summary_prompt)
+                    response = self._provider.complete(prompt)
+                    # One call returns both; the summary is the head and the
+                    # action items are the JSON array after the delimiter.
+                    summary, actions = split_summary_response(response)
                     meta = {
                         # Provenance for summary_meta.json. "generated_by"
                         # lets external tooling (the batch-summarize skill)
@@ -3177,14 +3177,6 @@ class MainWindow(QMainWindow):
                         "generated_at": datetime.now().isoformat(timespec="seconds"),
                     }
                     self.summary_ready.emit(summary, meta)
-
-                    self.phase_changed.emit("actions")
-                    actions_prompt = build_action_items_prompt(
-                        self._segments, self._names, self._notes, self._instruction,
-                        max_transcript_chars=max_chars,
-                    )
-                    actions_response = self._provider.complete(actions_prompt)
-                    actions = parse_action_items(actions_response)
                     self.actions_ready.emit(actions)
                 except Exception as e:
                     self.error.emit(str(e))
@@ -3198,11 +3190,9 @@ class MainWindow(QMainWindow):
         )
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
         self._summarize_worker.actions_ready.connect(self._on_actions_ready)
-        self._summarize_worker.phase_changed.connect(self._on_ai_phase_changed)
         self._summarize_worker.error.connect(self._on_summarize_error)
         self._summarize_worker.start()
 
-        self._ai_phase = "summary"
         self._ai_start_time = time.monotonic()
         self._ai_tick.start()
         self._update_activity_visibility()
@@ -3225,25 +3215,14 @@ class MainWindow(QMainWindow):
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             return "Transcribing"
         if self._ai_busy():
-            return {
-                "summary": "Generating summary",
-                "actions": "Extracting action items",
-            }.get(self._ai_phase, "Generating summary")
+            return "Generating summary"
         return "Transcribing"
 
-    def _on_ai_phase_changed(self, phase):
-        """Worker emits 'summary' then 'actions'. Each phase gets its own
-        elapsed clock, mirroring transcription -> diarization."""
-        self._ai_phase = phase
-        self._ai_start_time = time.monotonic()
-        self._update_activity_visibility()
-
     def _end_ai_phase(self):
-        """Tear down the AI progress state once the whole run finishes
-        (both phases) or fails. Not called from _on_summary_ready — action
-        items are still to come there."""
+        """Tear down the AI progress state once the summarize run finishes or
+        fails. Not called from _on_summary_ready — action items land in the
+        same run, right after, from _on_actions_ready."""
         self._ai_tick.stop()
-        self._ai_phase = None
         self._ai_start_time = None
         self._update_activity_visibility()
 

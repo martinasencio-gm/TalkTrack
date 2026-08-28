@@ -264,15 +264,22 @@ class _FakeProvider:
 
     max_context_chars = 100_000
 
-    def __init__(self, raises=None):
+    def __init__(self, raises=None, response=None):
         self._raises = raises
+        self._response = response
         self.prompts = []
 
     def complete(self, prompt):
         self.prompts.append(prompt)
         if self._raises is not None:
             raise self._raises
-        return "SUMMARY BODY" if len(self.prompts) == 1 else "- do the thing"
+        if self._response is not None:
+            return self._response
+        return (
+            "SUMMARY BODY\n"
+            "===ACTION_ITEMS_JSON===\n"
+            '[{"task": "do the thing", "assignee": "Bob", "deadline": ""}]'
+        )
 
 
 class _SummaryCase(_PipelineCase):
@@ -300,14 +307,34 @@ class TestSummarizationStage(_SummaryCase):
             )
         self.assertTrue(outcome.ok)
         self.assertTrue(outcome.summarized)
-        self.assertTrue((self.dir / "summary.md").exists())
-        self.assertTrue((self.dir / "action_items.json").exists())
+        self.assertEqual((self.dir / "summary.md").read_text(encoding="utf-8"), "SUMMARY BODY")
+        items = json.loads((self.dir / "action_items.json").read_text(encoding="utf-8"))
+        self.assertEqual(items, [{"task": "do the thing", "assignee": "Bob", "deadline": ""}])
+        # One combined prompt, not two.
+        self.assertEqual(len(provider.prompts), 1)
         meta = json.loads((self.dir / "summary_meta.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["generated_by"], "talktrack-batch")
         self.assertEqual(meta["model"], "fake-model")
         self.assertIn("SUMMARY BODY", (self.dir / "transcript.md").read_text(encoding="utf-8"))
         # The API key must never reach the outcome the runner logs.
         self.assertNotIn("sk-SECRET", " ".join(outcome.warnings))
+
+    def test_response_without_delimiter_is_all_summary_no_action_items(self):
+        from app.batch.pipeline import run_job
+        self._seed_transcript()
+        provider = _FakeProvider(response="Just a summary, no delimiter here.")
+        with unittest.mock.patch("app.ai.provider_factory.create_provider", return_value=provider), \
+             unittest.mock.patch("app.ai.provider_factory.describe_ai_model", return_value="fake-model"):
+            outcome = run_job(
+                self.job(ops=["summarization"]),
+                self.settings(ai_config={"provider": "claude", "api_key": "sk-SECRET"}),
+                workers=_Recorder(),
+            )
+        self.assertTrue(outcome.summarized)
+        self.assertEqual((self.dir / "summary.md").read_text(encoding="utf-8"),
+                         "Just a summary, no delimiter here.")
+        self.assertEqual(
+            json.loads((self.dir / "action_items.json").read_text(encoding="utf-8")), [])
 
     def test_skips_when_a_summary_already_exists(self):
         import app.batch.pipeline as pipeline

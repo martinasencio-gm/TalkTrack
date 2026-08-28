@@ -129,9 +129,9 @@ class SummaryPanel(QWidget):
             self._gen_btn.setVisible(True)
 
     def set_loading(self):
-        # Neutral: the phase verb ("Generating summary" / "Extracting action
-        # items") and its elapsed clock live on the shared activity strip
-        # now, so this panel just shows that something is running.
+        # Neutral: the phase verb ("Generating summary") and its elapsed clock
+        # live on the shared activity strip now, so this panel just shows that
+        # something is running.
         self._status.setText("Working…")
         self._status.setVisible(True)
         self._meta_label.setVisible(False)

@@ -441,8 +441,7 @@ class CompactStrip(QWidget):
 
         kwargs: phase_label — the verb for the "transcribing" state
         ("Transcribing" default, or "Identifying speakers" / "Generating
-        summary" / "Extracting action items"). Reset to the default on
-        every call.
+        summary"). Reset to the default on every call.
         """
         self.current_state = state
         self._phase_label = kwargs.get("phase_label") or "Transcribing"

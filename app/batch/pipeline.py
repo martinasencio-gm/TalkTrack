@@ -172,9 +172,7 @@ def _run_batch_summary(session, settings, progress):
     settings.ai_config is never logged.
     """
     from app.ai.provider_factory import create_provider, describe_ai_model
-    from app.ai.summarizer import (
-        build_action_items_prompt, build_summary_prompt, parse_action_items,
-    )
+    from app.ai.summarizer import build_summary_prompt, split_summary_response
 
     provider = create_provider(settings.ai_config)
     if provider is None:
@@ -191,11 +189,9 @@ def _run_batch_summary(session, settings, progress):
 
     progress("Generating summary...")
     t0 = time.monotonic()
-    summary = provider.complete(build_summary_prompt(
-        segments, speaker_names, notes, max_transcript_chars=max_chars))
-
-    progress("Extracting action items...")
-    actions = parse_action_items(provider.complete(build_action_items_prompt(
+    # One call returns the summary and the action-items JSON array, split on
+    # the delimiter — same as MainWindow's SummarizeWorker.
+    summary, actions = split_summary_response(provider.complete(build_summary_prompt(
         segments, speaker_names, notes, max_transcript_chars=max_chars)))
 
     meta = {
