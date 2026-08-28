@@ -45,7 +45,6 @@ from app.ui.recording_header import RecordingHeader, match_event_by_subject
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
 from app.ui.summary_panel import SummaryPanel
-from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
@@ -374,13 +373,10 @@ class MainWindow(QMainWindow):
         self.notes_panel = NotesPanel()
         self.tabs.addTab(self.notes_panel, "Notes")
 
-        # Summary tab
+        # Summary tab (hosts the action items checklist too — one AI call
+        # produces both, see _run_summarize)
         self.summary_panel = SummaryPanel()
         self.tabs.addTab(self.summary_panel, "Summary")
-
-        # Action Items tab
-        self.action_items_panel = ActionItemsPanel()
-        self.tabs.addTab(self.action_items_panel, "Action Items")
 
         # Chat tab
         self.chat_panel = ChatPanel()
@@ -519,10 +515,9 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.transcript_changed.connect(self._save_transcript)
         self.transcript_viewer.speaker_names_changed.connect(self._save_speaker_names)
 
-        # Summary / action items
+        # Summary / action items (one panel, one AI call)
         self.summary_panel.regenerate_requested.connect(self._regenerate_summary)
-        self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
-        self.action_items_panel.items_changed.connect(self._on_action_items_changed)
+        self.summary_panel.items_changed.connect(self._on_action_items_changed)
 
     def _start_recording(self):
         self.meeting_banner.hide_and_clear()
@@ -1114,7 +1109,6 @@ class MainWindow(QMainWindow):
         # Clear previous recording's view
         self.transcript_viewer.clear()
         self.summary_panel.clear()
-        self.action_items_panel.clear()
 
         # Set up transcript viewer for new recording
         audio_files = session.get("audio_files", {})
@@ -1754,7 +1748,6 @@ class MainWindow(QMainWindow):
         # Auto-summarize if AI provider configured
         self._transcript = result
         self.summary_panel.set_ready()
-        self.action_items_panel.set_ready()
         self._maybe_auto_summarize()
 
         # Update chat panel context
@@ -1790,7 +1783,6 @@ class MainWindow(QMainWindow):
             self.transcript_viewer.clear()
             self.recording_header.clear()
             self.summary_panel.clear()
-            self.action_items_panel.clear()
             self.status_label.setText("Recording deleted.")
 
     def _on_recording_files_changed(self, directory):
@@ -1808,7 +1800,6 @@ class MainWindow(QMainWindow):
             self.transcript_viewer.clear()
             self.recording_header.clear()
             self.summary_panel.clear()
-            self.action_items_panel.clear()
             self.status_label.setText("Recording updated.")
 
     def _on_recording_selected(self, metadata):
@@ -1827,7 +1818,6 @@ class MainWindow(QMainWindow):
         # Clear previous state before loading
         self.transcript_viewer.clear()
         self.summary_panel.clear()
-        self.action_items_panel.clear()
         self._transcript = None
 
         audio_files = metadata.get("audio_files", {})
@@ -1914,14 +1904,13 @@ class MainWindow(QMainWindow):
         if actions_path.exists():
             try:
                 with open(actions_path, "r", encoding="utf-8") as f:
-                    self.action_items_panel.set_items(json.load(f))
+                    self.summary_panel.set_action_items(json.load(f))
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Show generate buttons if transcript loaded but no summary/actions yet
+        # Show generate button if transcript loaded but no summary/actions yet
         if hasattr(self, '_transcript') and self._transcript is not None:
             self.summary_panel.set_ready()
-            self.action_items_panel.set_ready()
 
         # Update chat panel context for loaded recording
         self.chat_panel.set_session_dir(metadata["directory"])
@@ -2491,7 +2480,7 @@ class MainWindow(QMainWindow):
         self._run_summarize()
 
     def _run_summarize(self):
-        from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items
+        from app.ai.summarizer import build_combined_prompt, parse_combined_response
         from app.ai.provider_factory import create_provider
         from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -2508,7 +2497,6 @@ class MainWindow(QMainWindow):
             return
 
         self.summary_panel.set_loading()
-        self.action_items_panel.set_loading()
 
         class SummarizeWorker(QThread):
             summary_ready = pyqtSignal(str)
@@ -2526,19 +2514,13 @@ class MainWindow(QMainWindow):
             def run(self):
                 try:
                     max_chars = self._provider.max_context_chars
-                    summary_prompt = build_summary_prompt(
+                    prompt = build_combined_prompt(
                         self._segments, self._names, self._notes, self._instruction,
                         max_transcript_chars=max_chars,
                     )
-                    summary = self._provider.complete(summary_prompt)
+                    response = self._provider.complete(prompt)
+                    summary, actions = parse_combined_response(response)
                     self.summary_ready.emit(summary)
-
-                    actions_prompt = build_action_items_prompt(
-                        self._segments, self._names, self._notes, self._instruction,
-                        max_transcript_chars=max_chars,
-                    )
-                    actions_response = self._provider.complete(actions_prompt)
-                    actions = parse_action_items(actions_response)
                     self.actions_ready.emit(actions)
                 except Exception as e:
                     self.error.emit(str(e))
@@ -2557,7 +2539,6 @@ class MainWindow(QMainWindow):
     def _on_summarize_error(self, error_msg):
         self.status_label.setText(f"AI error: {error_msg}")
         self.summary_panel.set_error()
-        self.action_items_panel.set_error()
 
     def _on_summary_ready(self, summary):
         self.summary_panel.set_summary(summary)
@@ -2571,7 +2552,7 @@ class MainWindow(QMainWindow):
             self._export_transcript()
 
     def _on_actions_ready(self, items):
-        self.action_items_panel.set_items(items)
+        self.summary_panel.set_action_items(items)
         self._on_action_items_changed(items)
 
     def _on_action_items_changed(self, items):

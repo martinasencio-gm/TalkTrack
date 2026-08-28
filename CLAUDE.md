@@ -96,7 +96,7 @@ TalkTrack/
       transcript_search_bar.py        # Find/replace for transcripts
       search_bar.py                    # Recordings search bar
       summary_panel.py                 # AI meeting summary display
-      action_items_panel.py            # AI action items display
+      action_items_panel.py            # Action item checklist widget (embedded in summary_panel.py, not a standalone tab)
       chat_panel.py                    # Chat with transcript panel
       about_dialog.py                  # About dialog with donation link
     utils/
@@ -193,8 +193,7 @@ TalkTrack/
 - **Live waveform:** scrolling waveform visualization during recording
 - **Transcript find/replace:** Ctrl+F search across all segments with regex support
 - **Transcript undo/redo:** per-segment edit history with context menu
-- **AI meeting summaries:** auto-generated after transcription (configurable provider), manual generate/regenerate
-- **AI action items:** extracted tasks with assignees and deadlines, manual generate/regenerate
+- **AI meeting summaries + action items:** auto-generated after transcription (configurable provider) in a single AI call, manual generate/regenerate; action items (tasks, assignees, deadlines, with per-item completed checkboxes) display inside the Summary tab
 - **Notes in AI context:** user call notes included in AI summary and action item prompts
 - **Per-provider AI settings:** API keys and models stored separately per provider with status indicator
 - **Searchable history:** text and semantic search across all past recordings
@@ -288,8 +287,8 @@ TalkTrack/
 - Per-provider settings: API keys and models stored in `provider_settings` dict, keyed by provider name
 - API key status indicator in settings shows "API key configured (first4...last4)" or "No API key set"
 - Settings tab for provider selection, API keys, and model configuration
-- Auto-summarize after transcription (disableable in settings), with manual generate/regenerate buttons
-- User call notes included in summary and action item AI prompts via `build_summary_prompt(segments, speaker_names, notes="")`
+- Auto-summarize after transcription (disableable in settings), with a manual generate/regenerate button (one AI call produces both the summary and action items — see `summarizer.build_combined_prompt`)
+- User call notes included in the summary/action-item AI prompt via `build_combined_prompt(segments, speaker_names, notes="")`
 - Chat history persisted per recording as `chat_history.json`
 - Search index uses text matching (no AI needed) or semantic embeddings
 

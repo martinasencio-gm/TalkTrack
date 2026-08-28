@@ -10,8 +10,14 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 ## Context limits
 
 - `AIProvider.max_context_chars` (class attr): 100k default (cloud), `LocalProvider` overrides to 8k (n_ctx=4096 tokens + instruction/completion headroom).
-- Summary/action-item prompt builders take `max_transcript_chars`; pass `provider.max_context_chars`. Truncation keeps head AND tail (60/40) with a marker — action items cluster late in meetings, so a chat-style head-only cut drops exactly what the prompt needs.
+- `build_combined_prompt` (summarizer.py) takes `max_transcript_chars`; pass `provider.max_context_chars`. Truncation keeps head AND tail (60/40) with a marker — action items cluster late in meetings, so a chat-style head-only cut drops exactly what the prompt needs.
 - Chat has its own separate 12k char cap (`chat.MAX_CONTEXT_CHARS`).
+
+## Summary + action items are one call, not two
+
+- `SummarizeWorker` (`main_window.py`) makes a single `provider.complete()` call via `summarizer.build_combined_prompt`, which asks for the markdown summary followed by a ```json fenced action-items array in one response. `summarizer.parse_combined_response` splits the response back into `(summary_text, action_items)`. This replaced two sequential calls (one per artifact) that each re-uploaded the whole transcript — one call halves the round-trips and the token upload.
+- `action_items.json` is still written as a structured `[{"task", "assignee", "deadline"}]` list on disk (consumed by `transcript_export.py` and the recording delete-scope logic) — only the generation path and the UI location changed.
+- UI: action items display inside the Summary tab (`SummaryPanel` embeds an `ActionItemsPanel(show_controls=False)` — same interactive completed-checkboxes, just no separate tab or its own regenerate button/status text, since `SummaryPanel`'s single button/status drives both).
 
 ## Request timeouts (120s convention, #36)
 

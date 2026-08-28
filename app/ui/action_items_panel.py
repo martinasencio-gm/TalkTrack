@@ -1,10 +1,8 @@
-"""Action items display panel."""
+"""Action items checklist widget, embedded in SummaryPanel."""
 
-import json
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QPushButton, QScrollArea,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QScrollArea,
 )
 
 
@@ -39,7 +37,13 @@ class ActionItemWidget(QWidget):
 
 
 class ActionItemsPanel(QWidget):
-    regenerate_requested = pyqtSignal()
+    """Checklist of action items with per-item completed checkboxes.
+
+    Embedded inside SummaryPanel, which drives loading/error/regenerate
+    state for both the summary and the action items together (one AI call
+    produces both — see summarizer.build_combined_prompt).
+    """
+
     items_changed = pyqtSignal(list)
 
     def __init__(self, parent=None):
@@ -64,14 +68,6 @@ class ActionItemsPanel(QWidget):
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
 
-        btn_row = QHBoxLayout()
-        self._gen_btn = QPushButton("Extract Action Items")
-        self._gen_btn.clicked.connect(self.regenerate_requested.emit)
-        self._gen_btn.setVisible(False)
-        btn_row.addWidget(self._gen_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
     def set_items(self, items):
         self._items = items
         while self._items_layout.count():
@@ -86,8 +82,6 @@ class ActionItemsPanel(QWidget):
 
         self._items_layout.addStretch()
         self._scroll.setVisible(True)
-        self._gen_btn.setText("Regenerate")
-        self._gen_btn.setVisible(True)
         self._status.setVisible(False)
 
     def clear(self):
@@ -98,34 +92,8 @@ class ActionItemsPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._scroll.setVisible(False)
-        self._gen_btn.setVisible(False)
         self._status.setText("No action items extracted yet.")
         self._status.setVisible(True)
-
-    def set_ready(self):
-        """Show generate button when a transcript is available but no items yet."""
-        if not self._scroll.isVisible():
-            self._gen_btn.setText("Extract Action Items")
-            self._gen_btn.setVisible(True)
-
-    def set_loading(self):
-        self._status.setText("Extracting action items...")
-        self._status.setVisible(True)
-        self._gen_btn.setVisible(False)
-        self._scroll.setVisible(False)
-
-    def set_error(self, message="Action item extraction failed."):
-        """Restore from the loading state after a failed extraction."""
-        if self._items:
-            # Previous items still exist — bring them back.
-            self._scroll.setVisible(True)
-            self._status.setVisible(False)
-            self._gen_btn.setText("Regenerate")
-        else:
-            self._status.setText(message)
-            self._status.setVisible(True)
-            self._gen_btn.setText("Extract Action Items")
-        self._gen_btn.setVisible(True)
 
     def _on_toggled(self, index, checked):
         if 0 <= index < len(self._items):

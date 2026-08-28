@@ -1,14 +1,16 @@
-"""Meeting summary display panel."""
+"""Meeting summary display panel (also hosts the action items checklist)."""
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout, QLabel,
     QApplication, QLineEdit,
 )
+from app.ui.action_items_panel import ActionItemsPanel
 
 
 class SummaryPanel(QWidget):
     regenerate_requested = pyqtSignal()
+    items_changed = pyqtSignal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,6 +29,18 @@ class SummaryPanel(QWidget):
         self._text.setReadOnly(False)
         self._text.setVisible(False)
         layout.addWidget(self._text)
+
+        self._action_items_label = QLabel("Action Items")
+        self._action_items_label.setStyleSheet(
+            "font-weight: bold; color: #cdd6f4; padding-top: 4px;"
+        )
+        self._action_items_label.setVisible(False)
+        layout.addWidget(self._action_items_label)
+
+        self._action_items = ActionItemsPanel()
+        self._action_items.items_changed.connect(self.items_changed.emit)
+        self._action_items.setVisible(False)
+        layout.addWidget(self._action_items)
 
         # Instruction input for regeneration
         self._instruction_input = QLineEdit()
@@ -59,6 +73,16 @@ class SummaryPanel(QWidget):
         self._gen_btn.setVisible(True)
         self._instruction_input.setVisible(True)
         self._status.setVisible(False)
+        self._action_items_label.setVisible(True)
+        self._action_items.setVisible(True)
+
+    def set_action_items(self, items):
+        self._action_items.set_items(items)
+        self._action_items_label.setVisible(True)
+        self._action_items.setVisible(True)
+
+    def get_action_items(self):
+        return self._action_items.get_items()
 
     def clear(self):
         """Reset to initial empty state."""
@@ -70,6 +94,9 @@ class SummaryPanel(QWidget):
         self._instruction_input.setVisible(False)
         self._status.setText("No summary generated yet.")
         self._status.setVisible(True)
+        self._action_items.clear()
+        self._action_items_label.setVisible(False)
+        self._action_items.setVisible(False)
 
     def set_ready(self):
         """Show generate button when a transcript is available but no summary yet."""
@@ -83,6 +110,8 @@ class SummaryPanel(QWidget):
         self._gen_btn.setVisible(False)
         self._instruction_input.setVisible(False)
         self._text.setVisible(False)
+        self._action_items_label.setVisible(False)
+        self._action_items.setVisible(False)
 
     def set_error(self, message="Summary generation failed."):
         """Restore from the loading state after a failed generation."""
@@ -93,6 +122,8 @@ class SummaryPanel(QWidget):
             self._instruction_input.setVisible(True)
             self._status.setVisible(False)
             self._gen_btn.setText("Regenerate")
+            self._action_items_label.setVisible(True)
+            self._action_items.setVisible(True)
         else:
             self._status.setText(message)
             self._status.setVisible(True)
