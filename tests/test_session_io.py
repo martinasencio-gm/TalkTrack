@@ -143,27 +143,26 @@ class TestLoadTranscript(_SessionCase):
 
 
 class TestWriteSummary(_SessionCase):
-    def test_writes_the_three_files_and_refreshes_the_markdown(self):
+    def test_writes_summary_and_meta_and_refreshes_the_markdown(self):
         from app.utils.session_io import write_summary
         (self.dir / "transcript.json").write_text(
             json.dumps({"segments": _segments()}), encoding="utf-8")
         meta = {"generated_by": "talktrack-batch", "model": "fake",
                 "seconds": 1.2, "generated_at": "2026-08-27T10:00:00"}
-        actions = [{"task": "do it", "assignee": "Ana", "deadline": ""}]
-        self.assertTrue(write_summary(self.session, "The summary.", actions, meta))
-        self.assertEqual((self.dir / "summary.md").read_text(encoding="utf-8"), "The summary.")
-        self.assertEqual(
-            json.loads((self.dir / "action_items.json").read_text(encoding="utf-8")),
-            actions)
+        summary = "The summary.\n\n## Action Items\n- **Ana:** do it"
+        self.assertTrue(write_summary(self.session, summary, meta))
+        self.assertEqual((self.dir / "summary.md").read_text(encoding="utf-8"), summary)
         self.assertEqual(
             json.loads((self.dir / "summary_meta.json").read_text(encoding="utf-8"))["generated_by"],
             "talktrack-batch")
+        # Action items live inside the summary text — no separate file.
+        self.assertFalse((self.dir / "action_items.json").exists())
         self.assertIn("The summary.", (self.dir / "transcript.md").read_text(encoding="utf-8"))
 
     def test_no_directory_is_a_no_op(self):
         from app.utils.session_io import write_summary
-        self.assertFalse(write_summary({}, "x", [], {}))
-        self.assertFalse(write_summary(None, "x", [], {}))
+        self.assertFalse(write_summary({}, "x", {}))
+        self.assertFalse(write_summary(None, "x", {}))
 
 
 class TestExportSessionMarkdown(_SessionCase):

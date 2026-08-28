@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # never user- or import-controlled, so a static list is safe.
 TRANSCRIPTION_FILENAMES = [
     "transcript.json", "transcript.md", "transcript.txt", "summary.md",
+    # action_items.json is legacy — action items now live inside summary.md —
+    # but old recordings still have the file, so a transcriptions delete sweeps it.
     "action_items.json", "speaker_names.json",
 ]
 

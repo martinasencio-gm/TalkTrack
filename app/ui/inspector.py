@@ -38,12 +38,13 @@ class InspectorWidget(QWidget):
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setSpacing(1) # 1px divider between sections
         
-        # Three sections per spec — Notes / Speakers / Summary & actions.
-        # "Ask this call…" (chat) is folded into Summary & actions rather
-        # than a fourth section (see add_chat_panel).
+        # Three sections — Notes / Speakers / Summary. "Ask this call…"
+        # (chat) is folded into the Summary section rather than a fourth
+        # section (see add_chat_panel). Action items are a section inside
+        # the AI summary itself, not a separate panel.
         self.notes_section = CollapsibleSection("Notes", icon="note-pencil")
         self.speakers_section = CollapsibleSection("Speakers", icon="users-three")
-        self.summary_section = CollapsibleSection("Summary & Actions", icon="sparkle")
+        self.summary_section = CollapsibleSection("Summary", icon="sparkle")
 
         self.scroll_layout.addWidget(self.notes_section)
         self.scroll_layout.addWidget(self.speakers_section)
@@ -104,13 +105,11 @@ class InspectorWidget(QWidget):
         self.speakers_section.content_layout().addWidget(panel)
         self.speakers_section.set_expanded(True)
 
-    def add_summary_panel(self, summary_panel, actions_panel):
+    def add_summary_panel(self, summary_panel):
         self._summary_panel = summary_panel
-        self._actions_panel = actions_panel
         self.summary_section.content_layout().addWidget(summary_panel)
-        self.summary_section.content_layout().addWidget(actions_panel)
 
-        # "No provider configured" state: summary/actions need one, and
+        # "No provider configured" state: the summary needs one, and
         # showing a Generate button that silently no-ops on click (see
         # MainWindow._run_summarize's `if provider is None: return`) is
         # worse than not showing one at all.
@@ -147,17 +146,16 @@ class InspectorWidget(QWidget):
         self.summary_section.set_expanded(True)
 
     def set_ai_configured(self, configured):
-        """Toggle the summary/actions section between its real panels and
-        the "connect a provider" message."""
+        """Toggle the summary section between its real panel and the
+        "connect a provider" message."""
         if not hasattr(self, "_summary_panel"):
             return
         self._summary_panel.setVisible(configured)
-        self._actions_panel.setVisible(configured)
         self.ai_off_widget.setVisible(not configured)
 
     def add_chat_panel(self, panel):
-        """"Ask this call…" lives inside Summary & actions per spec, not
-        as its own section — pinned after the summary/actions content."""
+        """"Ask this call…" lives inside the Summary section, not as its
+        own section — pinned after the summary content."""
         self.summary_section.content_layout().addWidget(panel)
 
     def set_empty_state(self, is_empty):

@@ -1,211 +1,194 @@
-# Single-call summary + action items — design
+# Single-call summary, action items folded into the summary text — design
 
 **Date:** 2026-08-27
-**Status:** approved, ready for plan
+**Status:** implemented
+
+## History
+
+This spec was first approved for a version that kept a **structured**
+action-items artifact: one `provider.complete()` call returning the summary
+and a JSON array separated by a `===ACTION_ITEMS_JSON===` delimiter, with
+`action_items.json` and the Action Items panel both retained (commit
+`2ef1441`). Immediately after that landed, the direction changed: action
+items become a plain `## Action Items` markdown section **inside** the
+summary, `action_items.json` stops being written, and the Action Items
+panel is removed entirely. This document describes that final shape. The
+delimiter / JSON approach is gone — `ACTION_ITEMS_DELIMITER`,
+`split_summary_response`, `parse_action_items`, and `build_action_items_prompt`
+were all deleted.
 
 ## Problem
 
-Generating an AI summary for a recording currently makes **two** `provider.complete()`
-calls per run:
-
-1. `build_summary_prompt(...)` → markdown summary
-2. `build_action_items_prompt(...)` → JSON array of `{task, assignee, deadline}`
-
-Each call embeds a full (independently truncated) copy of the transcript. So a
-summarize action costs ~2× the transcript tokens on input plus two request
-latencies. This has been the shape since `ca2f387` ("add meeting summary and
-action items panels"); the recent batch-summarization work (`75bbc0f`) reused it
-verbatim in `_run_batch_summary`.
-
-We want **one** call that returns both, without losing the structured
-action-items artifact.
+Generating an AI summary used to make **two** `provider.complete()` calls
+per run (`build_summary_prompt` → markdown, `build_action_items_prompt` →
+JSON), each embedding its own truncated copy of the transcript — ~2× the
+input tokens plus two round-trips. And the structured `action_items.json` /
+`ActionItemsPanel` pair carried real weight (a second panel, its own
+signals, disk file, delete handling, export branch) for a payload that no
+downstream consumer actually reads: the only proposed consumer, a Dynamics
+CRM export, was never built.
 
 ## Goal
 
-One `provider.complete()` call produces both the summary and a structured
-action-items list. The app still writes `summary.md`, `action_items.json`,
-`summary_meta.json`, and refreshes `transcript.md` exactly as today; both the
-Summary panel and the Action Items panel stay; Dynamics CRM export (which reads
-`action_items.json`) is unaffected.
+- **One** `provider.complete()` call per summary.
+- Action items are the tail of the summary markdown — a section headed
+  exactly `## Action Items` — not a separate file, signal, or panel.
+- `summary.md` is the model response verbatim. `summary_meta.json` and the
+  `transcript.md` refresh happen as before.
+- Delete the `ActionItemsPanel` widget and all its wiring.
 
 ## Non-goals
 
-- Action items becoming plain summary text / losing `action_items.json` or the
-  Action Items panel. (Explicitly rejected — CRM export and the standalone panel
-  depend on the structured file.)
 - Streaming partial output.
-- Changing providers, prompts' substance, truncation strategy, or the
-  `generated_by` provenance values.
-- Combining the two UI panels into one.
-- Independent regeneration of summary vs. action items. It does not exist today
-  either — `summary_panel.regenerate_requested` and
-  `action_items_panel.regenerate_requested` both already call
-  `_regenerate_summary`, which re-runs the whole thing.
+- Changing providers, the summary's substance, or truncation strategy
+  (still 60/40 head/tail via `truncate_transcript`).
+- Changing the `generated_by` provenance values
+  (`talktrack-app` / `talktrack-batch` / `talktrack-batch-summarize`).
+- A migration for existing on-disk `summary.md` / `action_items.json`.
+  Existing files are left as-is; a stale `action_items.json` is treated as
+  legacy cleanup only (swept by the transcriptions delete scope and the
+  summary panel's Delete button).
 
 ## Response format
 
-The model is asked to return:
+The whole `provider.complete()` response **is** `summary.md`. The model is
+asked for:
 
 ```
-<concise markdown-bullet summary>
-===ACTION_ITEMS_JSON===
-[{"task": "...", "assignee": "...", "deadline": "..."}, ...]
+- <concise markdown-bullet summary: key discussion points, decisions, outcomes>
+
+## Action Items
+- **Owner:** the task (deadline, if one was mentioned)
+- ...
 ```
 
-- The delimiter is the literal line `===ACTION_ITEMS_JSON===` on its own.
-- Everything before the delimiter is the summary; everything after is the JSON
-  array.
-- Chosen over a single `{"summary": ..., "action_items": ...}` JSON object
-  because the summary stays first-class markdown (models — especially local GGUF
-  — handle long markdown-in-a-JSON-string worse), and a malformed object would
-  lose both halves at once. Chosen over a ```` ```json ```` fence because an
-  explicit delimiter is more deterministic to locate and can't be confused with
-  a code sample inside the summary.
+- The `## Action Items` heading is required and literal.
+- When there are no action items, the only line under the heading is
+  `_None._`.
+- No delimiter, no JSON, nothing to split or parse. A model that ignores
+  the heading simply yields a summary without that section — degraded, not
+  an error.
 
 ## Changes
 
 ### `app/ai/summarizer.py`
 
-**`build_summary_prompt(segments, speaker_names, notes="", instruction="", max_transcript_chars=None)`**
-— now asks for summary **and** action items in one prompt:
+- `build_summary_prompt(segments, speaker_names, notes="", instruction="", max_transcript_chars=None)`
+  asks for the one markdown document described above (summary framing +
+  the `## Action Items` section instruction + `_None._` rule). Transcript
+  is formatted and `truncate_transcript`'d once.
+- `truncate_transcript`, `_format_transcript`, `_format_notes`,
+  `_format_instruction` unchanged.
+- **Removed:** `ACTION_ITEMS_DELIMITER`, `split_summary_response`,
+  `parse_action_items`, `build_action_items_prompt`, and the now-unused
+  `import json` / `TranscriptSegment` import.
 
-- Keeps the existing summary framing (key discussion points, decisions,
-  outcomes; markdown bullets; incorporate notes; follow additional
-  instructions).
-- Appends the action-items framing (tasks / follow-ups / commitments; extract
-  from notes too; `{task, assignee, deadline}`, deadline `""` when none).
-- Specifies the `===ACTION_ITEMS_JSON===` delimiter and "nothing after the
-  array".
-- Transcript is formatted and `truncate_transcript`'d **once** (down from twice).
-- `_format_transcript`, `_format_notes`, `_format_instruction`,
-  `truncate_transcript` unchanged.
+### `app/main_window.py`
 
-**`build_action_items_prompt(...)`** — **removed.** Only callers are the two call
-sites changed here plus its own test.
+- `SummarizeWorker`: `summary_ready = pyqtSignal(str, dict)` only
+  (`actions_ready` removed). `run()` does one
+  `self._provider.complete(build_summary_prompt(...))` and emits
+  `summary_ready`. `meta["seconds"]` times that one call;
+  `generated_by` stays `"talktrack-app"`.
+- `_on_summary_ready` is the terminal handler — it calls `_end_ai_phase()`
+  (including on its `OSError` early-return path). `_on_actions_ready` and
+  `_on_action_items_changed` are deleted.
+- All `self.action_items_panel.*` calls removed
+  (`clear`/`set_ready`/`set_loading`/`set_error`), and the
+  `_do_on_recording_selected` block that loaded `action_items.json`.
+- `_delete_summary_and_actions`: title "Delete summary?", clears only the
+  summary panel; still unlinks `("summary.md", "summary_meta.json",
+  "action_items.json")` — the last purely as legacy cleanup.
+- `from app.ui.action_items_panel import ActionItemsPanel` removed;
+  `inspector.add_summary_panel(self.summary_panel)` (one arg).
 
-**`split_summary_response(response) -> (summary_markdown: str, action_items: list)`**
-— new:
+### `app/ui/inspector.py`
 
-- Find the **last** line equal to `===ACTION_ITEMS_JSON===` (stripped).
-- **Delimiter present:** text before it (stripped) → `summary_markdown`; text
-  after it → `parse_action_items()` (unchanged; its permissive outermost-`[...]`
-  extraction still copes with stray fences/prose). If the tail is garbage,
-  `parse_action_items` returns `[]` and the summary is still whatever came
-  before the delimiter — the delimiter line and everything after it never leak
-  into the summary.
-- **Delimiter absent:** `summary_markdown` = the whole response (stripped),
-  `action_items = []`.
-- Either way this mirrors today's "bad action-items JSON ⇒ empty list, keep the
-  summary" behaviour — never fatal.
-- Edge: a response whose *summary* text contains `===ACTION_ITEMS_JSON===` is not
-  a realistic concern for a "concise bullet summary", and using the **last**
-  occurrence makes the trailing real delimiter win anyway.
+- `add_summary_panel(summary_panel)` — single panel. Section renamed
+  `"Summary"` (was `"Summary & Actions"`). `set_ai_configured` toggles only
+  the summary panel vs. the "connect a provider" message.
 
-**`parse_action_items(response)`** — unchanged.
+### `app/ui/action_items_panel.py`
 
-### `app/main_window.py` — `SummarizeWorker`
+- Deleted.
 
-- `run()` makes **one** `self._provider.complete(prompt)` call, where `prompt =
-  build_summary_prompt(segments, names, notes, instruction, max_transcript_chars=max_chars)`.
-- Then `summary, actions = split_summary_response(response)`.
-- Emit `summary_ready.emit(summary, meta)` then `actions_ready.emit(actions)`
-  back-to-back. Both existing signals and their slots (`_on_summary_ready`,
-  `_on_actions_ready`, `_on_action_items_changed`) are **unchanged** — every disk
-  write (`summary.md`, `summary_meta.json`, `action_items.json`,
-  `_export_transcript()`) happens exactly as now.
-- `meta` unchanged in shape; `generated_by` stays `"talktrack-app"`;
-  `meta["seconds"]` now times the single call.
-- **Remove** the `phase_changed` signal and its two `emit("summary")` /
-  `emit("actions")` calls.
+### `app/utils/session_io.py`
 
-### `app/main_window.py` — progress UI
+- `write_summary(session, summary_markdown, meta)` — 3-arg. Writes
+  `summary.md` + `summary_meta.json`, refreshes `transcript.md`. No
+  `action_items` parameter, no `action_items.json`.
+- `export_session_markdown` no longer reads `action_items.json` or passes
+  it on.
 
-The two-phase progress machinery exists only to flip the activity label from
-"Generating summary" to "Extracting action items". With one call:
+### `app/utils/transcript_export.py`
 
-- **Remove** `_on_ai_phase_changed` and the `phase_changed` connection.
-- `_current_phase_label()` AI branch collapses to a single string
-  `"Generating summary"` (no dict lookup on `_ai_phase`).
-- `_ai_phase` is set once (to `"summary"`) when the worker starts, or dropped
-  entirely if nothing else reads it — implementer's call during the plan.
-- `_ai_start_time`, `_ai_tick`, `_end_ai_phase()` stay. `_end_ai_phase()` is
-  still called from `_on_actions_ready` (whole run done) and
-  `_on_summarize_error`.
-- `_ai_busy()`, `_should_hide_to_tray`, `resolve_activity_state`, activity-pill
-  / capital-bar / compact-strip wiring — all unchanged.
+- `build_export_markdown(metadata, transcript_data, speaker_names, calendar_event, notes, summary_markdown)`
+  and `export_transcript(...)` — `action_items` parameter dropped. The
+  `# Action Items` checklist block is gone; the `# Summary` section carries
+  the `## Action Items` sub-section as part of `summary_markdown`.
 
 ### `app/batch/pipeline.py` — `_run_batch_summary`
 
-- One `provider.complete(build_summary_prompt(...))` call.
-- `summary, actions = split_summary_response(response)`.
-- `session_io.write_summary(session, summary, actions, meta)` — unchanged.
-- `meta` unchanged (`generated_by: "talktrack-batch"`, `describe_ai_model`,
-  `seconds`, `generated_at`); `seconds` now times the single call.
-- Exception handling unchanged — still a non-fatal warning on an otherwise-OK
-  job in `run_job`.
+- One `provider.complete(build_summary_prompt(...))`;
+  `session_io.write_summary(session, summary, meta)`.
+- `meta` unchanged (`generated_by: "talktrack-batch"`).
+
+### `app/ui/recordings_list.py`
+
+- `TRANSCRIPTION_FILENAMES` keeps `action_items.json` (legacy sweep) with a
+  comment saying so.
 
 ## Error handling
 
 | Situation | Behaviour |
 |---|---|
-| `complete()` raises (network / auth / SDK) | In-app: `error` → `_on_summarize_error` → both panels `set_error()`, prior content restored where present. Batch: caught in `run_job`, appended to `warnings`, job still succeeds on its transcript. Same as today, now genuinely atomic — no state where `summary.md` was rewritten but `action_items.json` was not. |
-| Call OK, delimiter missing or tail unparseable | Whole response → summary; `action_items = []` written (identical to a meeting with no action items). Not an error. |
-| Call OK, well-formed | Summary + parsed items written as today. |
+| `complete()` raises | In-app: `error` → `_on_summarize_error` → summary panel `set_error()` (prior content restored where present), `_end_ai_phase()`. Batch: caught in `run_job`, appended to `warnings`, job still succeeds on its transcript. |
+| Call OK, model omitted the `## Action Items` heading | Summary written as-is. Not an error. |
+| Call OK | Response written verbatim to `summary.md`. |
 
 ## Testing
 
-- **`tests/test_summarizer.py`**
-  - Drop `test_build_action_items_prompt`.
-  - `build_summary_prompt`: keep existing asserts; add asserts that the prompt
-    now contains the action-items instruction (`"action item"`), the field names,
-    and the `===ACTION_ITEMS_JSON===` delimiter token.
-  - New `TestSplitSummaryResponse`: clean split; missing delimiter
-    (all-summary + `[]`); malformed JSON after the delimiter (all-summary +
-    `[]`); summary body containing a `[ ... ]` but a real trailing delimiter
-    (items still parsed from the tail); delimiter with surrounding whitespace.
-  - `truncate_transcript` tests unchanged.
-- **`tests/test_batch_pipeline.py`** — summary-stage tests already fake the
-  provider; update the fake `complete()` to return
-  `summary + "\n===ACTION_ITEMS_JSON===\n" + json_array` and assert both
-  `summary.md` and `action_items.json` are written with the expected content.
-  Add one case: fake returns summary with no delimiter → `summary.md` written,
-  `action_items.json` is `[]`.
-- **`SummarizeWorker`** is defined inline in `main_window.py` with no unit test
-  today; covered by the ways-of-working smoke check
-  (`python -c "from app.ai.summarizer import build_summary_prompt, split_summary_response"`).
+- **`tests/test_summarizer.py`** — dropped `TestSplitSummaryResponse`,
+  `TestParseActionItems`, `TestParseActionItemsHardening`. `build_summary_prompt`
+  now asserts the prompt contains `## Action Items` and `_None._` and does
+  **not** contain `JSON` / `===`. `truncate_transcript` tests unchanged.
+- **`tests/test_session_io.py`** — `write_summary` 3-arg; asserts
+  `action_items.json` is **not** written.
+- **`tests/test_transcript_export.py`** — every builder/export call drops
+  the trailing arg; the checklist tests are replaced by one asserting the
+  `## Action Items` sub-section rides inside `summary_markdown`.
+- **`tests/test_batch_pipeline.py`** — `_FakeProvider.complete` returns
+  plain markdown ending with a `## Action Items` section; asserts one call,
+  no `action_items.json`.
+- **`tests/test_inspector.py`** — `add_summary_panel` single arg.
+- **`tests/test_resizable_panels.py`** — `ActionItemsPanel` import and its
+  resize test removed.
+- Smoke: `python -c "from app.ai.summarizer import build_summary_prompt; import app.main_window; import app.batch.pipeline"`.
 - Full suite green: `.venv\Scripts\python.exe -m pytest tests/ -q`.
 
-## Companion skill — `.claude/skills/talktrack-batch-summarize/SKILL.md`
+## Companion skills
 
-- Merge **Step 5 (Generate the summary)** and **Step 6 (Generate action items)**
-  into one step: answer a single combined prompt (summary framing + action-items
-  framing) and produce your answer as
-  `<summary markdown>` + newline + `===ACTION_ITEMS_JSON===` + newline +
-  `<JSON array>`, then split your own answer on that delimiter — `summary` before,
-  `action_items` (parsed the same permissive way) after; missing/garbled tail ⇒
-  `action_items = []`, keep the summary.
-- Renumber: old Step 7 (Write back) → Step 6, old Step 8 (Report) → Step 7. Their
-  content is unchanged — still writes `summary.md`, `action_items.json`,
-  `summary_meta.json` (`generated_by: "talktrack-batch-summarize"`, no `seconds`
-  key), and refreshes `transcript.md`.
-- The provenance / speaker-name-map wording already fixed earlier today stays.
-
-**`.claude/skills/talktrack-transcripts/SKILL.md` — no change.** It only *reads*
-`transcript.md`; the export's `## Summary` / `## Action Items` sections are still
-produced by `export_session_markdown` in the same shape. Nothing in this change
-touches the export format.
+- **`.claude/skills/talktrack-batch-summarize/SKILL.md`** — Step 5 is one
+  prompt for a single markdown document ending with `## Action Items`; no
+  delimiter, no JSON, no split. Step 6 writes back only `summary.md` +
+  `summary_meta.json` + the `transcript.md` Summary section (which now
+  carries the action items itself); `action_items.json` is not written, and
+  a legacy standalone Action Items block in `transcript.md` is removed when
+  the Summary section is rewritten.
+- **`.claude/skills/talktrack-transcripts/SKILL.md`** — the "Export format"
+  section now shows `## Action Items` as a sub-section of `# Summary`, with
+  a note that a standalone block / `action_items.json` is legacy.
 
 ## Docs
 
-- `.claude/rules/ai-providers.md` — add under a short "Summary / action items"
-  note: one combined `provider.complete()` call; response is markdown summary +
-  `===ACTION_ITEMS_JSON===` delimiter + JSON array; `summarizer.split_summary_response`
-  does the split; a missing delimiter degrades to summary-only + `[]`.
-- The 2026-08-27 batch-summarization spec is historical — left as written.
+- `.claude/rules/ai-providers.md` — "Summary — one call, action items are a
+  section inside it".
+- `CLAUDE.md`, `README.md`, `docs/batch-transcription.md` — updated to drop
+  `action_items.json` and describe the `## Action Items` section.
 - No GitHub issue (issue filing is paused per project memory).
 
 ## Rollout
 
-Single commit (prefix `feat:` or `refactor:`), tests green, suite green, plus a
-one-line smoke import. No migration — existing `summary.md` / `action_items.json`
-on disk are untouched; only the generation path changes.
+Landed across two commits on `feature/ui-redesign`: `2ef1441` (single call,
+delimiter/JSON form) then the follow-up that folded action items into the
+summary text and removed the panel. No migration.

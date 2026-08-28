@@ -74,7 +74,7 @@ TalkTrack/
       mistral_provider.py              # Mistral AI API implementation
       local_provider.py                # Local model (llama-cpp-python)
       provider_factory.py              # Factory for configured provider
-      summarizer.py                    # Meeting summary + action items
+      summarizer.py                    # Meeting summary (ends with a ## Action Items section)
       search_index.py                  # Transcript search + embeddings
       chat.py                          # Chat context builder
     ui/
@@ -95,8 +95,7 @@ TalkTrack/
       waveform_display.py             # Live waveform visualization
       transcript_search_bar.py        # Find/replace for transcripts
       search_bar.py                    # Recordings search bar
-      summary_panel.py                 # AI meeting summary display
-      action_items_panel.py            # AI action items display
+      summary_panel.py                 # AI meeting summary display (action items are a section inside it)
       chat_panel.py                    # Chat with transcript panel
       about_dialog.py                  # About dialog with donation link
     utils/
@@ -181,7 +180,7 @@ TalkTrack/
 - **Calendar rename suggestion:** when a recording is tagged to a calendar event and has no custom name yet, offers to rename it to the event's subject
 - **Calendar remap:** "Change" button in the recording header re-runs the calendar lookup on demand and lets the user retag the recording to a different matching event
 - **Rename suggests meetings:** starting a rename looks up the calendar events overlapping the recording and offers their subjects as completions; picking one renames *and* tags/retags the recording to that meeting (a freely-typed name only renames)
-- **LLM-ready transcript export:** every transcript/notes/summary save also writes `transcript.md` (frontmatter + summary + action items + notes + transcript) into the recording's own session folder, alongside `transcript.json`
+- **LLM-ready transcript export:** every transcript/notes/summary save also writes `transcript.md` (frontmatter + summary — which ends with a `## Action Items` section — + notes + transcript) into the recording's own session folder, alongside `transcript.json`
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
@@ -194,9 +193,8 @@ TalkTrack/
 - **Live waveform:** scrolling waveform visualization during recording
 - **Transcript find/replace:** Ctrl+F search across all segments with regex support
 - **Transcript undo/redo:** per-segment edit history with context menu
-- **AI meeting summaries:** auto-generated after transcription (configurable provider), manual generate/regenerate
-- **AI action items:** extracted tasks with assignees and deadlines, manual generate/regenerate
-- **Notes in AI context:** user call notes included in AI summary and action item prompts
+- **AI meeting summaries:** auto-generated after transcription (configurable provider), manual generate/regenerate. One `provider.complete()` call returns a markdown summary that ends with a `## Action Items` section — action items are not a separate artifact or panel
+- **Notes in AI context:** user call notes included in the AI summary prompt
 - **Per-provider AI settings:** API keys and models stored separately per provider with status indicator
 - **Searchable history:** text and semantic search across all past recordings
 - **Chat with transcript:** ask AI questions about the current recording
@@ -206,7 +204,7 @@ TalkTrack/
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
 - **Multi-select bulk delete:** select multiple recordings and delete at once (Ctrl/Shift+click)
-- **Delete scopes:** deleting a recording offers three scopes — recording audio only (removes just the audio tracks, keeps `transcript.json`/`transcript.md`/summary/action items/notes/etc.; the session survives as a transcript-only entry), transcriptions only (removes `transcript.json`, `transcript.md`, summary, and action items, keeps audio), or everything. Either partial scope collapses to removing the whole session folder if it would otherwise leave neither audio nor a transcript behind.
+- **Delete scopes:** deleting a recording offers three scopes — recording audio only (removes just the audio tracks, keeps `transcript.json`/`transcript.md`/summary/notes/etc.; the session survives as a transcript-only entry), transcriptions only (removes `transcript.json`, `transcript.md`, and the summary — plus any legacy `action_items.json` — keeps audio), or everything. Either partial scope collapses to removing the whole session folder if it would otherwise leave neither audio nor a transcript behind.
 - **Transcribed indicator:** the "Transcribed" pill in the recordings list and the right-click Transcribe/Export actions both key off `transcript.json` inside the recording's own folder
 - **Custom app icon:** Start Menu shortcut (offered on first run) targets the venv interpreter and carries the icon + AppUserModelID for a correct taskbar icon
 - **About dialog:** version info and Buy Me a Coffee donation link
@@ -291,7 +289,7 @@ TalkTrack/
 - API key status indicator in settings shows "API key configured (first4...last4)" or "No API key set"
 - Settings tab for provider selection, API keys, and model configuration
 - Auto-summarize after transcription (disableable in settings), with manual generate/regenerate buttons
-- User call notes included in summary and action item AI prompts via `build_summary_prompt(segments, speaker_names, notes="")`
+- User call notes included in the summary AI prompt via `build_summary_prompt(segments, speaker_names, notes="")`; the summary it asks for ends with a `## Action Items` section
 - Chat history persisted per recording as `chat_history.json`
 - Search index uses text matching (no AI needed) or semantic embeddings
 
@@ -309,10 +307,9 @@ TalkTrack/
 
 ### Data Files Per Recording
 - transcript.json: transcription/diarization source of truth
-- transcript.md: LLM-ready Markdown export (frontmatter + summary + action items + notes + transcript), regenerated alongside transcript.json on every save
-- summary.md: AI-generated meeting summary
+- transcript.md: LLM-ready Markdown export (frontmatter + summary + notes + transcript), regenerated alongside transcript.json on every save. Action items are part of the summary, not a separate block.
+- summary.md: AI-generated meeting summary — a markdown document that ends with a `## Action Items` section. There is no separate action-items file; `action_items.json` may exist on recordings summarised before this change and is treated as legacy cleanup only.
 - summary_meta.json: summary provenance — `generated_by` ("talktrack-app" or an external tool like "talktrack-batch-summarize"), `model` (human label from `provider_factory.describe_ai_model`), `seconds` (app only), `generated_at`. Written next to summary.md, shown under the summary in the panel, removed by the Delete button. Absent for summaries produced before this was added.
-- action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history
 - embeddings.npz: Cached segment embeddings for semantic search (auto-invalidated on edit)
 - metadata.json: `batch_pending` (queued for the batch run) and `batch_attempts` (failed batch attempts; 3 retires it) are optional keys — absent means not queued

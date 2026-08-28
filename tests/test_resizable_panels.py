@@ -1,5 +1,5 @@
-"""Smoke tests: Call Notes / Summary / Action Items boxes gained a vertical
-resize grip, and it tracks the same show/hide lifecycle as its target."""
+"""Smoke tests: Call Notes / Summary boxes gained a vertical resize grip,
+and it tracks the same show/hide lifecycle as its target."""
 import os
 import unittest
 
@@ -7,7 +7,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
-from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.notes_panel import NotesPanel
 from app.ui.summary_panel import SummaryPanel
 from app.ui.vertical_resize_grip import VerticalResizeGrip
@@ -97,16 +96,6 @@ class TestSummaryPanelMeta(unittest.TestCase):
         panel.set_meta("m", 1.0)
         panel.clear()
         self.assertTrue(panel._meta_label.isHidden())
-
-
-class TestActionItemsPanelResizable(unittest.TestCase):
-    def test_grip_shown_with_items_hidden_otherwise(self):
-        panel = ActionItemsPanel()
-        self.assertTrue(panel._resize_grip.isHidden())
-        panel.set_items([{"task": "follow up", "assignee": "", "deadline": ""}])
-        self.assertFalse(panel._resize_grip.isHidden())
-        panel.clear()
-        self.assertTrue(panel._resize_grip.isHidden())
 
 
 class TestVerticalResizeGripIntegration(unittest.TestCase):

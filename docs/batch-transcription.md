@@ -3,7 +3,8 @@
 Transcription is slow on CPU, and speaker diarization is slower still —
 often longer than the recording itself. `batch_transcribe.py` moves both to
 an unattended run, so recordings can pile up during the day and be worked
-through overnight. A run can also generate the AI summary and action items.
+through overnight. A run can also generate the AI summary (which ends with a
+`## Action Items` section).
 
 ## Operations
 
@@ -12,9 +13,10 @@ Each queued recording carries an ordered set of operations, a subset of:
 1. **Transcription** — produce `transcript.json` / `transcript.txt` / `transcript.md`.
 2. **Speaker Recognition** — run pyannote diarization (needs a HuggingFace
    token). Internally `diarization`.
-3. **Summarization** — generate `summary.md` + `action_items.json` via the
-   configured AI provider. `summary_meta.json` is stamped
-   `generated_by: "talktrack-batch"`.
+3. **Summarization** — generate `summary.md` via the configured AI provider.
+   The summary is one markdown document ending with a `## Action Items`
+   section; there is no separate action-items file. `summary_meta.json` is
+   stamped `generated_by: "talktrack-batch"`.
 
 They always run in that order, and a stage is skipped when its output is
 already on disk (`summary.md` present → summarization skipped; a transcript
@@ -120,8 +122,7 @@ but no AI configuration.
 
 Each recording goes through the same pipeline the app uses, writing
 `transcript.json`, `transcript.txt` and `transcript.md` into the
-recording's own folder, plus `summary.md` / `action_items.json` when
-Summarization is queued.
+recording's own folder, plus `summary.md` when Summarization is queued.
 
 Summarization makes real network calls and spends against your AI API key,
 so it only runs for recordings explicitly queued with it (or a run passed

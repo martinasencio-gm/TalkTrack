@@ -32,7 +32,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
 
     def test_frontmatter_includes_core_fields(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, None
+            self._metadata(), self._transcript(), {}, None, "", None
         )
         self.assertIn('title: "rec_20260813_140000"', md)
         self.assertIn("recording_date: \"2026-08-13T14:00:00\"", md)
@@ -45,7 +45,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
         transcript = dict(self._transcript())
         transcript["model_size"] = "small"
         md = build_export_markdown(
-            self._metadata(), transcript, {}, None, "", None, None
+            self._metadata(), transcript, {}, None, "", None
         )
         self.assertIn('language: "en"', md)
         self.assertIn('model_size: "small"', md)
@@ -54,7 +54,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
         transcript = dict(self._transcript())
         transcript["model_size"] = "small"
         md = build_export_markdown(
-            self._metadata(), transcript, {}, None, "", None, None
+            self._metadata(), transcript, {}, None, "", None
         )
         self.assertLess(md.index("duration_seconds:"), md.index("language:"))
         self.assertLess(md.index("language:"), md.index("model_size:"))
@@ -64,14 +64,14 @@ class TestBuildExportMarkdown(unittest.TestCase):
         meta = self._metadata()
         meta["tags"] = ["Sprint Planning", "Backend"]
         md = build_export_markdown(
-            meta, self._transcript(), {}, None, "", None, None
+            meta, self._transcript(), {}, None, "", None
         )
         self.assertIn("tags:\n  - \"Sprint Planning\"\n  - \"Backend\"", md)
 
     def test_provenance_lines_omitted_when_absent(self):
         transcript = {"segments": [], "duration": 1834}
         md = build_export_markdown(
-            self._metadata(), transcript, {}, None, "", None, None
+            self._metadata(), transcript, {}, None, "", None
         )
         self.assertNotIn("language:", md)
         self.assertNotIn("model_size:", md)
@@ -79,7 +79,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
     def test_empty_provenance_values_are_omitted(self):
         transcript = {"segments": [], "duration": 1834, "language": "", "model_size": None}
         md = build_export_markdown(
-            self._metadata(), transcript, {}, None, "", None, None
+            self._metadata(), transcript, {}, None, "", None
         )
         self.assertNotIn("language:", md)
         self.assertNotIn("model_size:", md)
@@ -90,14 +90,14 @@ class TestBuildExportMarkdown(unittest.TestCase):
         transcript = dict(self._transcript())
         transcript["transcribe_seconds"] = 130.43
         md = build_export_markdown(
-            self._metadata(), transcript, {}, None, "", None, None
+            self._metadata(), transcript, {}, None, "", None
         )
         self.assertNotIn("transcribe_seconds", md)
         self.assertNotIn("130.43", md)
 
     def test_calendar_block_omitted_when_no_event(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, None
+            self._metadata(), self._transcript(), {}, None, "", None
         )
         self.assertNotIn("calendar:", md)
 
@@ -108,7 +108,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
             "attendees": ["jane.doe@example.com", "john.smith@example.com"],
         }
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, event, "", None, None
+            self._metadata(), self._transcript(), {}, event, "", None
         )
         self.assertIn('title: "Q3 Roadmap Sync"', md)
         self.assertIn("calendar:", md)
@@ -122,77 +122,70 @@ class TestBuildExportMarkdown(unittest.TestCase):
         to empty strings rather than raising inside _yaml_str."""
         event = {"subject": None, "organizer": None, "attendees": [None]}
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, event, "", None, None
+            self._metadata(), self._transcript(), {}, event, "", None
         )
         self.assertIn("calendar:", md)
         self.assertIn('subject: ""', md)
 
     def test_speakers_block_tolerates_none_name(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {"SPEAKER_00": None}, None, "", None, None
+            self._metadata(), self._transcript(), {"SPEAKER_00": None}, None, "", None
         )
         self.assertIn('SPEAKER_00: ""', md)
 
     def test_speakers_block_omitted_when_no_names(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, None
+            self._metadata(), self._transcript(), {}, None, "", None
         )
         self.assertNotIn("speakers:", md)
 
     def test_speakers_block_present_when_names_given(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {"SPEAKER_00": "Jane Doe"}, None, "", None, None
+            self._metadata(), self._transcript(), {"SPEAKER_00": "Jane Doe"}, None, "", None
         )
         self.assertIn("speakers:", md)
         self.assertIn('SPEAKER_00: "Jane Doe"', md)
 
     def test_summary_section_omitted_when_none(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, None
+            self._metadata(), self._transcript(), {}, None, "", None
         )
         self.assertNotIn("# Summary", md)
 
     def test_summary_section_present_when_given(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", "The team discussed Q3.", None
+            self._metadata(), self._transcript(), {}, None, "", "The team discussed Q3."
         )
         self.assertIn("# Summary", md)
         self.assertIn("The team discussed Q3.", md)
 
-    def test_action_items_section_omitted_when_empty(self):
+    def test_action_items_section_rides_along_inside_the_summary(self):
+        """Action items are no longer a separate argument or heading — they
+        arrive as part of summary_markdown and render under it verbatim."""
+        summary = "- Agreed to ship Friday\n\n## Action Items\n- **Bob:** send the deck"
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, []
+            self._metadata(), self._transcript(), {}, None, "", summary
         )
-        self.assertNotIn("# Action Items", md)
-
-    def test_action_items_rendered_as_checklist(self):
-        items = [
-            {"assignee": "Jane", "task": "Send the deck", "due": "2026-08-20"},
-            {"task": "Follow up with legal"},
-        ]
-        md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, items
-        )
-        self.assertIn("# Action Items", md)
-        self.assertIn("- [ ] Jane: Send the deck (due 2026-08-20)", md)
-        self.assertIn("- [ ] Follow up with legal", md)
+        self.assertIn("# Summary", md)
+        self.assertIn("## Action Items", md)
+        self.assertIn("- **Bob:** send the deck", md)
 
     def test_notes_section_omitted_when_blank(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "", None, None
+            self._metadata(), self._transcript(), {}, None, "", None
         )
         self.assertNotIn("# Notes", md)
 
     def test_notes_section_present_when_given(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {}, None, "Follow up on budget.", None, None
+            self._metadata(), self._transcript(), {}, None, "Follow up on budget.", None
         )
         self.assertIn("# Notes", md)
         self.assertIn("Follow up on budget.", md)
 
     def test_transcript_section_uses_speaker_names_and_timestamps(self):
         md = build_export_markdown(
-            self._metadata(), self._transcript(), {"SPEAKER_00": "Jane Doe"}, None, "", None, None
+            self._metadata(), self._transcript(), {"SPEAKER_00": "Jane Doe"}, None, "", None
         )
         self.assertIn("# Transcript", md)
         self.assertIn("**[00:00:03–00:00:08] Jane Doe:** Let's get started.", md)
@@ -201,7 +194,7 @@ class TestBuildExportMarkdown(unittest.TestCase):
     def test_empty_segments_still_produces_transcript_header(self):
         empty_transcript = {"segments": [], "language": "", "duration": 0}
         md = build_export_markdown(
-            self._metadata(), empty_transcript, {}, None, "", None, None
+            self._metadata(), empty_transcript, {}, None, "", None
         )
         self.assertIn("# Transcript", md)
 
@@ -222,7 +215,7 @@ class TestSegmentRendering(unittest.TestCase):
         transcript = {"segments": [segment], "duration": 1834}
         return build_export_markdown(
             self._metadata(), transcript, {"SPEAKER_00": "Alice"},
-            None, "", None, None,
+            None, "", None,
         )
 
     def test_full_form_with_end_speaker_and_confidence(self):
@@ -366,11 +359,10 @@ class TestExportTranscript(unittest.TestCase):
                 "attendees": ["alice@example.com", "bob@example.com"],
             }
             notes = "Important discussion about Q3 plans."
-            summary_markdown = "The team discussed Q3 plans and timelines."
-            action_items = [
-                {"assignee": "Alice", "task": "Send deck", "due": "2026-08-20"},
-                {"task": "Review budget"},
-            ]
+            summary_markdown = (
+                "The team discussed Q3 plans and timelines.\n\n"
+                "## Action Items\n- **Alice:** Send deck (2026-08-20)"
+            )
 
             export_transcript(
                 metadata,
@@ -379,7 +371,6 @@ class TestExportTranscript(unittest.TestCase):
                 calendar_event,
                 notes,
                 summary_markdown,
-                action_items,
             )
 
             export_path = Path(tmpdir) / "transcript.md"
@@ -396,9 +387,8 @@ class TestExportTranscript(unittest.TestCase):
             self.assertIn("SPEAKER_00: \"Alice\"", content)
             self.assertIn("# Summary", content)
             self.assertIn("The team discussed Q3 plans and timelines.", content)
-            self.assertIn("# Action Items", content)
-            self.assertIn("- [ ] Alice: Send deck (due 2026-08-20)", content)
-            self.assertIn("- [ ] Review budget", content)
+            self.assertIn("## Action Items", content)
+            self.assertIn("- **Alice:** Send deck (2026-08-20)", content)
             self.assertIn("# Notes", content)
             self.assertIn("Important discussion about Q3 plans.", content)
             self.assertIn("# Transcript", content)
@@ -412,7 +402,7 @@ class TestExportTranscript(unittest.TestCase):
             metadata = self._metadata(tmpdir)
             transcript = self._transcript()
 
-            export_transcript(metadata, transcript, {}, None, "", None, None)
+            export_transcript(metadata, transcript, {}, None, "", None)
             export_path = Path(tmpdir) / "transcript.md"
             self.assertTrue(export_path.exists())
 
@@ -422,7 +412,7 @@ class TestExportTranscript(unittest.TestCase):
             renamed_metadata["name"] = "Totally Different Title"
             calendar_event = {"subject": "Yet Another Title"}
 
-            export_transcript(renamed_metadata, transcript, {}, calendar_event, "", None, None)
+            export_transcript(renamed_metadata, transcript, {}, calendar_event, "", None)
 
             self.assertEqual(list(Path(tmpdir).glob("*.md")), [export_path])
             self.assertIn("Yet Another Title", export_path.read_text(encoding="utf-8"))
@@ -439,7 +429,7 @@ class TestExportTranscript(unittest.TestCase):
 
                 # This should not raise; it should catch and log the error
                 try:
-                    export_transcript(metadata, transcript, {}, None, "", None, None)
+                    export_transcript(metadata, transcript, {}, None, "", None)
                 except OSError:
                     self.fail("export_transcript() raised OSError; should have caught it")
 
@@ -458,7 +448,7 @@ class TestExportTranscript(unittest.TestCase):
             }
 
             try:
-                export_transcript(metadata, transcript, {}, calendar_event, "", None, None)
+                export_transcript(metadata, transcript, {}, calendar_event, "", None)
             except (TypeError, AttributeError):
                 self.fail(
                     "export_transcript() raised exception on malformed calendar_event; "
@@ -467,25 +457,6 @@ class TestExportTranscript(unittest.TestCase):
 
             # The export must actually be written, not silently dropped.
             self.assertTrue((Path(tmpdir) / "transcript.md").exists())
-
-    def test_export_transcript_malformed_action_items(self):
-        """Malformed action items (assignee/task/due=None) do not propagate."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = self._metadata(tmpdir)
-            transcript = self._transcript()
-            action_items = [
-                {"assignee": None, "task": None, "due": None},
-                {"assignee": "Alice", "task": None},
-            ]
-
-            # This should not raise; malformed items are caught
-            try:
-                export_transcript(metadata, transcript, {}, None, "", None, action_items)
-            except (TypeError, AttributeError):
-                self.fail(
-                    "export_transcript() raised exception on malformed action_items; "
-                    "should have caught it"
-                )
 
     def test_export_transcript_missing_metadata_directory_is_a_noop(self):
         """No metadata['directory'] means there is no session folder to
@@ -496,7 +467,7 @@ class TestExportTranscript(unittest.TestCase):
         transcript = self._transcript()
 
         try:
-            export_transcript(metadata, transcript, {}, None, "", None, None)
+            export_transcript(metadata, transcript, {}, None, "", None)
         except KeyError:
             self.fail(
                 "export_transcript() raised KeyError on missing metadata; "
@@ -535,7 +506,7 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             export_transcript(
                 self._metadata(tmpdir), {"segments": [], "language": "en"},
-                {}, None, "", None, None,
+                {}, None, "", None,
             )
             self.assertFalse((Path(tmpdir) / "transcript.md").exists())
 
@@ -549,12 +520,12 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
                 "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
                 "language": "en",
             }
-            export_transcript(metadata, transcript, {}, None, "", None, None)
+            export_transcript(metadata, transcript, {}, None, "", None)
             export_path = Path(tmpdir) / "transcript.md"
             self.assertTrue(export_path.exists())
             before = export_path.read_bytes()
 
-            export_transcript(metadata, {"segments": []}, {}, None, "", None, None)
+            export_transcript(metadata, {"segments": []}, {}, None, "", None)
 
             self.assertEqual(export_path.read_bytes(), before)
 
@@ -564,7 +535,7 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
                 "segments": [{"start": 3.0, "end": 8.0, "text": "Real content."}],
                 "language": "en",
             }
-            export_transcript(self._metadata(tmpdir), transcript, {}, None, "", None, None)
+            export_transcript(self._metadata(tmpdir), transcript, {}, None, "", None)
             self.assertTrue((Path(tmpdir) / "transcript.md").exists())
 
     def test_malformed_transcript_data_does_not_raise(self):
@@ -573,7 +544,7 @@ class TestExportSkipsEmptyTranscripts(unittest.TestCase):
         malformed input."""
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
-                export_transcript(self._metadata(tmpdir), [], {}, None, "", None, None)
+                export_transcript(self._metadata(tmpdir), [], {}, None, "", None)
             except AttributeError:
                 self.fail("export_transcript() raised on malformed transcript_data")
 

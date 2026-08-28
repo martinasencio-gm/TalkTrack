@@ -129,13 +129,12 @@ def load_transcript(session):
         return None
 
 
-def write_summary(session, summary_markdown, action_items, meta):
-    """Write summary.md + action_items.json + summary_meta.json, then refresh
-    transcript.md.
+def write_summary(session, summary_markdown, meta):
+    """Write summary.md + summary_meta.json, then refresh transcript.md.
 
-    The Qt-free equivalent of what MainWindow._on_summary_ready,
-    _on_actions_ready, and _on_action_items_changed do together. Returns
-    True on success.
+    The Qt-free equivalent of MainWindow._on_summary_ready. The summary
+    markdown carries its own ``## Action Items`` section — there is no
+    separate action-items file. Returns True on success.
     """
     directory = session.get("directory") if session else None
     if not directory:
@@ -143,8 +142,6 @@ def write_summary(session, summary_markdown, action_items, meta):
     directory = Path(directory)
     try:
         atomic_write_text(directory / "summary.md", summary_markdown or "")
-        atomic_write_json(directory / "action_items.json",
-                          action_items or [], indent=2, ensure_ascii=False)
         if meta:
             atomic_write_json(directory / "summary_meta.json", meta, indent=2)
     except OSError:
@@ -196,9 +193,8 @@ def export_session_markdown(session):
     calendar_event, _ = load_calendar_event(session)
     notes = _read_text(directory / "notes.txt") or ""
     summary_markdown = _read_text(directory / "summary.md")
-    action_items = _read_json(directory / "action_items.json")
 
     transcript_export.export_transcript(
         meta, transcript_data, speaker_names, calendar_event,
-        notes, summary_markdown, action_items,
+        notes, summary_markdown,
     )

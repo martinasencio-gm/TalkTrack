@@ -52,7 +52,6 @@ from app.ui.recording_header import RecordingHeader, match_event_by_subject
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
 from app.ui.summary_panel import SummaryPanel
-from app.ui.action_items_panel import ActionItemsPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
@@ -430,8 +429,7 @@ class MainWindow(QMainWindow):
         self.inspector.add_speakers_panel(self.speaker_panel)
 
         self.summary_panel = SummaryPanel()
-        self.action_items_panel = ActionItemsPanel()
-        self.inspector.add_summary_panel(self.summary_panel, self.action_items_panel)
+        self.inspector.add_summary_panel(self.summary_panel)
         
         self.chat_panel = ChatPanel()
         self.inspector.add_chat_panel(self.chat_panel)
@@ -607,11 +605,9 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.transcript_changed.connect(self._save_transcript)
         self.transcript_viewer.speaker_names_changed.connect(self._save_speaker_names)
 
-        # Summary / action items
+        # Summary (action items are a section inside it)
         self.summary_panel.regenerate_requested.connect(self._regenerate_summary)
         self.summary_panel.delete_requested.connect(self._delete_summary_and_actions)
-        self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
-        self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
         # Meeting detection prompts (floating desktop toast only;
         # the compact strip's armed state covers the visible-strip case)
@@ -1296,7 +1292,6 @@ class MainWindow(QMainWindow):
         # Clear previous recording's view
         self.transcript_viewer.clear()
         self.summary_panel.clear()
-        self.action_items_panel.clear()
 
         # Set up transcript viewer for new recording
         audio_files = session.get("audio_files", {})
@@ -2140,7 +2135,6 @@ class MainWindow(QMainWindow):
         # Auto-summarize if AI provider configured
         self._transcript = result
         self.summary_panel.set_ready()
-        self.action_items_panel.set_ready()
         self.inspector.set_ai_configured(self._ai_provider_configured())
         self._maybe_auto_summarize()
 
@@ -2198,7 +2192,6 @@ class MainWindow(QMainWindow):
             self.transcript_viewer.clear(nothing_selected=True)
             self.recording_header.clear()
             self.summary_panel.clear()
-            self.action_items_panel.clear()
             self.inspector.set_empty_state(True)
             self.status_label.setText("Recording deleted.")
 
@@ -2217,7 +2210,6 @@ class MainWindow(QMainWindow):
             self.transcript_viewer.clear(nothing_selected=True)
             self.recording_header.clear()
             self.summary_panel.clear()
-            self.action_items_panel.clear()
             self.inspector.set_empty_state(True)
             self.status_label.setText("Recording updated.")
 
@@ -2253,7 +2245,6 @@ class MainWindow(QMainWindow):
         # Clear previous state before loading
         self.transcript_viewer.clear()
         self.summary_panel.clear()
-        self.action_items_panel.clear()
         self._transcript = None
         self.inspector.set_empty_state(False)
 
@@ -2347,7 +2338,7 @@ class MainWindow(QMainWindow):
         self.notes_panel.set_session_dir(metadata["directory"])
         QApplication.processEvents()
 
-        # Load saved summary and action items
+        # Load saved summary (the action-items section lives inside it)
         session_dir = Path(metadata["directory"])
         summary_path = session_dir / "summary.md"
         if summary_path.exists():
@@ -2364,18 +2355,9 @@ class MainWindow(QMainWindow):
             except (json.JSONDecodeError, OSError):
                 pass
 
-        actions_path = session_dir / "action_items.json"
-        if actions_path.exists():
-            try:
-                with open(actions_path, "r", encoding="utf-8") as f:
-                    self.action_items_panel.set_items(json.load(f))
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        # Show generate buttons if transcript loaded but no summary/actions yet
+        # Show the generate button if a transcript is loaded but no summary yet
         if hasattr(self, '_transcript') and self._transcript is not None:
             self.summary_panel.set_ready()
-            self.action_items_panel.set_ready()
             self.inspector.set_ai_configured(self._ai_provider_configured())
 
         QApplication.processEvents()
@@ -3074,14 +3056,14 @@ class MainWindow(QMainWindow):
         self._run_summarize()
 
     def _delete_summary_and_actions(self):
-        """Wipe the generated summary and action items for the displayed
-        recording. User-initiated from the Summary panel's Delete button, so
-        the window is visible — a plain confirm dialog is fine."""
+        """Wipe the generated summary (action items included, they're a section
+        inside it) for the displayed recording. User-initiated from the Summary
+        panel's Delete button, so the window is visible — a plain confirm dialog
+        is fine."""
         reply = QMessageBox.question(
-            self, "Delete summary and action items?",
-            "This removes the AI summary and the extracted action items for "
-            "this recording. The transcript and your notes are kept. You can "
-            "regenerate them at any time.",
+            self, "Delete summary?",
+            "This removes the AI summary for this recording. The transcript and "
+            "your notes are kept. You can regenerate it at any time.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -3089,10 +3071,12 @@ class MainWindow(QMainWindow):
             return
 
         self.summary_panel.clear()
-        self.action_items_panel.clear()
 
         if self._current_session and self._current_session.get("directory"):
             session_dir = Path(self._current_session["directory"])
+            # action_items.json only exists on recordings summarised before the
+            # action items moved into summary.md — unlink it so old sessions
+            # don't keep a stale file around.
             for name in ("summary.md", "summary_meta.json", "action_items.json"):
                 try:
                     (session_dir / name).unlink()
@@ -3100,11 +3084,10 @@ class MainWindow(QMainWindow):
                     pass
             self._export_transcript()
 
-        # Offer the generate buttons again if a transcript is still loaded.
+        # Offer the generate button again if a transcript is still loaded.
         if getattr(self, "_transcript", None) is not None:
             self.summary_panel.set_ready()
-            self.action_items_panel.set_ready()
-        self.status_label.setText("Summary and action items deleted.")
+        self.status_label.setText("Summary deleted.")
 
     def _ai_provider_configured(self):
         provider = self.config.get("ai", "provider")
@@ -3119,7 +3102,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _run_summarize(self):
-        from app.ai.summarizer import build_summary_prompt, split_summary_response
+        from app.ai.summarizer import build_summary_prompt
         from app.ai.provider_factory import create_provider, describe_ai_model
         from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -3137,12 +3120,10 @@ class MainWindow(QMainWindow):
             return
 
         self.summary_panel.set_loading()
-        self.action_items_panel.set_loading()
 
         class SummarizeWorker(QThread):
-            # (summary_text, {"model": str, "seconds": float, "generated_at": iso})
+            # (summary_markdown, {"model": str, "seconds": float, "generated_at": iso})
             summary_ready = pyqtSignal(str, dict)
-            actions_ready = pyqtSignal(list)
             error = pyqtSignal(str)
 
             def __init__(self, provider, segments, speaker_names, notes="",
@@ -3163,10 +3144,7 @@ class MainWindow(QMainWindow):
                         max_transcript_chars=max_chars,
                     )
                     t0 = time.monotonic()
-                    response = self._provider.complete(prompt)
-                    # One call returns both; the summary is the head and the
-                    # action items are the JSON array after the delimiter.
-                    summary, actions = split_summary_response(response)
+                    summary = self._provider.complete(prompt)
                     meta = {
                         # Provenance for summary_meta.json. "generated_by"
                         # lets external tooling (the batch-summarize skill)
@@ -3177,7 +3155,6 @@ class MainWindow(QMainWindow):
                         "generated_at": datetime.now().isoformat(timespec="seconds"),
                     }
                     self.summary_ready.emit(summary, meta)
-                    self.actions_ready.emit(actions)
                 except Exception as e:
                     self.error.emit(str(e))
 
@@ -3189,7 +3166,6 @@ class MainWindow(QMainWindow):
             model_label,
         )
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
-        self._summarize_worker.actions_ready.connect(self._on_actions_ready)
         self._summarize_worker.error.connect(self._on_summarize_error)
         self._summarize_worker.start()
 
@@ -3220,8 +3196,7 @@ class MainWindow(QMainWindow):
 
     def _end_ai_phase(self):
         """Tear down the AI progress state once the summarize run finishes or
-        fails. Not called from _on_summary_ready — action items land in the
-        same run, right after, from _on_actions_ready."""
+        fails."""
         self._ai_tick.stop()
         self._ai_start_time = None
         self._update_activity_visibility()
@@ -3229,7 +3204,6 @@ class MainWindow(QMainWindow):
     def _on_summarize_error(self, error_msg):
         self.status_label.setText(f"AI error: {error_msg}")
         self.summary_panel.set_error()
-        self.action_items_panel.set_error()
         self._end_ai_phase()
 
     def _on_summary_ready(self, summary, meta=None):
@@ -3242,6 +3216,7 @@ class MainWindow(QMainWindow):
                 atomic_write_text(session_dir / "summary.md", summary)
             except OSError:
                 self.status_label.setText("Failed to save summary.")
+                self._end_ai_phase()
                 return
             if meta:
                 try:
@@ -3249,21 +3224,7 @@ class MainWindow(QMainWindow):
                 except OSError:
                     pass
             self._export_transcript()
-
-    def _on_actions_ready(self, items):
-        self.action_items_panel.set_items(items)
-        self._on_action_items_changed(items)
         self._end_ai_phase()
-
-    def _on_action_items_changed(self, items):
-        if self._current_session:
-            path = Path(self._current_session["directory"]) / "action_items.json"
-            try:
-                atomic_write_json(path, items, indent=2)
-            except OSError:
-                self.status_label.setText("Failed to save action items.")
-                return
-            self._export_transcript()
 
     def _should_hide_to_tray(self):
         """Whether the close button's "minimize instead" choice should fully

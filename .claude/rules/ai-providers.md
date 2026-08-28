@@ -26,7 +26,7 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 ## Context limits
 
 - `AIProvider.max_context_chars` (class attr): 100k default (cloud), `LocalProvider` overrides to 8k (n_ctx=4096 tokens + instruction/completion headroom).
-- Summary/action-item prompt builders take `max_transcript_chars`; pass `provider.max_context_chars`. Truncation keeps head AND tail (60/40) with a marker — action items cluster late in meetings, so a chat-style head-only cut drops exactly what the prompt needs.
+- `summarizer.build_summary_prompt` takes `max_transcript_chars`; pass `provider.max_context_chars`. Truncation keeps head AND tail (60/40) with a marker — action items cluster late in meetings, so a chat-style head-only cut drops exactly the tail the `## Action Items` section needs.
 - Chat has its own separate 12k char cap (`chat.MAX_CONTEXT_CHARS`).
 
 ## Request timeouts (120s convention, #36)
@@ -42,11 +42,12 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 - Search runs in `recordings_list._SearchWorker` (QThread, latest-query-wins).
 - **Per-recording embedding cache (#33)**: each recording dir gets `embeddings.npz` mapping sha1(segment text) → vector, keyed by `provider.embed_model_id`. `embedding_cache.get_corpus_vectors` embeds only cache misses and prunes stale hashes — transcript edits invalidate per segment automatically. Every provider must set `embed_model_id` (base default None = caching disabled); it MUST change whenever `embed()`'s vectors would (`st:<sentence-transformer name>` / `openai:<api model>` convention). A model-id mismatch or corrupt npz drops the whole file for that recording — never mix vectors across models.
 
-## Summary + action items — one combined call
+## Summary — one call, action items are a section inside it
 
-- `summarizer.build_summary_prompt(...)` asks for **both** the markdown summary and the action-items JSON in a single response, separated by a line equal to `summarizer.ACTION_ITEMS_DELIMITER` (`===ACTION_ITEMS_JSON===`). `summarizer.split_summary_response(response)` returns `(summary_markdown, action_items)` — summary is everything before the last delimiter line; items parse from the tail via `parse_action_items`. A missing delimiter (or garbage tail) degrades to summary-only + `[]`, never an error.
-- Both call sites make exactly one `provider.complete()` — `MainWindow.SummarizeWorker` (emits `summary_ready` then `actions_ready` back to back) and `app/batch/pipeline._run_batch_summary`. There is no separate action-items prompt; `build_action_items_prompt` was removed. Don't reintroduce a second call — the transcript is embedded once now, and two calls doubled the input tokens.
-- `meta["seconds"]` times the whole single call. `generated_by` stays `"talktrack-app"` (in-app) / `"talktrack-batch"` (batch run) / `"talktrack-batch-summarize"` (the Claude-session skill).
+- `summarizer.build_summary_prompt(...)` asks for **one** markdown document: a bulleted summary that ends with a section headed exactly `## Action Items` (bullets shaped `- **Owner:** the task (deadline, if mentioned)`, or a lone `_None._`). The whole `provider.complete()` response is `summary.md` verbatim — there is no delimiter, no JSON payload, and nothing to parse or split. `ACTION_ITEMS_DELIMITER`, `split_summary_response`, `parse_action_items`, and `build_action_items_prompt` were all removed; don't reintroduce them.
+- One `provider.complete()` per summary at both call sites — `MainWindow.SummarizeWorker` (emits `summary_ready` only) and `app/batch/pipeline._run_batch_summary`. There is no `action_items.json` and no `ActionItemsPanel`; the summary panel renders the `## Action Items` section as part of the markdown. `session_io.write_summary(session, summary_markdown, meta)` writes `summary.md` + `summary_meta.json` and refreshes `transcript.md`.
+- `meta["seconds"]` times the one call. `generated_by` stays `"talktrack-app"` (in-app) / `"talktrack-batch"` (batch run) / `"talktrack-batch-summarize"` (the Claude-session skill).
+- Legacy `action_items.json` files on older recordings are swept by the transcriptions delete scope (`recordings_list.TRANSCRIPTION_FILENAMES`) and unlinked by the summary panel's Delete button; nothing writes them any more.
 
 ## Error surfacing
 

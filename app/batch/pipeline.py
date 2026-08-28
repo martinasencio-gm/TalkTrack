@@ -163,16 +163,17 @@ def _disk_segment_count(directory):
 
 
 def _run_batch_summary(session, settings, progress):
-    """Generate summary.md + action_items.json for a session, headless.
+    """Generate summary.md (+ summary_meta.json) for a session, headless.
 
-    Returns True only when both were written. Raises on provider / SDK
-    errors — run_job catches those and records them as a non-fatal
-    warning, so a failed summary never costs a good transcript. The AI
-    SDKs do not put the API key in their exception messages, and
-    settings.ai_config is never logged.
+    The summary markdown carries its own ``## Action Items`` section — there
+    is no separate action-items file. Returns True when the summary was
+    written. Raises on provider / SDK errors — run_job catches those and
+    records them as a non-fatal warning, so a failed summary never costs a
+    good transcript. The AI SDKs do not put the API key in their exception
+    messages, and settings.ai_config is never logged.
     """
     from app.ai.provider_factory import create_provider, describe_ai_model
-    from app.ai.summarizer import build_summary_prompt, split_summary_response
+    from app.ai.summarizer import build_summary_prompt
 
     provider = create_provider(settings.ai_config)
     if provider is None:
@@ -189,10 +190,8 @@ def _run_batch_summary(session, settings, progress):
 
     progress("Generating summary...")
     t0 = time.monotonic()
-    # One call returns the summary and the action-items JSON array, split on
-    # the delimiter — same as MainWindow's SummarizeWorker.
-    summary, actions = split_summary_response(provider.complete(build_summary_prompt(
-        segments, speaker_names, notes, max_transcript_chars=max_chars)))
+    summary = provider.complete(build_summary_prompt(
+        segments, speaker_names, notes, max_transcript_chars=max_chars))
 
     meta = {
         # Distinct from the app's "talktrack-app" and the
@@ -203,7 +202,7 @@ def _run_batch_summary(session, settings, progress):
         "seconds": round(time.monotonic() - t0, 1),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    return session_io.write_summary(session, summary, actions, meta)
+    return session_io.write_summary(session, summary, meta)
 
 
 def run_job(job, settings, workers=None, on_progress=None):

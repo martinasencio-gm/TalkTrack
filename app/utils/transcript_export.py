@@ -62,8 +62,13 @@ def _yaml_str(value):
 
 
 def build_export_markdown(metadata, transcript_data, speaker_names,
-                           calendar_event, notes, summary_markdown, action_items):
-    """Render the full Markdown+YAML-frontmatter export document."""
+                           calendar_event, notes, summary_markdown):
+    """Render the full Markdown+YAML-frontmatter export document.
+
+    Action items are not a separate section — they are part of
+    ``summary_markdown`` (the AI summary ends with its own ``## Action
+    Items`` heading).
+    """
     directory_name = Path(metadata.get("directory", "")).name
     title = (calendar_event or {}).get("subject") or metadata.get("name") or directory_name
 
@@ -118,21 +123,6 @@ def build_export_markdown(metadata, transcript_data, speaker_names,
         lines.append(summary_markdown.strip())
         lines.append("")
 
-    if action_items:
-        lines.append("# Action Items")
-        lines.append("")
-        for item in action_items:
-            task = (item.get("task") or "").strip()
-            if not task:
-                continue
-            assignee = (item.get("assignee") or "").strip()
-            due = (item.get("due") or "").strip()
-            entry = f"{assignee}: {task}" if assignee else task
-            if due:
-                entry += f" (due {due})"
-            lines.append(f"- [ ] {entry}")
-        lines.append("")
-
     if notes and notes.strip():
         lines.append("# Notes")
         lines.append("")
@@ -170,7 +160,7 @@ def has_exportable_content(transcript_data):
 
 
 def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
-                       notes, summary_markdown, action_items):
+                       notes, summary_markdown):
     """Build and write transcript.md into the recording's own session
     directory, alongside transcript.json. Best-effort: every failure is
     swallowed after logging, never raised into the caller."""
@@ -195,7 +185,7 @@ def export_transcript(metadata, transcript_data, speaker_names, calendar_event,
         path = Path(directory) / "transcript.md"
         markdown = build_export_markdown(
             metadata, transcript_data, speaker_names, calendar_event,
-            notes, summary_markdown, action_items,
+            notes, summary_markdown,
         )
         atomic_write_text(path, markdown)
     except (OSError, TypeError, AttributeError, KeyError):

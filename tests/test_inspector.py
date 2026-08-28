@@ -68,9 +68,8 @@ class TestInspectorAiConfiguredState(unittest.TestCase):
     def _inspector_with_panels(self):
         inspector = InspectorWidget()
         summary_panel = QWidget()
-        actions_panel = QWidget()
-        inspector.add_summary_panel(summary_panel, actions_panel)
-        return inspector, summary_panel, actions_panel
+        inspector.add_summary_panel(summary_panel)
+        return inspector, summary_panel
 
     def test_before_add_summary_panel_is_a_noop(self):
         inspector = InspectorWidget()
@@ -78,25 +77,23 @@ class TestInspectorAiConfiguredState(unittest.TestCase):
         inspector.set_ai_configured(True)
 
     def test_configured_shows_panels_hides_ai_off_message(self):
-        inspector, summary_panel, actions_panel = self._inspector_with_panels()
+        inspector, summary_panel = self._inspector_with_panels()
         inspector.set_ai_configured(True)
         self.assertFalse(summary_panel.isHidden())
-        self.assertFalse(actions_panel.isHidden())
         self.assertTrue(inspector.ai_off_widget.isHidden())
 
     def test_unconfigured_hides_panels_shows_ai_off_message(self):
-        inspector, summary_panel, actions_panel = self._inspector_with_panels()
+        inspector, summary_panel = self._inspector_with_panels()
         inspector.set_ai_configured(False)
         self.assertTrue(summary_panel.isHidden())
-        self.assertTrue(actions_panel.isHidden())
         self.assertFalse(inspector.ai_off_widget.isHidden())
 
     def test_ai_off_widget_starts_hidden(self):
-        inspector, _, _ = self._inspector_with_panels()
+        inspector, _ = self._inspector_with_panels()
         self.assertTrue(inspector.ai_off_widget.isHidden())
 
     def test_connect_provider_button_emits_signal(self):
-        inspector, _, _ = self._inspector_with_panels()
+        inspector, _ = self._inspector_with_panels()
         received = []
         inspector.connect_provider_requested.connect(lambda: received.append(True))
         for child in inspector.ai_off_widget.findChildren(object):

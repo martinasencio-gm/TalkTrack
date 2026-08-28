@@ -70,10 +70,10 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Speaker diarization** — two modes:
   - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels (with an option to automatically replace "You" with your name)
   - *Full* (pyannote.audio): identifies individual speakers with a free HuggingFace token
-- **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
+- **AI assistant** — optional AI-powered meeting summaries (each ending with an action-items section) and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
 - **Per-provider AI settings** — API keys and models stored separately per provider, switch without losing config
-- **Manual AI generation** — generate or regenerate summaries and action items on demand
-- **Notes in AI context** — call notes are included in AI summary and action item generation
+- **Manual AI generation** — generate or regenerate the summary on demand
+- **Notes in AI context** — call notes are included in AI summary generation
 - **Interactive transcript** — click any segment to replay its audio, edit text inline, assign speaker names
 - **Play All** — sequential playback of the full transcript with real-time line highlighting and auto-scroll
 - **Export** to TXT, SRT (subtitles), or JSON
@@ -316,7 +316,7 @@ Uses the `pyannote.audio 4.0` neural pipeline to cluster individual voices (`SPE
 
 ## AI Assistant (Optional)
 
-TalkTrack connects to external or local AI providers to generate structured meeting summaries, extract action items with assignees, and chat with transcript context.
+TalkTrack connects to external or local AI providers to generate a meeting summary (one markdown document ending with an action-items section) and to chat with transcript context.
 
 | Provider | Supported Models | Required Package |
 |---|---|---|
@@ -341,12 +341,11 @@ Each recording session generates persistent artifacts inside its own session fol
 
 | Format / File | Description |
 |---|---|
-| `transcript.md` | **LLM-ready Markdown export** with YAML frontmatter, meeting metadata, summary, action items, call notes, and transcript. |
+| `transcript.md` | **LLM-ready Markdown export** with YAML frontmatter, meeting metadata, summary (including its action-items section), call notes, and transcript. |
 | `transcript.json` | Complete structured JSON with start/end timestamps, confidence ratings, and speaker labels. |
 | `transcript.txt` | Formatted plain text with timestamps and speaker names. |
 | `transcript.srt` | Subtitle file format compatible with video players and editors. |
-| `summary.md` | AI-generated meeting summary. |
-| `action_items.json` | Extracted action items with assigned owners. |
+| `summary.md` | AI-generated meeting summary — a markdown document that ends with a `## Action Items` section. |
 
 ---
 
