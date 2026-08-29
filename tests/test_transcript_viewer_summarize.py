@@ -30,7 +30,7 @@ class TestSummarizeCheckbox(unittest.TestCase):
     def test_unchecked_and_disabled_by_default(self):
         # No provider announced yet, so the box is inert until told otherwise.
         self.assertFalse(self.viewer.summarize_enabled())
-        self.assertFalse(self.viewer.summarize_cb.isEnabled())
+        self.assertFalse(self.viewer.summarize_action.isEnabled())
 
     def test_checked_with_a_provider_reports_enabled(self):
         self.viewer.set_summarize_available(True)
@@ -44,7 +44,7 @@ class TestSummarizeCheckbox(unittest.TestCase):
         self.viewer.set_summarize_available(False)
         self.viewer.set_summarize_enabled(True)
         self.assertFalse(self.viewer.summarize_enabled())
-        self.assertFalse(self.viewer.summarize_cb.isEnabled())
+        self.assertFalse(self.viewer.summarize_action.isEnabled())
 
     def test_programmatic_set_does_not_emit(self):
         # Syncing from config must not look like a user change, or loading
@@ -59,7 +59,7 @@ class TestSummarizeCheckbox(unittest.TestCase):
         seen = []
         self.viewer.set_summarize_available(True)
         self.viewer.summarize_toggled.connect(seen.append)
-        self.viewer.summarize_cb.setChecked(True)
+        self.viewer.summarize_action.setChecked(True)
         self.assertEqual(seen, [True])
 
     def test_available_toggle_preserves_checked_state(self):
@@ -68,7 +68,7 @@ class TestSummarizeCheckbox(unittest.TestCase):
         self.viewer.set_summarize_available(True)
         self.viewer.set_summarize_enabled(True)
         self.viewer.set_summarize_available(True)
-        self.assertTrue(self.viewer.summarize_cb.isChecked())
+        self.assertTrue(self.viewer.summarize_action.isChecked())
 
 
 class TestMainWindowWiring(unittest.TestCase):
@@ -99,7 +99,7 @@ class TestMainWindowWiring(unittest.TestCase):
         from unittest.mock import patch
         with patch.object(self.window, "_ai_provider_configured", return_value=False):
             self.window._sync_summarize_control()
-        self.assertFalse(self.window.transcript_viewer.summarize_cb.isEnabled())
+        self.assertFalse(self.window.transcript_viewer.summarize_action.isEnabled())
 
     def test_sync_pushes_saved_preference_into_the_box(self):
         from unittest.mock import patch
@@ -107,7 +107,7 @@ class TestMainWindowWiring(unittest.TestCase):
              patch.object(self.window.config, "save"):
             self.window.config.set("ai", "auto_summarize", True)
             self.window._sync_summarize_control()
-        self.assertTrue(self.window.transcript_viewer.summarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.summarize_action.isChecked())
 
     def test_auto_summarize_skipped_when_the_box_is_unchecked(self):
         from unittest.mock import patch

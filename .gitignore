@@ -26,3 +26,7 @@ temp.txt
 
 # graphify knowledge graph output (regenerate with: graphify update .)
 graphify-out/
+
+# UI snapshot working output — docs/ui-snapshots/baseline is the tracked
+# pre-declutter reference; "current" is regenerated on every harness run.
+docs/ui-snapshots/current/

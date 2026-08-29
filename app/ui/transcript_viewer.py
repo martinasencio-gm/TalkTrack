@@ -5,10 +5,10 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QFileDialog, QScrollArea, QCheckBox,
-    QApplication, QToolTip,
+    QApplication, QToolTip, QToolButton, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QShortcut, QKeySequence, QIcon
+from PyQt6.QtGui import QShortcut, QKeySequence, QIcon, QAction
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 from app.ui.transcript_search_bar import TranscriptSearchBar
@@ -118,33 +118,44 @@ class TranscriptViewer(QWidget):
         header.addWidget(title)
         header.addStretch()
 
-        # Diarization is by far the slowest stage (often longer than the
-        # recording itself on CPU), so it gets a per-run opt-out right next
-        # to the button that starts the work, not only a buried setting.
-        self.diarize_cb = QCheckBox("Identify speakers")
-        self.diarize_cb.setToolTip(
+        # Diarization and summarization are per-run *choices*, not actions.
+        # As always-visible checkboxes they competed with the button that
+        # acts on them, and "Identify speakers" sat immediately beside an
+        # "Identify Speakers" button, which read as a duplicate control.
+        # They are now items in the Transcribe split-button's menu: still
+        # one click away, no longer permanent chrome.
+        #
+        # QAction rather than QCheckBox deliberately — it keeps the
+        # isChecked/setChecked/isEnabled/setEnabled/toggled API the
+        # checkboxes had, so diarization_enabled(), summarize_enabled() and
+        # the config-sync paths below are unchanged.
+        self.diarize_action = QAction("Identify speakers", self)
+        self.diarize_action.setCheckable(True)
+        self.diarize_action.setToolTip(
             "Run speaker diarization after transcription to identify individual speakers.\n"
             "Unchecked, separate mic and system tracks still label You/Remote."
         )
-        self.diarize_cb.toggled.connect(self.diarize_toggled)
-        header.addWidget(self.diarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.diarize_action.toggled.connect(self.diarize_toggled)
 
-        # Same per-run opt-in shape as "Identify speakers": whether the AI
-        # summary + action items run automatically once the next
-        # transcription finishes. Mirrors config["ai"]["auto_summarize"].
-        self.summarize_cb = QCheckBox("Summarize")
-        self.summarize_cb.setToolTip(
+        # Mirrors config["ai"]["auto_summarize"]. Inert until MainWindow
+        # reports a configured provider via set_summarize_available(); an
+        # un-synced viewer must not offer an operative choice.
+        self.summarize_action = QAction("Summarize", self)
+        self.summarize_action.setCheckable(True)
+        self.summarize_action.setToolTip(
             "Generate an AI summary and action items after transcription."
         )
-        # Inert until MainWindow reports a configured provider via
-        # set_summarize_available(); an un-synced viewer must not show an
-        # operative box.
-        self.summarize_cb.setEnabled(False)
-        self.summarize_cb.toggled.connect(self.summarize_toggled)
-        header.addWidget(self.summarize_cb, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.summarize_action.setEnabled(False)
+        self.summarize_action.toggled.connect(self.summarize_toggled)
+
+        self._transcribe_menu = QMenu(self)
+        self._transcribe_menu.addAction(self.diarize_action)
+        self._transcribe_menu.addAction(self.summarize_action)
 
         # On-demand diarization for a transcript that already exists, so a
         # fast unlabelled pass can be upgraded without transcribing again.
+        # Stays a button of its own: it is an action rather than a setting,
+        # and it is already contextual (hidden unless it can actually run).
         self.diarize_btn = QPushButton("Identify Speakers")
         self.diarize_btn.setToolTip(
             "Run speaker diarization on the existing transcript."
@@ -154,7 +165,18 @@ class TranscriptViewer(QWidget):
         self.diarize_btn.clicked.connect(self.diarize_requested)
         header.addWidget(self.diarize_btn)
 
-        self.transcribe_btn = QPushButton("Transcribe")
+        # Split button: the body transcribes, the arrow opens the run
+        # options above.
+        self.transcribe_btn = QToolButton()
+        self.transcribe_btn.setObjectName("splitAction")
+        self.transcribe_btn.setText("Transcribe")
+        self.transcribe_btn.setToolTip(
+            "Transcribe this recording. Use the arrow for run options."
+        )
+        self.transcribe_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        self.transcribe_btn.setMenu(self._transcribe_menu)
         self.transcribe_btn.setEnabled(False)
         self.transcribe_btn.clicked.connect(self._on_transcribe_clicked)
         header.addWidget(self.transcribe_btn)
@@ -220,41 +242,61 @@ class TranscriptViewer(QWidget):
         export_row = QHBoxLayout()
         row_align = Qt.AlignmentFlag.AlignVCenter
 
-        self.play_all_btn = QPushButton("\u25b6 Play All")
-        self.play_all_btn.setEnabled(False)
-        self.play_all_btn.setFixedWidth(90)
-        self.play_all_btn.clicked.connect(self._on_play_all_clicked)
-        export_row.addWidget(self.play_all_btn, 0, row_align)
-
-        self.continue_from_cb = QCheckBox("Continue playing")
-        self.continue_from_cb.setChecked(True)
-        self.continue_from_cb.setToolTip(
+        # "Continue playing" is a sticky preference, not an action, so it
+        # moves off the row and into this button's menu \u2014 beside the
+        # playback it governs rather than buried in Settings.
+        self.continue_action = QAction("Continue playing from a segment", self)
+        self.continue_action.setCheckable(True)
+        self.continue_action.setChecked(True)
+        self.continue_action.setToolTip(
             "When checked, clicking a segment's play button\n"
             "will continue playing all segments from that point."
         )
-        self.continue_from_cb.toggled.connect(self._on_continue_toggled)
-        export_row.addWidget(self.continue_from_cb, 0, row_align)
+        self.continue_action.toggled.connect(self._on_continue_toggled)
+
+        self._play_menu = QMenu(self)
+        self._play_menu.addAction(self.continue_action)
+
+        self.play_all_btn = QToolButton()
+        self.play_all_btn.setObjectName("splitAction")
+        self.play_all_btn.setText("\u25b6 Play All")
+        self.play_all_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        self.play_all_btn.setMenu(self._play_menu)
+        self.play_all_btn.setEnabled(False)
+        self.play_all_btn.clicked.connect(self._on_play_all_clicked)
+        export_row.addWidget(self.play_all_btn, 0, row_align)
 
         export_row.addStretch()
 
-        self.copy_all_btn = QPushButton("Copy All")
-        self.copy_all_btn.setEnabled(False)
-        self.copy_all_btn.setToolTip(
+        # One control for one concept. Copy is by far the most-used of the
+        # three, so it stays the button's direct action and the two file
+        # formats move into its menu \u2014 three permanent buttons became one.
+        self.export_txt_action = QAction("Export as TXT\u2026", self)
+        self.export_txt_action.triggered.connect(lambda: self._export("txt"))
+        self.export_srt_action = QAction("Export as SRT\u2026", self)
+        self.export_srt_action.triggered.connect(lambda: self._export("srt"))
+
+        self._export_menu = QMenu(self)
+        self._export_menu.addAction(self.export_txt_action)
+        self._export_menu.addAction(self.export_srt_action)
+
+        self.export_btn = QToolButton()
+        self.export_btn.setObjectName("splitAction")
+        self.export_btn.setText("Copy")
+        self.export_btn.setToolTip(
             "Copy the entire transcript to the clipboard as plain text\n"
-            "(speakers + text, no timestamps)."
+            "(speakers + text, no timestamps).\n"
+            "Use the arrow to export as a TXT or SRT file."
         )
-        self.copy_all_btn.clicked.connect(self._on_copy_all_clicked)
-        export_row.addWidget(self.copy_all_btn, 0, row_align)
-
-        self.export_txt_btn = QPushButton("Export TXT")
-        self.export_txt_btn.setEnabled(False)
-        self.export_txt_btn.clicked.connect(lambda: self._export("txt"))
-        export_row.addWidget(self.export_txt_btn, 0, row_align)
-
-        self.export_srt_btn = QPushButton("Export SRT")
-        self.export_srt_btn.setEnabled(False)
-        self.export_srt_btn.clicked.connect(lambda: self._export("srt"))
-        export_row.addWidget(self.export_srt_btn, 0, row_align)
+        self.export_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        self.export_btn.setMenu(self._export_menu)
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._on_copy_all_clicked)
+        export_row.addWidget(self.export_btn, 0, row_align)
 
         layout.addLayout(export_row)
 
@@ -270,7 +312,7 @@ class TranscriptViewer(QWidget):
         has_audio = self._audio_path is not None
         self.transcribe_btn.setEnabled(has_audio)
         self.play_all_btn.setEnabled(has_audio)
-        self.continue_from_cb.setEnabled(has_audio)
+        self.continue_action.setEnabled(has_audio)
         self._update_diarize_button()
         for widget in self._segment_widgets:
             widget.set_has_audio(has_audio)
@@ -285,9 +327,9 @@ class TranscriptViewer(QWidget):
         disabled rather than left looking operative.
         """
         self._diarization_available = bool(available)
-        self.diarize_cb.setEnabled(self._diarization_available)
+        self.diarize_action.setEnabled(self._diarization_available)
         if not self._diarization_available:
-            self.diarize_cb.setToolTip(
+            self.diarize_action.setToolTip(
                 "Add a HuggingFace token in Settings > Transcription to "
                 "enable speaker diarization."
             )
@@ -295,12 +337,12 @@ class TranscriptViewer(QWidget):
 
     def set_diarization_enabled(self, enabled):
         """Set the checkbox without reporting it back as a user change."""
-        self.diarize_cb.blockSignals(True)
-        self.diarize_cb.setChecked(bool(enabled))
-        self.diarize_cb.blockSignals(False)
+        self.diarize_action.blockSignals(True)
+        self.diarize_action.setChecked(bool(enabled))
+        self.diarize_action.blockSignals(False)
 
     def diarization_enabled(self):
-        return self.diarize_cb.isChecked() and self.diarize_cb.isEnabled()
+        return self.diarize_action.isChecked() and self.diarize_action.isEnabled()
 
     def set_summarize_available(self, available):
         """Whether an AI provider is configured at all.
@@ -310,25 +352,25 @@ class TranscriptViewer(QWidget):
         "Identify speakers" without a HuggingFace token.
         """
         self._summarize_available = bool(available)
-        self.summarize_cb.setEnabled(self._summarize_available)
+        self.summarize_action.setEnabled(self._summarize_available)
         if self._summarize_available:
-            self.summarize_cb.setToolTip(
+            self.summarize_action.setToolTip(
                 "Generate an AI summary and action items after transcription."
             )
         else:
-            self.summarize_cb.setToolTip(
+            self.summarize_action.setToolTip(
                 "Choose an AI provider in Settings > AI Assistant to enable "
                 "summaries."
             )
 
     def set_summarize_enabled(self, enabled):
         """Set the checkbox without reporting it back as a user change."""
-        self.summarize_cb.blockSignals(True)
-        self.summarize_cb.setChecked(bool(enabled))
-        self.summarize_cb.blockSignals(False)
+        self.summarize_action.blockSignals(True)
+        self.summarize_action.setChecked(bool(enabled))
+        self.summarize_action.blockSignals(False)
 
     def summarize_enabled(self):
-        return self.summarize_cb.isChecked() and self.summarize_cb.isEnabled()
+        return self.summarize_action.isChecked() and self.summarize_action.isEnabled()
 
     def _update_diarize_button(self):
         """On-demand diarization needs a transcript to label and audio to
@@ -497,11 +539,11 @@ class TranscriptViewer(QWidget):
         )
 
         # Enable export and playback buttons
-        self.copy_all_btn.setEnabled(True)
-        self.export_txt_btn.setEnabled(True)
-        self.export_srt_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)
+        self.export_txt_action.setEnabled(True)
+        self.export_srt_action.setEnabled(True)
         self.play_all_btn.setEnabled(has_audio)
-        self.continue_from_cb.setEnabled(has_audio)
+        self.continue_action.setEnabled(has_audio)
         self._update_diarize_button()
 
     def _build_placeholder(self, nothing_selected):
@@ -593,9 +635,9 @@ class TranscriptViewer(QWidget):
         self._segments_layout.addStretch()
 
         # Disable export, playback, and transcribe buttons
-        self.copy_all_btn.setEnabled(False)
-        self.export_txt_btn.setEnabled(False)
-        self.export_srt_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.export_txt_action.setEnabled(False)
+        self.export_srt_action.setEnabled(False)
         self.play_all_btn.setEnabled(False)
         self.transcribe_btn.setEnabled(False)
         self._update_diarize_button()
@@ -705,7 +747,7 @@ class TranscriptViewer(QWidget):
             return
 
         # "Continue from here" checkbox: start continuous play from this segment
-        if self.continue_from_cb.isChecked():
+        if self.continue_action.isChecked():
             self._clear_highlight()
             self._start_continuous_play(index)
             return
@@ -829,5 +871,5 @@ class TranscriptViewer(QWidget):
         text = self._transcript.to_plain_text(speaker_names=self._speaker_names)
         QApplication.clipboard().setText(text)
         count = len(self._transcript.segments)
-        pos = self.copy_all_btn.mapToGlobal(self.copy_all_btn.rect().bottomLeft())
-        QToolTip.showText(pos, f"Copied {count} segments to clipboard", self.copy_all_btn, self.copy_all_btn.rect(), 2000)
+        pos = self.export_btn.mapToGlobal(self.export_btn.rect().bottomLeft())
+        QToolTip.showText(pos, f"Copied {count} segments to clipboard", self.export_btn, self.export_btn.rect(), 2000)

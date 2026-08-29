@@ -88,6 +88,48 @@ QPushButton:disabled {
     border-color: rgba(233,233,237,0.07);
 }
 
+/* Split buttons (QToolButton with a menu) — the transcript column's
+   Transcribe / Play All / Copy controls. QToolButton does not inherit the
+   QPushButton rules above, so the base look is restated here; the extra
+   right padding is room for the menu arrow. */
+QToolButton#splitAction {
+    background-color: transparent;
+    color: #e9e9ed;
+    border: 1px solid rgba(233,233,237,0.16);
+    border-radius: 8px;
+    padding: 6px 12px;
+    padding-right: 22px;
+    font-weight: 500;
+    font-size: 12.5px;
+}
+
+QToolButton#splitAction:hover {
+    background-color: rgba(233,233,237,0.07);
+}
+
+QToolButton#splitAction:pressed {
+    background-color: rgba(233,233,237,0.14);
+}
+
+QToolButton#splitAction:focus {
+    border: 2px solid #9184d9;
+    outline: none;
+}
+
+QToolButton#splitAction:disabled {
+    color: rgba(233,233,237,0.45);
+    border-color: rgba(233,233,237,0.07);
+}
+
+/* Separator between the button body and its arrow, so the split reads as
+   two targets rather than one wide button. */
+QToolButton#splitAction::menu-button {
+    width: 16px;
+    border-left: 1px solid rgba(233,233,237,0.16);
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
 /* Primary actions (Accent outline) */
 QPushButton#primaryAction {
     border-color: #9184d9;

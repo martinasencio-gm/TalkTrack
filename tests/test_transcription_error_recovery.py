@@ -53,7 +53,7 @@ class TestTranscriptViewerShowEmptyState(unittest.TestCase):
         viewer.show_empty_state(True)
 
         self.assertEqual(len(viewer._segment_widgets), 0)
-        self.assertFalse(viewer.copy_all_btn.isEnabled())
+        self.assertFalse(viewer.export_btn.isEnabled())
         self.assertFalse(viewer.play_all_btn.isEnabled())
 
     def test_show_empty_state_false_is_a_no_op(self):

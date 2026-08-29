@@ -50,7 +50,7 @@ class TestDiarizationCheckbox(unittest.TestCase):
         self.viewer.set_diarization_available(False)
         self.viewer.set_diarization_enabled(True)
         self.assertFalse(self.viewer.diarization_enabled())
-        self.assertFalse(self.viewer.diarize_cb.isEnabled())
+        self.assertFalse(self.viewer.diarize_action.isEnabled())
 
     def test_programmatic_set_does_not_emit(self):
         # Syncing from config must not look like a user change, or loading
@@ -65,7 +65,7 @@ class TestDiarizationCheckbox(unittest.TestCase):
         seen = []
         self.viewer.set_diarization_available(True)
         self.viewer.diarize_toggled.connect(seen.append)
-        self.viewer.diarize_cb.setChecked(True)
+        self.viewer.diarize_action.setChecked(True)
         self.assertEqual(seen, [True])
 
 
@@ -252,24 +252,24 @@ class TestOneOnOneCallDiarizationDefault(unittest.TestCase):
     def test_one_attendee_unchecks_identify_speakers(self):
         session = self._session("one_on_one", attendees=["alice@example.com"])
         self.window._on_recording_selected(session)
-        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertFalse(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_two_attendees_keeps_the_default_checked(self):
         # Group call: SimpleDiarizer's binary You/Remote split can't tell
         # two remote attendees apart, so pyannote still earns its keep here.
         session = self._session("group_call", attendees=["alice@example.com", "bob@example.com"])
         self.window._on_recording_selected(session)
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_zero_attendees_keeps_the_default_checked(self):
         session = self._session("solo", attendees=[])
         self.window._on_recording_selected(session)
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_untagged_recording_keeps_the_default_checked(self):
         session = self._session("untagged", attendees=None)
         self.window._on_recording_selected(session)
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_switching_from_one_on_one_to_group_restores_the_default(self):
         # Regression guard: the auto-uncheck for a 1:1 call must not leak
@@ -278,10 +278,10 @@ class TestOneOnOneCallDiarizationDefault(unittest.TestCase):
         group = self._session("group_call2", attendees=["alice@example.com", "bob@example.com"])
 
         self.window._on_recording_selected(one_on_one)
-        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertFalse(self.window.transcript_viewer.diarize_action.isChecked())
 
         self.window._on_recording_selected(group)
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_manual_recheck_for_a_one_on_one_survives_settings_resync(self):
         # _sync_diarization_controls() also runs when Settings closes (it
@@ -290,11 +290,11 @@ class TestOneOnOneCallDiarizationDefault(unittest.TestCase):
         # manual choice the user already made for the recording on screen.
         session = self._session("one_on_one3", attendees=["alice@example.com"])
         self.window._on_recording_selected(session)
-        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertFalse(self.window.transcript_viewer.diarize_action.isChecked())
 
-        self.window.transcript_viewer.diarize_cb.setChecked(True)
+        self.window.transcript_viewer.diarize_action.setChecked(True)
         self.window._sync_diarization_controls()
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
     def test_tagging_an_already_open_recording_as_one_on_one_unchecks_it(self):
         # The other place attendees become known: tagging a recording
@@ -302,13 +302,13 @@ class TestOneOnOneCallDiarizationDefault(unittest.TestCase):
         # selecting a pre-tagged one.
         session = self._session("to_be_tagged", attendees=None)
         self.window._on_recording_selected(session)
-        self.assertTrue(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertTrue(self.window.transcript_viewer.diarize_action.isChecked())
 
         self.window._apply_calendar_event({
             "subject": "1:1 sync", "attendees": ["alice@example.com"],
             "start": "2026-01-01T10:00:00", "end": "2026-01-01T10:30:00",
         })
-        self.assertFalse(self.window.transcript_viewer.diarize_cb.isChecked())
+        self.assertFalse(self.window.transcript_viewer.diarize_action.isChecked())
 
 
 if __name__ == "__main__":

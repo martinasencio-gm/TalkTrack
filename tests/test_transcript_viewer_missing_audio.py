@@ -52,7 +52,7 @@ class TestTranscriptViewerMissingAudio(unittest.TestCase):
             self.assertTrue(widget.play_btn.isHidden())
 
         self.assertFalse(viewer.play_all_btn.isEnabled())
-        self.assertFalse(viewer.continue_from_cb.isEnabled())
+        self.assertFalse(viewer.continue_action.isEnabled())
 
     def test_main_window_selected_recording_with_deleted_audio_hides_play_buttons(self):
         from app.main_window import MainWindow
@@ -108,7 +108,7 @@ class TestTranscriptViewerMissingAudio(unittest.TestCase):
             self.assertFalse(widget.play_btn.isHidden())
 
         self.assertTrue(viewer.play_all_btn.isEnabled())
-        self.assertTrue(viewer.continue_from_cb.isEnabled())
+        self.assertTrue(viewer.continue_action.isEnabled())
 
     def test_set_audio_path_after_display_updates_existing_widgets(self):
         viewer = TranscriptViewer()
