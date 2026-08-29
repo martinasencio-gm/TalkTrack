@@ -101,6 +101,13 @@ class MainWindow(QMainWindow):
         self._ai_tick.timeout.connect(self._update_activity_visibility)
         self._pending_transcriptions = []
         self._closing = False
+        # Set around any programmatic splitter.set_collapsed() call whose
+        # effect must NOT be written to config — currently only the
+        # double-click force-open below. CollapsibleSplitter fires the same
+        # collapse_changed signal for a real click and a programmatic call;
+        # this is how the persistence handlers (_on_transcript_collapse_changed
+        # / _on_inspector_collapse_changed) tell the two apart.
+        self._suppress_collapse_persist = False
         self._silent_capture_warned = False
         self._bleed_warned = False
         self._mic_muted = False
@@ -2283,7 +2290,21 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+    def _expand_panels_for_recording_view(self):
+        """Force both the Transcript and Inspector columns open for this
+        viewing session, without changing the user's saved collapse
+        preference — see _do_on_recording_selected and
+        docs/superpowers/specs/2026-08-29-collapsible-panels-design.md."""
+        self._suppress_collapse_persist = True
+        try:
+            self.splitter2.set_collapsed(False)
+            self.splitter1.set_collapsed(False)
+        finally:
+            self._suppress_collapse_persist = False
+
     def _do_on_recording_selected(self, metadata):
+        self._expand_panels_for_recording_view()
+
         # Clear any stale calendar-suggestion banner from the previously
         # displayed recording — see _on_recording_finished for why.
         self.calendar_banner.hide_and_clear()
