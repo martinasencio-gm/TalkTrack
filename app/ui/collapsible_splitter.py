@@ -66,13 +66,27 @@ class CollapsibleSplitter(QSplitter):
         if len(sizes) < 2:
             return
         total = sum(sizes)
-        if target:
-            self._expanded_size = sizes[1]
-            self.setSizes([total, 0])
-        else:
-            restore = self._expanded_size or max(total // 3, 1)
-            restore = min(restore, total)
-            self.setSizes([total - restore, restore])
+        # The owning window calls setCollapsible(1, False) so a stray drag
+        # can never leave pane 1 at size 0 without _collapsed knowing about
+        # it. But once pane 1 holds a widget with a non-trivial
+        # minimumSizeHint(), that same False also blocks OUR OWN
+        # programmatic setSizes([..., 0]) below - Qt clamps to the minimum
+        # size hint for a non-collapsible pane regardless of who calls
+        # setSizes. Flip collapsible on for just this resize, then put back
+        # whatever the owner configured, so drag-to-zero stays blocked while
+        # the button can still reach exactly 0.
+        was_collapsible = self.isCollapsible(1)
+        self.setCollapsible(1, True)
+        try:
+            if target:
+                self._expanded_size = sizes[1]
+                self.setSizes([total, 0])
+            else:
+                restore = self._expanded_size or max(total // 3, 1)
+                restore = min(restore, total)
+                self.setSizes([total - restore, restore])
+        finally:
+            self.setCollapsible(1, was_collapsible)
         self._collapsed = target
         self.collapse_changed.emit(self._collapsed)
 

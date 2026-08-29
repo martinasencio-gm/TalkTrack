@@ -431,16 +431,14 @@ class MainWindow(QMainWindow):
         self.splitter2.addWidget(self.transcript_panel)
 
         self.splitter2.setCollapsible(0, False)
-        # NOTE: the design spec calls for setCollapsible(1, False) here (native
-        # drag-to-zero disabled on both panes, arrow button the only collapse
-        # path). In practice Qt's collapsible=False also blocks *programmatic*
-        # setSizes([..., 0]) once the pane's minimumSizeHint is non-trivial
-        # (verified empirically: a bare QWidget collapses fine, a widget with
-        # real layout content does not) -- so with it False, toggle_collapse()
-        # can never actually zero transcript_panel. Left True so the button
-        # works; this does mean a full drag-to-edge also collapses this pane
-        # natively. See task-4-report.md for detail/follow-up.
-        self.splitter2.setCollapsible(1, True)
+        # Native drag-to-zero disabled on both panes -- the arrow button
+        # (CollapsibleSplitter.toggle_collapse) is the only collapse path, so
+        # _collapsed always reflects reality and a stray drag can't desync it.
+        # toggle_collapse() flips this to True internally for the instant of
+        # its own setSizes([..., 0]) call, since Qt's collapsible=False also
+        # blocks *programmatic* collapse-to-zero once the pane's
+        # minimumSizeHint is non-trivial -- see collapsible_splitter.py.
+        self.splitter2.setCollapsible(1, False)
         self.splitter2.setStretchFactor(0, 0)
         self.splitter2.setStretchFactor(1, 1)
 
@@ -461,9 +459,8 @@ class MainWindow(QMainWindow):
         self.splitter1.addWidget(self.splitter2)
         self.splitter1.addWidget(self.inspector)
         self.splitter1.setCollapsible(0, False)
-        # See the matching note on splitter2 above -- collapsible must stay
-        # True here too for toggle_collapse() to actually zero the inspector.
-        self.splitter1.setCollapsible(1, True)
+        # See the matching note on splitter2 above.
+        self.splitter1.setCollapsible(1, False)
         self.splitter1.setStretchFactor(0, 1)
         self.splitter1.setStretchFactor(1, 0)
 
