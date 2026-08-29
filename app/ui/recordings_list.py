@@ -477,22 +477,17 @@ class RecordingsList(QWidget):
         self.search_bar.cleared.connect(self._on_search_cleared)
         layout.addWidget(self.search_bar)
 
-        import_row = QHBoxLayout()
+        # Import moved to the Tools menu (File > Import Recording... before
+        # that) — this row used to also hold that button.
+        batch_row = QHBoxLayout()
         self.batch_btn = QPushButton("Run Batch")
         self.batch_btn.setObjectName("batchListBtn")
         self.batch_btn.setToolTip("Open the batch transcription launcher for queued recordings")
         self.batch_btn.clicked.connect(self.run_batch_requested.emit)
         self.batch_btn.setVisible(False)
-        import_row.addWidget(self.batch_btn)
-        import_row.addStretch()
-        self.import_btn = QPushButton("Import...")
-        self.import_btn.setToolTip(
-            "Import an existing audio file (wav/mp3/m4a) as a new recording, "
-            "running it through transcription and diarization."
-        )
-        self.import_btn.clicked.connect(self._on_import_clicked)
-        import_row.addWidget(self.import_btn)
-        layout.addLayout(import_row)
+        batch_row.addWidget(self.batch_btn)
+        batch_row.addStretch()
+        layout.addLayout(batch_row)
 
         # Filter chips: All / Untranscribed / Tagged — single-select, counts
         # kept live by _update_filter_chip_counts() on every refresh().

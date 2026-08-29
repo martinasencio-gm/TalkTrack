@@ -208,11 +208,6 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&File")
 
-        import_action = QAction("&Import Recording...", self)
-        import_action.setShortcut(QKeySequence("Ctrl+O"))
-        import_action.triggered.connect(lambda: self.recordings_list._on_import_clicked())
-        file_menu.addAction(import_action)
-
         export_action = QAction("&Export Transcript...", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(lambda: self.transcript_viewer._export("txt"))
@@ -291,6 +286,13 @@ class MainWindow(QMainWindow):
 
         # Tools menu
         tools_menu = menubar.addMenu("&Tools")
+
+        import_action = QAction("&Import Recording...", self)
+        import_action.setShortcut(QKeySequence("Ctrl+O"))
+        import_action.triggered.connect(lambda: self.recordings_list._on_import_clicked())
+        tools_menu.addAction(import_action)
+
+        tools_menu.addSeparator()
 
         settings_action = QAction("&Settings...", self)
         settings_action.setShortcut(QKeySequence("Ctrl+,"))
