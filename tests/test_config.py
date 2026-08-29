@@ -228,5 +228,34 @@ class TestLocalModelNameDefault(ConfigTestCase):
         self.assertEqual(DEFAULT_CONFIG["ai"]["local_model_name"], "")
 
 
+class TestCollapsiblePanelDefaults(ConfigTestCase):
+    def test_new_ui_keys_have_expected_defaults(self):
+        from app.utils.config import Config
+        config = Config()
+        self.assertEqual(config.get("ui", "transcript_collapsed"), False)
+        self.assertEqual(config.get("ui", "inspector_collapsed"), False)
+        self.assertEqual(config.get("ui", "notes_section_expanded"), True)
+        self.assertEqual(config.get("ui", "speakers_section_expanded"), True)
+        self.assertEqual(config.get("ui", "summary_section_expanded"), True)
+        self.assertEqual(
+            config.get("ui", "panel_fractions"),
+            {"library": None, "transcript": None, "inspector": None},
+        )
+
+    def test_right_panel_collapsed_key_is_gone(self):
+        from app.utils.config import DEFAULT_CONFIG
+        self.assertNotIn("right_panel_collapsed", DEFAULT_CONFIG["ui"])
+
+    def test_panel_fraction_round_trips_through_save_and_load(self):
+        from app.utils.config import Config
+        config = Config()
+        config.set("ui", "panel_fractions", {"library": 0.2, "transcript": 0.6, "inspector": 0.2})
+        reloaded = Config()
+        self.assertEqual(
+            reloaded.get("ui", "panel_fractions"),
+            {"library": 0.2, "transcript": 0.6, "inspector": 0.2},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,3 +42,23 @@ def apply_close_to_tray_migration(saved, merged):
     if general.get("minimize_behavior") == "tray" or general.get("minimize_to_tray") is True:
         merged["general"]["close_to_tray"] = True
     return merged
+
+
+def apply_inspector_collapsed_migration(saved, merged):
+    """Carry the legacy ui.right_panel_collapsed value onto ui.inspector_collapsed.
+
+    right_panel_collapsed was dead scaffolding from an older two-pane layout
+    spec (docs/superpowers/specs/2026-08-14-phase1-folder-nav-collapsible-panel-design.md),
+    never wired up. inspector_collapsed is the live key for the current
+    3-column layout's Inspector column — this migration only matters for a
+    settings.json that predates this feature but happened to carry the old
+    unused key.
+    """
+    if not saved:
+        return merged                      # brand-new install: defaults are correct
+    ui = saved.get("ui") or {}
+    if "inspector_collapsed" in ui:
+        return merged                      # already migrated; respect their choice
+    if "right_panel_collapsed" in ui:
+        merged["ui"]["inspector_collapsed"] = ui["right_panel_collapsed"]
+    return merged

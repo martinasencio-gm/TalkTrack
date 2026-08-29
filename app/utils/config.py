@@ -8,6 +8,7 @@ from app.utils.app_paths import APP_DATA_DIR
 from app.utils.atomic_io import atomic_write_json
 from app.utils.config_migration import (
     apply_close_to_tray_migration,
+    apply_inspector_collapsed_migration,
     apply_meeting_detection_migration,
 )
 
@@ -99,7 +100,19 @@ DEFAULT_CONFIG = {
     "ui": {
         "theme": "dark",
         "speakers_collapsed": False,
-        "right_panel_collapsed": False,
+        "transcript_collapsed": False,
+        "inspector_collapsed": False,
+        "notes_section_expanded": True,
+        "speakers_section_expanded": True,
+        "summary_section_expanded": True,
+        # Fraction of the active screen's available width each column
+        # occupied the last time the user dragged its splitter handle.
+        # None = use the fixed pixel defaults in MainWindow._setup_ui.
+        "panel_fractions": {
+            "library": None,
+            "transcript": None,
+            "inspector": None,
+        },
         "audio_sources_collapsed": False,
         "recordings_collapsed": False,
         "activity_widget_position": None,
@@ -147,6 +160,7 @@ class Config:
             self._data = copy.deepcopy(DEFAULT_CONFIG)
         self._data = apply_meeting_detection_migration(saved, self._data)
         self._data = apply_close_to_tray_migration(saved, self._data)
+        self._data = apply_inspector_collapsed_migration(saved, self._data)
         try:
             os.makedirs(self._data["output"]["directory"], exist_ok=True)
         except OSError:
