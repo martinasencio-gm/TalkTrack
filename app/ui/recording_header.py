@@ -3,14 +3,32 @@ import json
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QCompleter
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton,
+    QCompleter, QToolButton, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QIcon
+
 
 from app.utils.icons import colored_pixmap
 
 _CALENDAR_ICON_COLOR = "#9397ab"
 _CALENDAR_ICON_SIZE = 12
+_OVERFLOW_ICON_COLOR = "#9397ab"
+
+
+class _DoubleClickableLabel(QLabel):
+    """QLabel that reports double-clicks.
+
+    The recording name is renamed by double-clicking it, which is what
+    replaced the permanent Rename button beside it.
+    """
+
+    double_clicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):
+        self.double_clicked.emit()
+        super().mouseDoubleClickEvent(event)
 
 
 def _display_name_from_metadata(metadata):
@@ -103,23 +121,58 @@ class RecordingHeader(QWidget):
         # Top row: name + rename button
         top_row = QHBoxLayout()
 
-        self.name_label = QLabel("")
+        # Double-click the name to rename it, the way a file name is renamed
+        # everywhere else — this is what replaced the permanent Rename button.
+        self.name_label = _DoubleClickableLabel("")
         self.name_label.setObjectName("recordingName")
+        self.name_label.setToolTip("Double-click to rename")
+        self.name_label.double_clicked.connect(self._start_rename)
         top_row.addWidget(self.name_label)
 
         self.name_edit = QLineEdit()
         self.name_edit.setObjectName("recordingNameEdit")
         self.name_edit.hide()
-        self.name_edit.returnPressed.connect(self._finish_rename)
+        # editingFinished rather than returnPressed: it covers Enter *and*
+        # clicking away, so losing the button costs no way to commit.
+        # _finish_rename is re-entrancy guarded because Qt can emit this
+        # twice (Return, then the focus-out that follows it).
+        self.name_edit.editingFinished.connect(self._finish_rename)
         top_row.addWidget(self.name_edit)
 
         top_row.addStretch()
 
-        self.rename_btn = QPushButton("Rename")
-        self.rename_btn.setObjectName("renameButton")
-        self.rename_btn.setFixedWidth(70)
-        self.rename_btn.clicked.connect(self._start_rename)
-        top_row.addWidget(self.rename_btn)
+        # One overflow for the three actions that used to be three permanent
+        # buttons (Rename / + Tag / Change meeting). "Change meeting" is only
+        # meaningful once the recording is tagged to a calendar event, so it
+        # is enabled per-recording in set_recording().
+        self.rename_action = QAction("Rename", self)
+        self.rename_action.triggered.connect(self._start_rename)
+        self.add_tag_action = QAction("Add tag…", self)
+        self.add_tag_action.triggered.connect(self._on_add_tag_clicked)
+        self.change_calendar_action = QAction("Change meeting…", self)
+        self.change_calendar_action.triggered.connect(
+            self.change_calendar_requested.emit
+        )
+        self.change_calendar_action.setVisible(False)
+
+        self._overflow_menu = QMenu(self)
+        self._overflow_menu.addAction(self.rename_action)
+        self._overflow_menu.addAction(self.add_tag_action)
+        self._overflow_menu.addAction(self.change_calendar_action)
+
+        self.overflow_btn = QToolButton()
+        self.overflow_btn.setObjectName("headerOverflow")
+        # The vendored icon, not a "⋯" character — Inter has no glyph for
+        # U+22EF and it renders as tofu.
+        self.overflow_btn.setIcon(
+            QIcon(colored_pixmap("dots-three", _OVERFLOW_ICON_COLOR, 16))
+        )
+        self.overflow_btn.setToolTip("Rename, tag, or change the meeting")
+        self.overflow_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self.overflow_btn.setMenu(self._overflow_menu)
+        top_row.addWidget(self.overflow_btn)
 
         layout.addLayout(top_row)
 
@@ -139,12 +192,8 @@ class RecordingHeader(QWidget):
         self.tags_layout.setSpacing(6)
         self.tags_row.addWidget(self.tags_container)
 
-        self.add_tag_btn = QPushButton("+ Tag")
-        self.add_tag_btn.setObjectName("addTagButton")
-        self.add_tag_btn.setToolTip("Add or manage tags for this recording")
-        self.add_tag_btn.clicked.connect(self._on_add_tag_clicked)
-        self.tags_row.addWidget(self.add_tag_btn)
-
+        # "+ Tag" is now the overflow's "Add tag…" — the tag chips themselves
+        # stay on this row, since they are content rather than chrome.
         self.tags_row.addStretch()
         layout.addLayout(self.tags_row)
 
@@ -161,12 +210,8 @@ class RecordingHeader(QWidget):
         self.calendar_label.hide()
         calendar_row.addWidget(self.calendar_label)
 
-        self.change_calendar_btn = QPushButton("Change")
-        self.change_calendar_btn.setObjectName("changeCalendarButton")
-        self.change_calendar_btn.clicked.connect(self.change_calendar_requested.emit)
-        self.change_calendar_btn.hide()
-        calendar_row.addWidget(self.change_calendar_btn)
-
+        # The "Change" button moved into the header overflow as
+        # "Change meeting…"; the calendar line itself stays, it is content.
         calendar_row.addStretch()
         layout.addLayout(calendar_row)
 
@@ -214,12 +259,12 @@ class RecordingHeader(QWidget):
             self.calendar_label.setText(_format_calendar_line(calendar_event))
             self.calendar_icon.show()
             self.calendar_label.show()
-            self.change_calendar_btn.show()
+            self.change_calendar_action.setVisible(True)
         else:
             self.calendar_label.clear()
             self.calendar_icon.hide()
             self.calendar_label.hide()
-            self.change_calendar_btn.hide()
+            self.change_calendar_action.setVisible(False)
 
     def _rebuild_tags(self):
         while self.tags_layout.count():
@@ -286,10 +331,11 @@ class RecordingHeader(QWidget):
         self.name_edit.show()
         self.name_edit.setFocus()
         self.name_edit.selectAll()
-        self.rename_btn.setText("Save")
         self.rename_started.emit()
 
     def _finish_rename(self):
+        if not self._editing:
+            return
         self._editing = False
         new_name = self.name_edit.text().strip()
         if new_name:
@@ -299,4 +345,3 @@ class RecordingHeader(QWidget):
         self._suggested_subjects = []
         self.name_edit.hide()
         self.name_label.show()
-        self.rename_btn.setText("Rename")
