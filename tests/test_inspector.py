@@ -103,5 +103,33 @@ class TestInspectorAiConfiguredState(unittest.TestCase):
         self.assertEqual(received, [True])
 
 
+class TestInspectorSectionsStartCollapsed(unittest.TestCase):
+    """add_*_panel used to force set_expanded(True) unconditionally — now
+    MainWindow decides each section's initial state from config
+    (ui.notes_section_expanded / speakers_section_expanded /
+    summary_section_expanded), see app/main_window.py's
+    _restore_panel_collapse_state.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _get_app()
+
+    def test_add_notes_panel_does_not_force_expanded(self):
+        inspector = InspectorWidget()
+        inspector.add_notes_panel(QWidget())
+        self.assertFalse(inspector.notes_section.is_expanded())
+
+    def test_add_speakers_panel_does_not_force_expanded(self):
+        inspector = InspectorWidget()
+        inspector.add_speakers_panel(QWidget())
+        self.assertFalse(inspector.speakers_section.is_expanded())
+
+    def test_add_summary_panel_does_not_force_expanded(self):
+        inspector = InspectorWidget()
+        inspector.add_summary_panel(QWidget())
+        self.assertFalse(inspector.summary_section.is_expanded())
+
+
 if __name__ == "__main__":
     unittest.main()

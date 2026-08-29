@@ -99,11 +99,9 @@ class InspectorWidget(QWidget):
 
     def add_notes_panel(self, panel):
         self.notes_section.content_layout().addWidget(panel)
-        self.notes_section.set_expanded(True)
 
     def add_speakers_panel(self, panel):
         self.speakers_section.content_layout().addWidget(panel)
-        self.speakers_section.set_expanded(True)
 
     def add_summary_panel(self, summary_panel):
         self._summary_panel = summary_panel
@@ -142,8 +140,6 @@ class InspectorWidget(QWidget):
 
         self.summary_section.content_layout().addWidget(self.ai_off_widget)
         self.ai_off_widget.setVisible(False)
-
-        self.summary_section.set_expanded(True)
 
     def set_ai_configured(self, configured):
         """Toggle the summary section between its real panel and the
