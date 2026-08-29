@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
 
         self._setup_menu()
         self._setup_ui()
+        self._restore_panel_collapse_state()
         self._setup_statusbar()
         self._connect_signals()
 
@@ -504,8 +505,27 @@ class MainWindow(QMainWindow):
         self.waveform = WaveformDisplay(seconds=5, sample_rate=16000)
         self.meters_panel = MetersPanel()
 
+    def _on_transcript_collapse_changed(self, collapsed):
+        if getattr(self, "_suppress_collapse_persist", False):
+            return
+        self.config.set("ui", "transcript_collapsed", collapsed)
 
+    def _on_inspector_collapse_changed(self, collapsed):
+        if getattr(self, "_suppress_collapse_persist", False):
+            return
+        self.config.set("ui", "inspector_collapsed", collapsed)
 
+    def _restore_panel_collapse_state(self):
+        """Apply the saved collapse/expand state to both outer columns and
+        all three Inspector sections. Called once from __init__, right
+        after _setup_ui() builds the splitters and sections and before
+        _connect_signals() wires the persistence handlers below — so this
+        initial restore never itself gets written back to config."""
+        self.splitter2.set_collapsed(self.config.get("ui", "transcript_collapsed"))
+        self.splitter1.set_collapsed(self.config.get("ui", "inspector_collapsed"))
+        self.inspector.notes_section.set_expanded(self.config.get("ui", "notes_section_expanded"))
+        self.inspector.speakers_section.set_expanded(self.config.get("ui", "speakers_section_expanded"))
+        self.inspector.summary_section.set_expanded(self.config.get("ui", "summary_section_expanded"))
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
@@ -547,6 +567,18 @@ class MainWindow(QMainWindow):
         self.statusbar.addPermanentWidget(self.batch_indicator)
 
     def _connect_signals(self):
+        self.splitter2.collapse_changed.connect(self._on_transcript_collapse_changed)
+        self.splitter1.collapse_changed.connect(self._on_inspector_collapse_changed)
+        self.inspector.notes_section.toggled.connect(
+            lambda expanded: self.config.set("ui", "notes_section_expanded", expanded)
+        )
+        self.inspector.speakers_section.toggled.connect(
+            lambda expanded: self.config.set("ui", "speakers_section_expanded", expanded)
+        )
+        self.inspector.summary_section.toggled.connect(
+            lambda expanded: self.config.set("ui", "summary_section_expanded", expanded)
+        )
+
         self.inspector.connect_provider_requested.connect(
             lambda: self._open_settings(initial_tab="AI Assistant")
         )
