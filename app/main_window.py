@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QSplitter, QFrame, QMenu, QMessageBox, QApplication, QInputDialog, QStatusBar
+    QLabel, QFrame, QMenu, QMessageBox, QApplication, QInputDialog, QStatusBar
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QThread
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
@@ -391,10 +391,18 @@ class MainWindow(QMainWindow):
         self.notification_region = NotificationRegion()
         main_layout.addWidget(self.notification_region)
 
-        # Three-column splitter
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(1)
-        self.splitter.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
+        # Three-column layout: two nested CollapsibleSplitters, each
+        # collapsing its own pane 1 -- see
+        # docs/superpowers/specs/2026-08-29-collapsible-panels-design.md.
+        # splitter2 = Library | Transcript (collapses Transcript)
+        # splitter1 = splitter2 | Inspector (collapses Inspector)
+        self.splitter2 = CollapsibleSplitter(Qt.Orientation.Horizontal)
+        self.splitter2.setHandleWidth(1)
+        self.splitter2.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
+
+        self.splitter1 = CollapsibleSplitter(Qt.Orientation.Horizontal)
+        self.splitter1.setHandleWidth(1)
+        self.splitter1.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
 
         # Column A: Library
         self.library_panel = QWidget()
@@ -403,7 +411,7 @@ class MainWindow(QMainWindow):
         recordings_dir = self.config.get("output", "directory")
         self.recordings_list = RecordingsList(recordings_dir)
         library_layout.addWidget(self.recordings_list)
-        self.splitter.addWidget(self.library_panel)
+        self.splitter2.addWidget(self.library_panel)
 
         # Column B: Transcript
         self.transcript_panel = QWidget()
@@ -420,7 +428,21 @@ class MainWindow(QMainWindow):
 
         self.transcript_viewer = TranscriptViewer(config=self.config, speaker_panel=self.speaker_panel)
         transcript_layout.addWidget(self.transcript_viewer)
-        self.splitter.addWidget(self.transcript_panel)
+        self.splitter2.addWidget(self.transcript_panel)
+
+        self.splitter2.setCollapsible(0, False)
+        # NOTE: the design spec calls for setCollapsible(1, False) here (native
+        # drag-to-zero disabled on both panes, arrow button the only collapse
+        # path). In practice Qt's collapsible=False also blocks *programmatic*
+        # setSizes([..., 0]) once the pane's minimumSizeHint is non-trivial
+        # (verified empirically: a bare QWidget collapses fine, a widget with
+        # real layout content does not) -- so with it False, toggle_collapse()
+        # can never actually zero transcript_panel. Left True so the button
+        # works; this does mean a full drag-to-edge also collapses this pane
+        # natively. See task-4-report.md for detail/follow-up.
+        self.splitter2.setCollapsible(1, True)
+        self.splitter2.setStretchFactor(0, 0)
+        self.splitter2.setStretchFactor(1, 1)
 
         # Column C: Inspector
         self.inspector = InspectorWidget()
@@ -435,19 +457,23 @@ class MainWindow(QMainWindow):
         
         self.chat_panel = ChatPanel()
         self.inspector.add_chat_panel(self.chat_panel)
-        
-        self.splitter.addWidget(self.inspector)
 
-        # Set default sizes — library and inspector fixed-ish, transcript
-        # absorbs resize slack (per the capture-bar design spec).
-        self.splitter.setSizes([262, 776, 322])
-        self.splitter.setCollapsible(0, False)
-        self.splitter.setCollapsible(1, False)
-        self.splitter.setCollapsible(2, True)
-        self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setStretchFactor(2, 0)
-        main_layout.addWidget(self.splitter, 1)
+        self.splitter1.addWidget(self.splitter2)
+        self.splitter1.addWidget(self.inspector)
+        self.splitter1.setCollapsible(0, False)
+        # See the matching note on splitter2 above -- collapsible must stay
+        # True here too for toggle_collapse() to actually zero the inspector.
+        self.splitter1.setCollapsible(1, True)
+        self.splitter1.setStretchFactor(0, 1)
+        self.splitter1.setStretchFactor(1, 0)
+
+        # Default sizes -- library and inspector fixed-ish, transcript
+        # absorbs resize slack (per the capture-bar design spec). Overridden
+        # by _restore_panel_fractions() / _restore_panel_collapse_state() in
+        # __init__ once config is available.
+        self.splitter2.setSizes([262, 776])
+        self.splitter1.setSizes([1038, 322])
+        main_layout.addWidget(self.splitter1, 1)
 
         # Background monitors
         self._mic_level_tracker = MicLevelTracker()
@@ -481,8 +507,6 @@ class MainWindow(QMainWindow):
         self.waveform = WaveformDisplay(seconds=5, sample_rate=16000)
         self.meters_panel = MetersPanel()
 
-    def _on_right_panel_collapse_changed(self, collapsed):
-        self.config.set("ui", "right_panel_collapsed", collapsed)
 
 
 
