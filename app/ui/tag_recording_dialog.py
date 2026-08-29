@@ -16,6 +16,7 @@ from PyQt6.QtGui import QCursor, QColor
 
 from app.utils import tag_manager
 from app.utils.icons import colored_pixmap
+from app.ui import tokens
 
 
 class _FlowLayout(QLayout):
@@ -105,16 +106,16 @@ class _AssignedChip(QFrame):
         layout.setSpacing(6)
 
         label = QLabel(name)
-        label.setStyleSheet("color: #e9e9ed; font-size: 12px; font-weight: 500;")
+        label.setStyleSheet(f"color: {tokens.TEXT}; font-size: {tokens.TYPE_MD}; font-weight: 500;")
         layout.addWidget(label)
 
         remove_btn = QPushButton("×")
         remove_btn.setFixedSize(16, 16)
         remove_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         remove_btn.setStyleSheet(
-            "QPushButton { color: #9397ab; background: transparent; border: none; "
-            "font-size: 13px; font-weight: bold; padding: 0; } "
-            "QPushButton:hover { color: #f38ba8; }"
+            f"QPushButton {{ color: {tokens.TEXT_MUTED}; background: transparent; border: none; "
+            f"font-size: {tokens.TYPE_BASE}; font-weight: bold; padding: 0; }} "
+            f"QPushButton:hover {{ color: {tokens.RED}; }}"
         )
         remove_btn.clicked.connect(lambda: self.remove_clicked.emit(name))
         layout.addWidget(remove_btn)
@@ -144,7 +145,7 @@ class _AllTagPill(QFrame):
         layout.setSpacing(6)
 
         self._check_label = QLabel("✓")
-        self._check_label.setStyleSheet("color: #9184d9; font-size: 11px; font-weight: bold;")
+        self._check_label.setStyleSheet(f"color: {tokens.ACCENT}; font-size: {tokens.TYPE_SM}; font-weight: bold;")
         self._check_label.setVisible(selected)
         layout.addWidget(self._check_label)
 
@@ -154,7 +155,7 @@ class _AllTagPill(QFrame):
         layout.addSpacing(10)
 
         self._count_label = QLabel(str(count))
-        self._count_label.setStyleSheet("color: #75798c; font-size: 11px;")
+        self._count_label.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM}; font-size: {tokens.TYPE_SM};")
         layout.addWidget(self._count_label)
 
         self._apply_style()
@@ -174,16 +175,16 @@ class _AllTagPill(QFrame):
         if self._selected:
             self.setStyleSheet(
                 "QFrame#allTagPill { background-color: rgba(145,132,217,0.18); "
-                "border: 1px solid #9184d9; border-radius: 8px; }"
+                f"border: 1px solid {tokens.ACCENT}; border-radius: 8px; }}"
             )
-            self._name_label.setStyleSheet("color: #9184d9; font-size: 12.5px; font-weight: 600;")
+            self._name_label.setStyleSheet(f"color: {tokens.ACCENT}; font-size: 12.5px; font-weight: 600;")
         else:
             self.setStyleSheet(
                 "QFrame#allTagPill { background-color: transparent; "
                 "border: 1px solid rgba(233,233,237,0.16); border-radius: 8px; }"
                 "QFrame#allTagPill:hover { background-color: rgba(233,233,237,0.07); }"
             )
-            self._name_label.setStyleSheet("color: #e9e9ed; font-size: 12.5px; font-weight: 500;")
+            self._name_label.setStyleSheet(f"color: {tokens.TEXT}; font-size: 12.5px; font-weight: 500;")
 
 
 class _CreateTagPill(QFrame):
@@ -203,16 +204,16 @@ class _CreateTagPill(QFrame):
         layout.setSpacing(6)
 
         plus_label = QLabel("+")
-        plus_label.setStyleSheet("color: #cba6f7; font-size: 13px; font-weight: bold;")
+        plus_label.setStyleSheet(f"color: {tokens.MAUVE}; font-size: {tokens.TYPE_BASE}; font-weight: bold;")
         layout.addWidget(plus_label)
 
         self._name_label = QLabel(f'Create "{name}"')
-        self._name_label.setStyleSheet("color: #cba6f7; font-size: 12.5px; font-weight: 600;")
+        self._name_label.setStyleSheet(f"color: {tokens.MAUVE}; font-size: 12.5px; font-weight: 600;")
         layout.addWidget(self._name_label)
 
         self.setStyleSheet(
             "QFrame#createTagPill { background-color: rgba(203, 166, 247, 0.12); "
-            "border: 1px dashed #cba6f7; border-radius: 8px; }"
+            f"border: 1px dashed {tokens.MAUVE}; border-radius: 8px; }}"
             "QFrame#createTagPill:hover { background-color: rgba(203, 166, 247, 0.22); }"
         )
 
@@ -261,7 +262,7 @@ class TagRecordingDialog(QDialog):
         center_on_active_screen(self, self.parent())
 
     def _setup_ui(self):
-        self.setStyleSheet("QDialog { background-color: #161826; }")
+        self.setStyleSheet(f"QDialog {{ background-color: {tokens.SURFACE_6}; }}")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 18, 20, 16)
@@ -270,18 +271,18 @@ class TagRecordingDialog(QDialog):
         header = QHBoxLayout()
         header.setSpacing(8)
         icon = QLabel()
-        icon.setPixmap(colored_pixmap("bookmark-simple", "#9184d9", 18))
+        icon.setPixmap(colored_pixmap("bookmark-simple", tokens.ACCENT, 18))
         header.addWidget(icon)
         title = QLabel("Tag this recording")
-        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #e9e9ed;")
+        title.setStyleSheet(f"font-size: {tokens.TYPE_LG}; font-weight: 600; color: {tokens.TEXT};")
         header.addWidget(title)
         header.addStretch(1)
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(22, 22)
         close_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         close_btn.setStyleSheet(
-            "QPushButton { color: #75798c; background: transparent; border: none; font-size: 13px; } "
-            "QPushButton:hover { color: #e9e9ed; }"
+            f"QPushButton {{ color: {tokens.TEXT_MUTED_DIM}; background: transparent; border: none; font-size: {tokens.TYPE_BASE}; }} "
+            f"QPushButton:hover {{ color: {tokens.TEXT}; }}"
         )
         close_btn.clicked.connect(self.accept)
         header.addWidget(close_btn)
@@ -290,7 +291,7 @@ class TagRecordingDialog(QDialog):
         name = self.metadata.get("name", "")
         duration = _format_duration(self.metadata.get("duration", 0))
         subtitle = QLabel(f"{name} · {duration}" if name else duration)
-        subtitle.setStyleSheet("color: #75798c; font-size: 12.5px;")
+        subtitle.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM}; font-size: 12.5px;")
         outer.addWidget(subtitle)
 
         input_row = QHBoxLayout()
@@ -327,11 +328,11 @@ class TagRecordingDialog(QDialog):
         sug_layout.setContentsMargins(10, 8, 10, 8)
         sug_layout.setSpacing(8)
         sug_icon = QLabel()
-        sug_icon.setPixmap(colored_pixmap("sparkle", "#9184d9", 14))
+        sug_icon.setPixmap(colored_pixmap("sparkle", tokens.ACCENT, 14))
         sug_layout.addWidget(sug_icon, 0, Qt.AlignmentFlag.AlignTop)
         self._suggestion_label = QLabel()
         self._suggestion_label.setWordWrap(True)
-        self._suggestion_label.setStyleSheet("color: #cfd3e5; font-size: 12px;")
+        self._suggestion_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.TYPE_MD};")
         sug_layout.addWidget(self._suggestion_label, 1)
         self._suggestion_btn = QPushButton("Use both")
         self._suggestion_btn.setObjectName("primaryAction")
@@ -346,7 +347,7 @@ class TagRecordingDialog(QDialog):
         all_header.addWidget(all_label)
         all_header.addStretch(1)
         hint = QLabel("most used first")
-        hint.setStyleSheet("color: #75798c; font-size: 11px;")
+        hint.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM}; font-size: {tokens.TYPE_SM};")
         all_header.addWidget(hint)
         outer.addLayout(all_header)
 
@@ -361,7 +362,7 @@ class TagRecordingDialog(QDialog):
 
         footer = QHBoxLayout()
         save_hint = QLabel("Saved as you tap · Esc to close")
-        save_hint.setStyleSheet("color: #75798c; font-size: 11px;")
+        save_hint.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM}; font-size: {tokens.TYPE_SM};")
         footer.addWidget(save_hint)
         footer.addStretch(1)
         done_btn = QPushButton("Done")

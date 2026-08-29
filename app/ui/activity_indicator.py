@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from app.recording.recorder import RecordingState
 from app.utils.icons import colored_pixmap
+from app.ui import tokens
 
 
 def resolve_activity_state(recording_state, transcription_busy, ai_busy=False):
@@ -60,16 +61,16 @@ def format_activity_label(state, elapsed_seconds=None, progress_percent=None,
 def resolve_dot_color(state):
     """Hex color for the state dot: red/amber/accent."""
     return {
-        "recording": "#f38ba8",
-        "paused": "#f9e2af",
-        "transcribing": "#9184d9",
-        "muted": "#f38ba8",
+        "recording": tokens.RED,
+        "paused": tokens.YELLOW,
+        "transcribing": tokens.ACCENT,
+        "muted": tokens.RED,
     }.get(state)
 
 
-_METER_STYLE = """
-    QProgressBar { background-color: #23252f; border: none; border-radius: 3px; }
-    QProgressBar::chunk { background-color: #a6e3a1; border-radius: 3px; }
+_METER_STYLE = f"""
+    QProgressBar {{ background-color: {tokens.SURFACE_2}; border: none; border-radius: 3px; }}
+    QProgressBar::chunk {{ background-color: {tokens.GREEN}; border-radius: 3px; }}
 """
 
 _STATE_EDGE_COLORS = {
@@ -153,13 +154,13 @@ class ActivityIndicator(QWidget):
 
         # Status text ("REC", "PAUSED", etc.)
         self.pill_status_label = QLabel("Ready")
-        self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
+        self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.TEXT_SECONDARY};")
         pill_layout.addWidget(self.pill_status_label)
 
         # Timer ("00:00:00")
         self.pill_timer = QLabel("00:00:00")
         self.pill_timer.setStyleSheet(
-            "font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #e9e9ed;"
+            f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; font-weight: 600; color: {tokens.TEXT};"
         )
         pill_layout.addWidget(self.pill_timer)
 
@@ -185,7 +186,7 @@ class ActivityIndicator(QWidget):
         self.pill_btn_record.setFixedSize(28, 28)
         self.pill_btn_record.setIconSize(QSize(14, 14))
         self.pill_btn_record.setStyleSheet(_BTN_STYLE)
-        self._set_btn_icon(self.pill_btn_record, "record", "#f38ba8")
+        self._set_btn_icon(self.pill_btn_record, "record", tokens.RED)
         self.pill_btn_record.clicked.connect(self.record_requested.emit)
         pill_layout.addWidget(self.pill_btn_record)
 
@@ -193,7 +194,7 @@ class ActivityIndicator(QWidget):
         self.pill_btn_pause.setFixedSize(28, 28)
         self.pill_btn_pause.setIconSize(QSize(14, 14))
         self.pill_btn_pause.setStyleSheet(_BTN_STYLE)
-        self._set_btn_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+        self._set_btn_icon(self.pill_btn_pause, "pause", tokens.TEXT)
         self.pill_btn_pause.clicked.connect(self._on_pause_clicked)
         pill_layout.addWidget(self.pill_btn_pause)
 
@@ -201,7 +202,7 @@ class ActivityIndicator(QWidget):
         self.pill_btn_stop.setFixedSize(28, 28)
         self.pill_btn_stop.setIconSize(QSize(14, 14))
         self.pill_btn_stop.setStyleSheet(_BTN_STYLE)
-        self._set_btn_icon(self.pill_btn_stop, "stop-fill", "#f38ba8")
+        self._set_btn_icon(self.pill_btn_stop, "stop-fill", tokens.RED)
         self.pill_btn_stop.clicked.connect(self.stop_requested.emit)
         pill_layout.addWidget(self.pill_btn_stop)
 
@@ -211,7 +212,7 @@ class ActivityIndicator(QWidget):
         edge_color = _STATE_EDGE_COLORS.get(state, _STATE_EDGE_COLORS["idle"])
         self.pill_frame.setStyleSheet(f"""
             QFrame#compactPillFrame {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1d2c, stop:1 #14161f);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {tokens.SURFACE_3}, stop:1 {tokens.SURFACE_4});
                 border: 1px solid {edge_color};
                 border-radius: 22px;
             }}
@@ -239,10 +240,10 @@ class ActivityIndicator(QWidget):
 
         if state == "recording":
             self.pill_status_label.setText("REC")
-            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
-            self.pill_timer.setStyleSheet("font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #e9e9ed;")
-            self.pill_mark_icon.setPixmap(colored_pixmap("record", "#f38ba8", 11))
-            self._set_btn_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_MD}; font-weight: 700; color: {tokens.RED};")
+            self.pill_timer.setStyleSheet(f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; font-weight: 600; color: {tokens.TEXT};")
+            self.pill_mark_icon.setPixmap(colored_pixmap("record", tokens.RED, 11))
+            self._set_btn_icon(self.pill_btn_pause, "pause", tokens.TEXT)
             self.pill_timer.show()
             self.pill_btn_pause.show()
             self.pill_btn_stop.show()
@@ -253,10 +254,10 @@ class ActivityIndicator(QWidget):
                 self._mark_pulse_anim.start()
         elif state == "paused":
             self.pill_status_label.setText("PAUSED")
-            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f9e2af;")
-            self.pill_timer.setStyleSheet("font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600; color: #f9e2af;")
-            self.pill_mark_icon.setPixmap(colored_pixmap("pause", "#f9e2af", 11))
-            self._set_btn_icon(self.pill_btn_pause, "play-fill", "#e9e9ed")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_MD}; font-weight: 700; color: {tokens.YELLOW};")
+            self.pill_timer.setStyleSheet(f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; font-weight: 600; color: {tokens.YELLOW};")
+            self.pill_mark_icon.setPixmap(colored_pixmap("pause", tokens.YELLOW, 11))
+            self._set_btn_icon(self.pill_btn_pause, "play-fill", tokens.TEXT)
             self.pill_timer.show()
             self.pill_btn_pause.show()
             self.pill_btn_stop.show()
@@ -271,8 +272,8 @@ class ActivityIndicator(QWidget):
                 if progress_percent is not None else f"{phase_label}…"
             )
             self.pill_status_label.setText(label_text)
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
-            self.pill_mark_icon.setPixmap(colored_pixmap("transcribe", "#9184d9", 11))
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.ACCENT};")
+            self.pill_mark_icon.setPixmap(colored_pixmap("transcribe", tokens.ACCENT, 11))
             self.pill_timer.hide()
             self.pill_btn_pause.hide()
             self.pill_btn_stop.hide()
@@ -283,8 +284,8 @@ class ActivityIndicator(QWidget):
                 self._mark_pulse_anim.start()
         else:
             self.pill_status_label.setText("Ready")
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
-            self.pill_mark_icon.setPixmap(colored_pixmap("record", "#a6adc8", 11))
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.TEXT_SECONDARY};")
+            self.pill_mark_icon.setPixmap(colored_pixmap("record", tokens.TEXT_SUBTLE, 11))
             self.pill_timer.hide()
             self.pill_btn_pause.hide()
             self.pill_btn_stop.hide()

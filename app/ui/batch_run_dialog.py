@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFrame,
     QGroupBox, QHBoxLayout, QLabel, QPushButton, QRadioButton, QSpinBox, QVBoxLayout
 )
+from app.ui import tokens
 
 MODE_IN_APP = "in_app"
 MODE_DETACHED = "detached"
@@ -47,16 +48,16 @@ class BatchRunDialog(QDialog):
                 f"<b>{self._queued_count} recording{'s' if self._queued_count != 1 else ''}</b> "
                 f"queued for batch processing."
             )
-            count_label.setStyleSheet("font-size: 13px; color: #e9e9ed;")
+            count_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.TEXT};")
             summary_layout.addWidget(count_label)
 
             info_label = QLabel("Recordings will be transcribed sequentially in the background.")
-            info_label.setStyleSheet("font-size: 11px; color: #9397ab;")
+            info_label.setStyleSheet(f"font-size: {tokens.TYPE_SM}; color: {tokens.TEXT_MUTED};")
             info_label.setWordWrap(True)
             summary_layout.addWidget(info_label)
         else:
             no_queue_label = QLabel("<b>No recordings are currently queued for batch processing.</b>")
-            no_queue_label.setStyleSheet("font-size: 13px; color: #fab387;")
+            no_queue_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.PEACH};")
             summary_layout.addWidget(no_queue_label)
 
             hint_label = QLabel(
@@ -64,7 +65,7 @@ class BatchRunDialog(QDialog):
                 "<b>Queue for Batch Transcription</b>, or enable automatic queueing in "
                 "Settings > General."
             )
-            hint_label.setStyleSheet("font-size: 11px; color: #9397ab;")
+            hint_label.setStyleSheet(f"font-size: {tokens.TYPE_SM}; color: {tokens.TEXT_MUTED};")
             hint_label.setWordWrap(True)
             summary_layout.addWidget(hint_label)
 
@@ -84,7 +85,7 @@ class BatchRunDialog(QDialog):
             mode_layout.addWidget(self._in_app_radio)
 
             in_app_desc = QLabel("Shows live progress in status bar; pauses if TalkTrack is closed.")
-            in_app_desc.setStyleSheet("font-size: 10px; color: #9397ab; margin-left: 20px;")
+            in_app_desc.setStyleSheet(f"font-size: {tokens.TYPE_XS}; color: {tokens.TEXT_MUTED}; margin-left: 20px;")
             mode_layout.addWidget(in_app_desc)
 
             self._detached_radio = QRadioButton("Run as independent background process")
@@ -98,7 +99,7 @@ class BatchRunDialog(QDialog):
                 "Continues running even if TalkTrack is closed. "
                 "Logs to Documents\\TalkTrack\\batch Log."
             )
-            detached_desc.setStyleSheet("font-size: 10px; color: #9397ab; margin-left: 20px;")
+            detached_desc.setStyleSheet(f"font-size: {tokens.TYPE_XS}; color: {tokens.TEXT_MUTED}; margin-left: 20px;")
             mode_layout.addWidget(detached_desc)
 
             self._mode_btn_group = QButtonGroup(self)
@@ -126,7 +127,7 @@ class BatchRunDialog(QDialog):
                     "<i>Diarization is disabled because no HuggingFace token is configured. "
                     "Per-track speaker labels ('You' / 'Remote') will still be used when available.</i>"
                 )
-                no_token_label.setStyleSheet("font-size: 10px; color: #fab387;")
+                no_token_label.setStyleSheet(f"font-size: {tokens.TYPE_XS}; color: {tokens.PEACH};")
                 no_token_label.setWordWrap(True)
                 diarize_layout.addWidget(self._diarize_cb)
                 diarize_layout.addWidget(no_token_label)
@@ -156,7 +157,7 @@ class BatchRunDialog(QDialog):
                     "<i>Summarization is disabled because no AI provider is configured "
                     "in Settings &gt; AI Assistant.</i>"
                 )
-                no_provider_label.setStyleSheet("font-size: 10px; color: #fab387;")
+                no_provider_label.setStyleSheet(f"font-size: {tokens.TYPE_XS}; color: {tokens.PEACH};")
                 no_provider_label.setWordWrap(True)
                 summarize_layout.addWidget(no_provider_label)
 

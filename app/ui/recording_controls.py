@@ -9,15 +9,16 @@ from app.recording.recorder import RecordingState
 from app.ui.preflight import PreflightWidget
 from app.ui.level_meter import LevelMeter
 from app.utils.icons import colored_pixmap
+from app.ui import tokens
 
 logger = logging.getLogger(__name__)
 
 _REC_MARK_ICON_SIZE = 18
 _REC_MARK_BADGE_SIZE = 48
 
-_CAPTURE_ICON_COLORS = {"ready": "#75798c", "warning": "#f9e2af", "blocked": "#f38ba8"}
+_CAPTURE_ICON_COLORS = {"ready": tokens.TEXT_MUTED_DIM, "warning": tokens.YELLOW, "blocked": tokens.RED}
 
-_DIVIDER_COLOR = "#292b31"
+_DIVIDER_COLOR = tokens.SURFACE_1
 
 
 def _v_divider(height):
@@ -87,7 +88,7 @@ class RecordingControls(QWidget):
         self.ready_widget.setObjectName("captureBarReady")
         self.ready_widget.setMinimumHeight(76)
         self.ready_widget.setStyleSheet(
-            "QFrame#captureBarReady { border-bottom: 1px solid #292b31; }"
+            f"QFrame#captureBarReady {{ border-bottom: 1px solid {tokens.SURFACE_1}; }}"
         )
         ready_layout = QHBoxLayout(self.ready_widget)
         ready_layout.setContentsMargins(20, 12, 20, 12)
@@ -106,7 +107,7 @@ class RecordingControls(QWidget):
         self.capturing_block.setCursor(Qt.CursorShape.PointingHandCursor)
         self.capturing_block.setStyleSheet(
             "QFrame#capturingBlock {"
-            " border: 1px solid #292b31; border-radius: 8px;"
+            f" border: 1px solid {tokens.SURFACE_1}; border-radius: 8px;"
             "}"
             "QFrame#capturingBlock:hover {"
             " background-color: rgba(233,233,237,0.05);"
@@ -120,19 +121,19 @@ class RecordingControls(QWidget):
         cb_text_layout.setSpacing(3)
         cb_kicker = QLabel("CAPTURING")
         cb_kicker.setObjectName("sectionHeader")
-        cb_kicker.setStyleSheet("color: #75798c;")
+        cb_kicker.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM};")
         cb_text_layout.addWidget(cb_kicker)
 
         cb_row = QHBoxLayout()
         cb_row.setSpacing(8)
         self.capturing_mic_icon = QLabel()
         self.capturing_mic_name = QLabel("")
-        self.capturing_mic_name.setStyleSheet("font-size: 13px; color: #cfd3e5;")
+        self.capturing_mic_name.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.TEXT_SECONDARY};")
         cb_plus = QLabel("+")
-        cb_plus.setStyleSheet("color: #4d5063; font-size: 12px;")
+        cb_plus.setStyleSheet(f"color: {tokens.BORDER_MUTED}; font-size: {tokens.TYPE_MD};")
         self.capturing_call_icon = QLabel()
         self.capturing_call_name = QLabel("")
-        self.capturing_call_name.setStyleSheet("font-size: 13px; color: #cfd3e5;")
+        self.capturing_call_name.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.TEXT_SECONDARY};")
         cb_row.addWidget(self.capturing_mic_icon)
         cb_row.addWidget(self.capturing_mic_name)
         cb_row.addWidget(cb_plus)
@@ -142,7 +143,7 @@ class RecordingControls(QWidget):
 
         cb_layout.addLayout(cb_text_layout)
         cb_caret = QLabel()
-        cb_caret.setPixmap(colored_pixmap("caret-down", "#75798c", 12))
+        cb_caret.setPixmap(colored_pixmap("caret-down", tokens.TEXT_MUTED_DIM, 12))
         cb_layout.addWidget(cb_caret)
 
         self.capturing_block.clicked.connect(self.sources_clicked.emit)
@@ -153,8 +154,8 @@ class RecordingControls(QWidget):
 
         self.record_btn = QPushButton("Record")
         self.record_btn.setObjectName("recordAction")
-        self.record_btn.setStyleSheet("font-size: 15px; font-weight: 600; padding: 12px 24px;")
-        self._set_button_icon(self.record_btn, "record", "#f38ba8")
+        self.record_btn.setStyleSheet(f"font-size: {tokens.TYPE_LG}; font-weight: 600; padding: 12px 24px;")
+        self._set_button_icon(self.record_btn, "record", tokens.RED)
         self.record_btn.clicked.connect(self.record_clicked.emit)
 
         ready_layout.addWidget(self.record_btn)
@@ -167,7 +168,7 @@ class RecordingControls(QWidget):
         # without it the separator under the bar disappeared the
         # moment recording started.
         self.rec_widget.setStyleSheet(
-            "QFrame#captureBarActive { border-bottom: 1px solid #292b31; }"
+            f"QFrame#captureBarActive {{ border-bottom: 1px solid {tokens.SURFACE_1}; }}"
         )
         rec_layout = QHBoxLayout(self.rec_widget)
         # Matches the Ready variant exactly; at 22 the whole bar
@@ -199,11 +200,11 @@ class RecordingControls(QWidget):
         self.rec_source_block.setToolTip("Click to change audio sources")
         self.rec_source_block.setStyleSheet(
             "QFrame#recSourceBlock {"
-            " border: 1px solid #292b31; border-radius: 8px; padding: 4px 10px;"
+            f" border: 1px solid {tokens.SURFACE_1}; border-radius: 8px; padding: 4px 10px;"
             "}"
             "QFrame#recSourceBlock:hover {"
             " background-color: rgba(233,233,237,0.06);"
-            " border-color: #3b3e4d;"
+            f" border-color: {tokens.BORDER_SUBTLE};"
             "}"
         )
         rec_block_layout = QHBoxLayout(self.rec_source_block)
@@ -216,19 +217,19 @@ class RecordingControls(QWidget):
 
         rec_kicker = QLabel("CAPTURING")
         rec_kicker.setObjectName("sectionHeader")
-        rec_kicker.setStyleSheet("color: #75798c;")
+        rec_kicker.setStyleSheet(f"color: {tokens.TEXT_MUTED_DIM};")
         source_layout.addWidget(rec_kicker)
 
         rec_row = QHBoxLayout()
         rec_row.setSpacing(8)
         self.rec_mic_icon = QLabel()
         self.rec_mic_name = QLabel("")
-        self.rec_mic_name.setStyleSheet("font-size: 12.5px; color: #cfd3e5;")
+        self.rec_mic_name.setStyleSheet(f"font-size: 12.5px; color: {tokens.TEXT_SECONDARY};")
         rec_plus = QLabel("+")
-        rec_plus.setStyleSheet("color: #4d5063; font-size: 11px;")
+        rec_plus.setStyleSheet(f"color: {tokens.BORDER_MUTED}; font-size: {tokens.TYPE_SM};")
         self.rec_call_icon = QLabel()
         self.rec_call_name = QLabel("")
-        self.rec_call_name.setStyleSheet("font-size: 12.5px; color: #cfd3e5;")
+        self.rec_call_name.setStyleSheet(f"font-size: 12.5px; color: {tokens.TEXT_SECONDARY};")
         rec_row.addWidget(self.rec_mic_icon)
         rec_row.addWidget(self.rec_mic_name)
         rec_row.addWidget(rec_plus)
@@ -240,14 +241,14 @@ class RecordingControls(QWidget):
         self.source_line.hide()  # preserved for backwards compatibility
 
         self.health_line = QLabel("")
-        self.health_line.setStyleSheet("font-size: 11px; color: #75798c;")
+        self.health_line.setStyleSheet(f"font-size: {tokens.TYPE_SM}; color: {tokens.TEXT_MUTED_DIM};")
         self.health_line.hide()
         source_layout.addWidget(self.health_line)
 
         rec_block_layout.addLayout(source_layout)
 
         rec_caret = QLabel()
-        rec_caret.setPixmap(colored_pixmap("caret-down", "#75798c", 12))
+        rec_caret.setPixmap(colored_pixmap("caret-down", tokens.TEXT_MUTED_DIM, 12))
         rec_block_layout.addWidget(rec_caret)
 
         self.rec_source_block.clicked.connect(self.sources_clicked.emit)
@@ -257,18 +258,18 @@ class RecordingControls(QWidget):
         rec_layout.addWidget(self.live_meters, stretch=1)
 
         self.mute_btn = QPushButton("Mute mic")
-        self.mute_btn.setStyleSheet("padding: 8px 14px; font-size: 13px;")
-        self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
+        self.mute_btn.setStyleSheet(f"padding: 8px 14px; font-size: {tokens.TYPE_BASE};")
+        self._set_button_icon(self.mute_btn, "microphone-slash", tokens.TEXT)
         self.mute_btn.clicked.connect(self.mute_clicked.emit)
 
         self.pause_btn = QPushButton("Pause")
-        self.pause_btn.setStyleSheet("padding: 8px 14px; font-size: 13px;")
-        self._set_button_icon(self.pause_btn, "pause", "#e9e9ed")
+        self.pause_btn.setStyleSheet(f"padding: 8px 14px; font-size: {tokens.TYPE_BASE};")
+        self._set_button_icon(self.pause_btn, "pause", tokens.TEXT)
         self.pause_btn.clicked.connect(self.pause_clicked.emit)
 
         self.stop_btn = QPushButton("Stop && transcribe")
-        self.stop_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8; padding: 8px 16px; font-size: 13px; font-weight: 600;")
-        self._set_button_icon(self.stop_btn, "stop-fill", "#f38ba8")
+        self.stop_btn.setStyleSheet(f"border-color: {tokens.RED}; color: {tokens.RED}; padding: 8px 16px; font-size: {tokens.TYPE_BASE}; font-weight: 600;")
+        self._set_button_icon(self.stop_btn, "stop-fill", tokens.RED)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
 
         rec_layout.addWidget(self.mute_btn)
@@ -288,7 +289,7 @@ class RecordingControls(QWidget):
         self.transcribing_strip.setStyleSheet(
             "QFrame#captureBarTranscribing {"
             " background-color: rgba(145,132,217,0.07);"
-            " border-bottom: 1px solid #423a6a;"
+            f" border-bottom: 1px solid {tokens.ACCENT_STRONG};"
             "}"
         )
         ts_layout = QHBoxLayout(self.transcribing_strip)
@@ -296,11 +297,11 @@ class RecordingControls(QWidget):
         ts_layout.setSpacing(11)
 
         self.transcribing_icon = QLabel()
-        self.transcribing_icon.setPixmap(colored_pixmap("waveform", "#9184d9", 15))
+        self.transcribing_icon.setPixmap(colored_pixmap("waveform", tokens.ACCENT, 15))
         ts_layout.addWidget(self.transcribing_icon)
 
         self.transcribing_label = QLabel("Transcribing…")
-        self.transcribing_label.setStyleSheet("font-size: 12.5px; color: #d2cefd;")
+        self.transcribing_label.setStyleSheet(f"font-size: 12.5px; color: {tokens.ACCENT_LIGHT};")
         ts_layout.addWidget(self.transcribing_label)
 
         self.transcribing_bar = QProgressBar()
@@ -311,12 +312,12 @@ class RecordingControls(QWidget):
 
         self.transcribing_percent = QLabel("")
         self.transcribing_percent.setStyleSheet(
-            "font-size: 11.5px; color: #9397ab; font-family: Consolas, monospace;"
+            f"font-size: 11.5px; color: {tokens.TEXT_MUTED}; font-family: Consolas, monospace;"
         )
         ts_layout.addWidget(self.transcribing_percent, stretch=1)
 
         self.transcribing_queued_label = QLabel("")
-        self.transcribing_queued_label.setStyleSheet("font-size: 11.5px; color: #75798c;")
+        self.transcribing_queued_label.setStyleSheet(f"font-size: 11.5px; color: {tokens.TEXT_MUTED_DIM};")
         ts_layout.addWidget(self.transcribing_queued_label)
 
         self.transcribing_cancel_btn = QPushButton("Cancel")
@@ -336,22 +337,22 @@ class RecordingControls(QWidget):
         elif state == RecordingState.RECORDING:
             self.stack.setCurrentWidget(self.rec_widget)
             self.pause_btn.setText("Pause")
-            self._set_button_icon(self.pause_btn, "pause", "#e9e9ed")
+            self._set_button_icon(self.pause_btn, "pause", tokens.TEXT)
             self.rec_kicker.setText("RECORDING")
-            self.rec_kicker.setStyleSheet("color: #f38ba8;")
-            self._set_badge("record-fill", "#f38ba8")
-            self.rec_widget.setStyleSheet(self._card_style("#f38ba8", "rgba(243,139,168,0.07)"))
+            self.rec_kicker.setStyleSheet(f"color: {tokens.RED};")
+            self._set_badge("record-fill", tokens.RED)
+            self.rec_widget.setStyleSheet(self._card_style(tokens.RED, "rgba(243,139,168,0.07)"))
             self.stop_btn.setEnabled(True)
             self.pause_btn.setEnabled(True)
             self.mute_btn.setEnabled(True)
         elif state == RecordingState.PAUSED:
             self.stack.setCurrentWidget(self.rec_widget)
             self.pause_btn.setText("Resume")
-            self._set_button_icon(self.pause_btn, "play-fill", "#f9e2af")
+            self._set_button_icon(self.pause_btn, "play-fill", tokens.YELLOW)
             self.rec_kicker.setText("PAUSED")
-            self.rec_kicker.setStyleSheet("color: #f9e2af;")
-            self._set_badge("pause-fill", "#f9e2af")
-            self.rec_widget.setStyleSheet(self._card_style("#f9e2af", "rgba(249,226,175,0.07)"))
+            self.rec_kicker.setStyleSheet(f"color: {tokens.YELLOW};")
+            self._set_badge("pause-fill", tokens.YELLOW)
+            self.rec_widget.setStyleSheet(self._card_style(tokens.YELLOW, "rgba(249,226,175,0.07)"))
         elif state in (RecordingState.STOPPING, RecordingState.PROCESSING):
             self.stop_btn.setEnabled(False)
             self.pause_btn.setEnabled(False)
@@ -442,11 +443,11 @@ class RecordingControls(QWidget):
         self._muted = bool(muted)
         self.mute_btn.setText("Muted" if self._muted else "Mute mic")
         if self._muted:
-            self.mute_btn.setStyleSheet("border-color: #f38ba8; color: #f38ba8;")
-            self._set_button_icon(self.mute_btn, "microphone-slash", "#f38ba8")
+            self.mute_btn.setStyleSheet(f"border-color: {tokens.RED}; color: {tokens.RED};")
+            self._set_button_icon(self.mute_btn, "microphone-slash", tokens.RED)
         else:
             self.mute_btn.setStyleSheet("")
-            self._set_button_icon(self.mute_btn, "microphone-slash", "#e9e9ed")
+            self._set_button_icon(self.mute_btn, "microphone-slash", tokens.TEXT)
 
     def _toggle_live_meters(self):
         pass

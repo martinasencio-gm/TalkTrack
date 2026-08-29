@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from app.batch.logging_setup import open_batch_log
 from app.batch.process_monitor import BatchProcessInfo, terminate_batch_process
 from app.utils.icons import colored_pixmap
+from app.ui import tokens
 
 
 class BatchProcessInfoDialog(QDialog):
@@ -68,7 +69,7 @@ class BatchProcessInfoDialog(QDialog):
         count = len(self.processes)
         title_text = "<b>Batch Transcription Running</b>" if count <= 1 else f"<b>{count} Batch Jobs Running</b>"
         self._title_label = QLabel(title_text)
-        self._title_label.setStyleSheet("font-size: 14px; color: #e9e9ed;")
+        self._title_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.TEXT};")
         title_row.addWidget(self._title_label)
         title_row.addStretch()
 
@@ -81,9 +82,9 @@ class BatchProcessInfoDialog(QDialog):
         status_pill_layout.setContentsMargins(8, 2, 8, 2)
         status_pill_layout.setSpacing(4)
         status_icon = QLabel()
-        status_icon.setPixmap(colored_pixmap("check-circle-fill", "#a6e3a1", 11))
+        status_icon.setPixmap(colored_pixmap("check-circle-fill", tokens.GREEN, 11))
         status_text = QLabel("Active")
-        status_text.setStyleSheet("color: #a6e3a1; font-weight: 600; font-size: 11px;")
+        status_text.setStyleSheet(f"color: {tokens.GREEN}; font-weight: 600; font-size: {tokens.TYPE_SM};")
         status_pill_layout.addWidget(status_icon)
         status_pill_layout.addWidget(status_text)
         title_row.addWidget(status_pill)
@@ -95,7 +96,7 @@ class BatchProcessInfoDialog(QDialog):
             f"{count} batch transcription processes are currently executing in the background."
         )
         self._desc_label = QLabel(desc_text)
-        self._desc_label.setStyleSheet("font-size: 11px; color: #9397ab;")
+        self._desc_label.setStyleSheet(f"font-size: {tokens.TYPE_SM}; color: {tokens.TEXT_MUTED};")
         header_layout.addWidget(self._desc_label)
 
         self._main_layout.addWidget(self._header_card)
@@ -142,9 +143,9 @@ class BatchProcessInfoDialog(QDialog):
         if len(self.processes) == 1:
             self.end_btn = QPushButton("End Process")
             self.end_btn.setStyleSheet(
-                "QPushButton { background-color: #7d2a2a; color: #f38ba8; "
-                "border: 1px solid #b34d4d; border-radius: 6px; padding: 6px 14px; font-weight: bold; }"
-                "QPushButton:hover { background-color: #9e3535; color: #ffffff; }"
+                f"QPushButton {{ background-color: {tokens.DANGER_BG}; color: {tokens.RED}; "
+                f"border: 1px solid {tokens.DANGER_BORDER}; border-radius: 6px; padding: 6px 14px; font-weight: bold; }}"
+                f"QPushButton:hover {{ background-color: {tokens.DANGER_HOVER}; color: {tokens.ON_DANGER}; }}"
             )
             self.end_btn.setToolTip("Terminate the running batch transcription process")
             self.end_btn.clicked.connect(lambda: self._on_end_clicked_proc(self.processes[0]))
@@ -152,9 +153,9 @@ class BatchProcessInfoDialog(QDialog):
         else:
             self.end_all_btn = QPushButton("End All Processes")
             self.end_all_btn.setStyleSheet(
-                "QPushButton { background-color: #7d2a2a; color: #f38ba8; "
-                "border: 1px solid #b34d4d; border-radius: 6px; padding: 6px 14px; font-weight: bold; }"
-                "QPushButton:hover { background-color: #9e3535; color: #ffffff; }"
+                f"QPushButton {{ background-color: {tokens.DANGER_BG}; color: {tokens.RED}; "
+                f"border: 1px solid {tokens.DANGER_BORDER}; border-radius: 6px; padding: 6px 14px; font-weight: bold; }}"
+                f"QPushButton:hover {{ background-color: {tokens.DANGER_HOVER}; color: {tokens.ON_DANGER}; }}"
             )
             self.end_all_btn.setToolTip("Terminate all running batch transcription processes")
             self.end_all_btn.clicked.connect(self._on_end_all_clicked)
@@ -177,7 +178,7 @@ class BatchProcessInfoDialog(QDialog):
     def _build_process_card(self, proc: BatchProcessInfo) -> QWidget:
         card = QFrame()
         card.setStyleSheet(
-            "QFrame { background-color: #12141f; border: 1px solid #292b31; border-radius: 8px; }"
+            f"QFrame {{ background-color: {tokens.SURFACE_5}; border: 1px solid {tokens.SURFACE_1}; border-radius: 8px; }}"
         )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 10, 12, 10)
@@ -191,15 +192,15 @@ class BatchProcessInfoDialog(QDialog):
         if len(self.processes) > 1:
             card_header = QHBoxLayout()
             card_title = QLabel(f"<b>PID {proc.pid}</b> — {proc.process_type_label}")
-            card_title.setStyleSheet("font-size: 13px; color: #fab387;")
+            card_title.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; color: {tokens.PEACH};")
             card_header.addWidget(card_title)
             card_header.addStretch()
 
             end_card_btn = QPushButton("End Process")
             end_card_btn.setStyleSheet(
-                "QPushButton { background-color: #5c2020; color: #f38ba8; "
-                "border: 1px solid #8c3838; border-radius: 4px; padding: 3px 10px; font-size: 11px; font-weight: bold; }"
-                "QPushButton:hover { background-color: #8c3838; color: #ffffff; }"
+                f"QPushButton {{ background-color: {tokens.DANGER_PRESSED_BG}; color: {tokens.RED}; "
+                f"border: 1px solid {tokens.DANGER_PRESSED_BORDER}; border-radius: 4px; padding: 3px 10px; font-size: {tokens.TYPE_SM}; font-weight: bold; }}"
+                f"QPushButton:hover {{ background-color: {tokens.DANGER_PRESSED_BORDER}; color: {tokens.ON_DANGER}; }}"
             )
             end_card_btn.clicked.connect(lambda checked, p=proc: self._on_end_clicked_proc(p))
             card_header.addWidget(end_card_btn)
@@ -208,10 +209,10 @@ class BatchProcessInfoDialog(QDialog):
         def add_field(label_text: str, value_text: str) -> QLabel:
             row = QHBoxLayout()
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #9397ab; font-size: 12px; font-weight: 500;")
+            lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; font-size: {tokens.TYPE_MD}; font-weight: 500;")
             lbl.setFixedWidth(120)
             val = QLabel(value_text)
-            val.setStyleSheet("color: #e9e9ed; font-size: 12px; font-weight: bold;")
+            val.setStyleSheet(f"color: {tokens.TEXT}; font-size: {tokens.TYPE_MD}; font-weight: bold;")
             val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             row.addWidget(lbl)
             row.addWidget(val, 1)

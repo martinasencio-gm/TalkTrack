@@ -9,15 +9,16 @@ import os
 
 from app.recording.recorder import RecordingState
 from app.utils.icons import colored_pixmap
+from app.ui import tokens
 
 logger = logging.getLogger(__name__)
 
-# Meter trough/fill per spec: trough `#23252f`, fill `ok` — distinct from the
-# global QSS QProgressBar rule (accent fill), which is for the transcribing
-# progress bar, not these level meters.
-_METER_STYLE = """
-    QProgressBar { background-color: #23252f; border: none; border-radius: 3px; }
-    QProgressBar::chunk { background-color: #a6e3a1; border-radius: 3px; }
+# Meter trough/fill per spec: trough `tokens.SURFACE_2`, fill `ok` — distinct
+# from the global QSS QProgressBar rule (accent fill), which is for the
+# transcribing progress bar, not these level meters.
+_METER_STYLE = f"""
+    QProgressBar {{ background-color: {tokens.SURFACE_2}; border: none; border-radius: 3px; }}
+    QProgressBar::chunk {{ background-color: {tokens.GREEN}; border-radius: 3px; }}
 """
 
 # Per-state edge color, shared by the full frame's inline setStyleSheet calls
@@ -113,12 +114,12 @@ class CompactStrip(QWidget):
         
         self.frame = QFrame(self)
         self.frame.setObjectName("compactStripFrame")
-        self.frame.setStyleSheet("""
-            QFrame#compactStripFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1d2c, stop:1 #14161f);
+        self.frame.setStyleSheet(f"""
+            QFrame#compactStripFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {tokens.SURFACE_3}, stop:1 {tokens.SURFACE_4});
                 border: 1px solid rgba(145,132,217,0.30);
                 border-radius: 14px;
-            }
+            }}
         """)
         
         frame_layout = QHBoxLayout(self.frame)
@@ -148,7 +149,7 @@ class CompactStrip(QWidget):
         self.mark_layout.addWidget(self.mark_icon, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.drag_hint = QLabel()
-        self.drag_hint.setPixmap(colored_pixmap("dots-six-vertical", "#3f424d", 10))
+        self.drag_hint.setPixmap(colored_pixmap("dots-six-vertical", tokens.BORDER, 10))
         self.drag_hint.setFixedSize(10, 10)
         self.mark_layout.addWidget(self.drag_hint, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -164,7 +165,7 @@ class CompactStrip(QWidget):
         self.title_label.setMinimumWidth(80)
         
         self.subtitle_label = QLabel("")
-        self.subtitle_label.setStyleSheet("font-size: 11.5px; color: #9397ab;")
+        self.subtitle_label.setStyleSheet(f"font-size: 11.5px; color: {tokens.TEXT_MUTED};")
         self.subtitle_label.setMinimumWidth(80)
         
         self.title_layout.addWidget(self.title_label)
@@ -185,7 +186,7 @@ class CompactStrip(QWidget):
         mic_row = QHBoxLayout()
         mic_row.setSpacing(4)
         self.mic_icon_label = QLabel()
-        self.mic_icon_label.setPixmap(colored_pixmap("microphone", "#75798c", 11))
+        self.mic_icon_label.setPixmap(colored_pixmap("microphone", tokens.TEXT_MUTED_DIM, 11))
         self.mic_icon_label.setFixedSize(11, 11)
         self.mic_meter = QProgressBar()
         self.mic_meter.setFixedSize(78, 6)
@@ -197,7 +198,7 @@ class CompactStrip(QWidget):
         sys_row = QHBoxLayout()
         sys_row.setSpacing(4)
         self.sys_icon_label = QLabel()
-        self.sys_icon_label.setPixmap(colored_pixmap("speaker-high", "#75798c", 11))
+        self.sys_icon_label.setPixmap(colored_pixmap("speaker-high", tokens.TEXT_MUTED_DIM, 11))
         self.sys_icon_label.setFixedSize(11, 11)
         self.sys_meter = QProgressBar()
         self.sys_meter.setFixedSize(78, 6)
@@ -214,7 +215,7 @@ class CompactStrip(QWidget):
         # Divider
         self.divider = QFrame()
         self.divider.setFrameShape(QFrame.Shape.VLine)
-        self.divider.setStyleSheet("border-left: 1px solid #292b31; max-height: 40px;")
+        self.divider.setStyleSheet(f"border-left: 1px solid {tokens.SURFACE_1}; max-height: 40px;")
         frame_layout.addWidget(self.divider)
         
         # Actions
@@ -233,7 +234,7 @@ class CompactStrip(QWidget):
         self.btn_pause = QPushButton()
         self.btn_pause.setFixedSize(36, 36)
         self.btn_pause.setIconSize(QSize(16, 16))
-        self._set_icon(self.btn_pause, "pause", "#e9e9ed")
+        self._set_icon(self.btn_pause, "pause", tokens.TEXT)
         self.btn_pause.hide()
 
         self.btn_primary = QPushButton("Record")
@@ -242,7 +243,7 @@ class CompactStrip(QWidget):
         self.btn_primary.setFixedHeight(36)
         self.btn_primary.setMinimumWidth(80)
         self.btn_primary.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self._set_icon(self.btn_primary, "record", "#f38ba8")
+        self._set_icon(self.btn_primary, "record", tokens.RED)
 
         self.btn_secondary = QPushButton("Cancel")
         self.btn_secondary.setIconSize(QSize(12, 12))
@@ -256,13 +257,13 @@ class CompactStrip(QWidget):
         self.btn_collapse.setFixedSize(30, 36)
         self.btn_collapse.setIconSize(QSize(14, 14))
         self.btn_collapse.setToolTip("Collapse to pill")
-        self._set_icon(self.btn_collapse, "minus", "#75798c")
+        self._set_icon(self.btn_collapse, "minus", tokens.TEXT_MUTED_DIM)
 
         self.btn_expand = QPushButton()
         self.btn_expand.setFixedSize(30, 36)
         self.btn_expand.setIconSize(QSize(16, 16))
         self.btn_expand.setToolTip("Expand")
-        self._set_icon(self.btn_expand, "arrows-out-simple", "#9184d9")
+        self._set_icon(self.btn_expand, "arrows-out-simple", tokens.ACCENT)
 
         self.actions_layout.addWidget(self.btn_mute)
         self.actions_layout.addWidget(self.btn_pause)
@@ -318,13 +319,13 @@ class CompactStrip(QWidget):
 
         self.pill_status_label = QLabel("Ready")
         self.pill_status_label.setStyleSheet(
-            "font-size: 13px; font-weight: 600; color: #cfd3e5;"
+            f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.TEXT_SECONDARY};"
         )
         pill_layout.addWidget(self.pill_status_label)
 
         self.pill_timer = QLabel("00:00:00")
         self.pill_timer.setStyleSheet(
-            "font-family: 'Consolas', monospace; font-size: 15px; font-weight: 600;"
+            f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; font-weight: 600;"
         )
         pill_layout.addWidget(self.pill_timer)
 
@@ -350,21 +351,21 @@ class CompactStrip(QWidget):
         self.pill_btn_record = QPushButton()
         self.pill_btn_record.setFixedSize(28, 28)
         self.pill_btn_record.setIconSize(QSize(14, 14))
-        self._set_icon(self.pill_btn_record, "record", "#f38ba8")
+        self._set_icon(self.pill_btn_record, "record", tokens.RED)
         self.pill_btn_record.clicked.connect(self.record_requested.emit)
         pill_layout.addWidget(self.pill_btn_record)
 
         self.pill_btn_pause = QPushButton()
         self.pill_btn_pause.setFixedSize(28, 28)
         self.pill_btn_pause.setIconSize(QSize(14, 14))
-        self._set_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+        self._set_icon(self.pill_btn_pause, "pause", tokens.TEXT)
         self.pill_btn_pause.clicked.connect(self.pause_requested.emit)
         pill_layout.addWidget(self.pill_btn_pause)
 
         self.pill_btn_stop = QPushButton()
         self.pill_btn_stop.setFixedSize(28, 28)
         self.pill_btn_stop.setIconSize(QSize(14, 14))
-        self._set_icon(self.pill_btn_stop, "stop-fill", "#f38ba8")
+        self._set_icon(self.pill_btn_stop, "stop-fill", tokens.RED)
         self.pill_btn_stop.clicked.connect(self.stop_requested.emit)
         pill_layout.addWidget(self.pill_btn_stop)
         
@@ -452,15 +453,15 @@ class CompactStrip(QWidget):
             # is `record` regular weight (outline, "available"), not the
             # filled dot recording uses ("running").
             self.frame.setStyleSheet(self._frame_style("rgba(63,66,77,0.9)"))
-            self._set_mark_icon("record", "#75798c", size=13)
+            self._set_mark_icon("record", tokens.TEXT_MUTED_DIM, size=13)
             self._set_mark_pulsing(False)
             self.title_label.setText("Ready to record")
-            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #cfd3e5;")
+            self.title_label.setStyleSheet(f"font-size: 14.5px; font-weight: 600; color: {tokens.TEXT_SECONDARY};")
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record", "#f38ba8")
+            self._set_icon(self.btn_primary, "record", tokens.RED)
             self.btn_secondary.hide()
             self.btn_mute.hide()
             self.btn_pause.hide()
@@ -472,16 +473,16 @@ class CompactStrip(QWidget):
 
         elif state == "armed":
             self.frame.setStyleSheet(self._frame_style("rgba(145,132,217,0.30)"))
-            self._set_mark_icon("phone-incoming", "#9184d9", size=13)
+            self._set_mark_icon("phone-incoming", tokens.ACCENT, size=13)
             self._set_mark_pulsing(False)
             if self.title_label.text() == "Ready to record":
                 self.title_label.setText("Recording Name")
-            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
+            self.title_label.setStyleSheet(f"font-size: 14.5px; font-weight: 600; color: {tokens.TEXT};")
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record", "#f38ba8")
+            self._set_icon(self.btn_primary, "record", tokens.RED)
             self.btn_secondary.hide()
             self.btn_mute.hide()
             self.btn_pause.hide()
@@ -493,22 +494,22 @@ class CompactStrip(QWidget):
 
         elif state == "recording":
             self.frame.setStyleSheet(self._frame_style("rgba(243,139,168,0.35)"))
-            self._set_mark_icon("record-fill", "#f38ba8", size=11)
+            self._set_mark_icon("record-fill", tokens.RED, size=11)
             self._set_mark_pulsing(True)
             if self.title_label.text() == "Ready to record":
                 self.title_label.setText("Recording Name")
-            self.title_label.setStyleSheet("font-size: 14.5px; font-weight: 600; color: #e9e9ed;")
+            self.title_label.setStyleSheet(f"font-size: 14.5px; font-weight: 600; color: {tokens.TEXT};")
             self.btn_primary.setText("Stop")
             self.btn_primary.setMinimumWidth(76)
-            self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
-            self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
+            self.btn_primary.setStyleSheet(f"padding: 0 10px; border-color: {tokens.RED}; color: {tokens.RED};")
+            self._set_icon(self.btn_primary, "stop-fill", tokens.RED)
             self.btn_secondary.hide()
-            self._set_icon(self.btn_mute, "microphone", "#e9e9ed")
+            self._set_icon(self.btn_mute, "microphone", tokens.TEXT)
             self.btn_mute.setStyleSheet("")
             self.btn_mute.show()
             self.btn_pause.show()
             self.timer_label.show()
-            self.timer_label.setStyleSheet("color: #e9e9ed;")
+            self.timer_label.setStyleSheet(f"color: {tokens.TEXT};")
             self.mic_meter.show()
             self.mic_icon_label.show()
             self.sys_meter.show()
@@ -516,20 +517,20 @@ class CompactStrip(QWidget):
 
         elif state == "paused":
             self.frame.setStyleSheet(self._frame_style("rgba(249,226,175,0.45)"))
-            self._set_mark_icon("pause-fill", "#f9e2af", size=13)
+            self._set_mark_icon("pause-fill", tokens.YELLOW, size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Stop")
             self.btn_primary.setMinimumWidth(76)
-            self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
-            self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
+            self.btn_primary.setStyleSheet(f"padding: 0 10px; border-color: {tokens.RED}; color: {tokens.RED};")
+            self._set_icon(self.btn_primary, "stop-fill", tokens.RED)
             self.btn_secondary.setText("Resume")
             self.btn_secondary.setMinimumWidth(88)
-            self._set_icon(self.btn_secondary, "play-fill", "#e9e9ed")
+            self._set_icon(self.btn_secondary, "play-fill", tokens.TEXT)
             self.btn_secondary.show()
             self.btn_mute.hide()
             self.btn_pause.hide()
             self.timer_label.show()
-            self.timer_label.setStyleSheet("color: #f9e2af;")
+            self.timer_label.setStyleSheet(f"color: {tokens.YELLOW};")
 
         elif state == "muted":
             # Same red edge as "recording" (per spec — mute doesn't deepen
@@ -537,19 +538,19 @@ class CompactStrip(QWidget):
             # itself flipping to a filled mic-slash icon below, plus the
             # timer staying normal-colored rather than following the mark.
             self.frame.setStyleSheet(self._frame_style("rgba(243,139,168,0.35)"))
-            self._set_mark_icon("record-fill", "#f38ba8", size=11)
+            self._set_mark_icon("record-fill", tokens.RED, size=11)
             self._set_mark_pulsing(True)
             self.btn_primary.setText("Stop")
             self.btn_primary.setMinimumWidth(76)
-            self.btn_primary.setStyleSheet("padding: 0 10px; border-color: #f38ba8; color: #f38ba8;")
-            self._set_icon(self.btn_primary, "stop-fill", "#f38ba8")
+            self.btn_primary.setStyleSheet(f"padding: 0 10px; border-color: {tokens.RED}; color: {tokens.RED};")
+            self._set_icon(self.btn_primary, "stop-fill", tokens.RED)
             self.btn_secondary.hide()
-            self._set_icon(self.btn_mute, "microphone-slash", "#f38ba8")
-            self.btn_mute.setStyleSheet("border-color: #f38ba8;")
+            self._set_icon(self.btn_mute, "microphone-slash", tokens.RED)
+            self.btn_mute.setStyleSheet(f"border-color: {tokens.RED};")
             self.btn_mute.show()
             self.btn_pause.show()
             self.timer_label.show()
-            self.timer_label.setStyleSheet("color: #e9e9ed;")
+            self.timer_label.setStyleSheet(f"color: {tokens.TEXT};")
             self.mic_meter.hide()
             self.mic_icon_label.hide()
             self.sys_meter.show()
@@ -557,16 +558,16 @@ class CompactStrip(QWidget):
 
         elif state == "transcribing":
             self.frame.setStyleSheet(self._frame_style("rgba(145,132,217,0.30)"))
-            self._set_mark_icon("waveform", "#9184d9", size=13)
+            self._set_mark_icon("waveform", tokens.ACCENT, size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record", "#f38ba8")
+            self._set_icon(self.btn_primary, "record", tokens.RED)
             self.btn_secondary.setText("Cancel")
             self.btn_secondary.setMinimumWidth(76)
-            self._set_icon(self.btn_secondary, "x", "#e9e9ed")
+            self._set_icon(self.btn_secondary, "x", tokens.TEXT)
             self.btn_secondary.show()
             self.btn_mute.hide()
             self.btn_pause.hide()
@@ -578,16 +579,16 @@ class CompactStrip(QWidget):
 
         elif state == "done":
             self.frame.setStyleSheet(self._frame_style("rgba(166,227,161,0.35)"))
-            self._set_mark_icon("check-circle", "#a6e3a1", size=13)
+            self._set_mark_icon("check-circle", tokens.GREEN, size=13)
             self._set_mark_pulsing(False)
             self.btn_primary.setText("Record")
             self.btn_primary.setObjectName("recordAction")
             self.btn_primary.setMinimumWidth(86)
             self.btn_primary.setStyleSheet("padding: 0 10px;")
-            self._set_icon(self.btn_primary, "record", "#f38ba8")
+            self._set_icon(self.btn_primary, "record", tokens.RED)
             self.btn_secondary.setText("Open transcript")
             self.btn_secondary.setMinimumWidth(130)
-            self._set_icon(self.btn_secondary, "arrow-square-out", "#e9e9ed")
+            self._set_icon(self.btn_secondary, "arrow-square-out", tokens.TEXT)
             self.btn_secondary.show()
             self.btn_mute.hide()
             self.btn_pause.hide()
@@ -607,31 +608,31 @@ class CompactStrip(QWidget):
 
         if state == "idle":
             self.pill_status_label.setText("Ready")
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #cfd3e5;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.TEXT_SECONDARY};")
             self.pill_status_label.show()
         elif state == "armed":
             self.pill_status_label.setText("Call Active")
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.ACCENT};")
             self.pill_status_label.show()
         elif state == "recording":
             self.pill_status_label.setText("REC")
-            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_MD}; font-weight: 700; color: {tokens.RED};")
             self.pill_status_label.show()
         elif state == "paused":
             self.pill_status_label.setText("PAUSED")
-            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f9e2af;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_MD}; font-weight: 700; color: {tokens.YELLOW};")
             self.pill_status_label.show()
         elif state == "muted":
             self.pill_status_label.setText("MUTED")
-            self.pill_status_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #f38ba8;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_MD}; font-weight: 700; color: {tokens.RED};")
             self.pill_status_label.show()
         elif state == "transcribing":
             self.pill_status_label.setText(f"{self._phase_label}…")
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #9184d9;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.ACCENT};")
             self.pill_status_label.show()
         elif state == "done":
             self.pill_status_label.setText("Done")
-            self.pill_status_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #a6e3a1;")
+            self.pill_status_label.setStyleSheet(f"font-size: {tokens.TYPE_BASE}; font-weight: 600; color: {tokens.GREEN};")
             self.pill_status_label.show()
 
         if state in ("recording", "muted", "paused"):
@@ -641,16 +642,16 @@ class CompactStrip(QWidget):
             self.pill_btn_pause.show()
             if state == "paused":
                 self.pill_timer.setStyleSheet(
-                    "font-family: 'Consolas', monospace; font-size: 15px; "
-                    "font-weight: 600; color: #f9e2af;"
+                    f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; "
+                    f"font-weight: 600; color: {tokens.YELLOW};"
                 )
-                self._set_icon(self.pill_btn_pause, "play-fill", "#e9e9ed")
+                self._set_icon(self.pill_btn_pause, "play-fill", tokens.TEXT)
             else:
                 self.pill_timer.setStyleSheet(
-                    "font-family: 'Consolas', monospace; font-size: 15px; "
-                    "font-weight: 600; color: #e9e9ed;"
+                    f"font-family: 'Consolas', monospace; font-size: {tokens.TYPE_LG}; "
+                    f"font-weight: 600; color: {tokens.TEXT};"
                 )
-                self._set_icon(self.pill_btn_pause, "pause", "#e9e9ed")
+                self._set_icon(self.pill_btn_pause, "pause", tokens.TEXT)
         else:
             self.pill_timer.hide()
             self.pill_btn_pause.hide()
@@ -689,7 +690,7 @@ class CompactStrip(QWidget):
     def _frame_style(self, border_color, object_name="compactStripFrame", radius=14):
         return f"""
             QFrame#{object_name} {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1d2c, stop:1 #14161f);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {tokens.SURFACE_3}, stop:1 {tokens.SURFACE_4});
                 border: 1px solid {border_color};
                 border-radius: {radius}px;
             }}
