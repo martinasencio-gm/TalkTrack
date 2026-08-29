@@ -1,5 +1,70 @@
 # UI Patterns: reusable widget conventions and Qt gotchas
 
+## Disclosure tiers (control placement)
+
+Every control gets an explicit tier when it's added, so new features have a defined
+home instead of landing in the nearest toolbar by default:
+
+| Tier | Meaning |
+|---|---|
+| **T0** Always visible | The one primary action for the surface, plus live state |
+| **T1** Contextual | Shown only when applicable (e.g. `diarize_btn.hide()` when there's no HF token) |
+| **T2** Overflow | A `⋯` button, split-button menu (`QToolButton` + `MenuButtonPopup`), or right-click context menu |
+| **T3** Settings | Sticky preferences set once, not per-use |
+
+**Budget: at most 4 T0 controls per surface.** When a 5th earns its place, demote the
+least-used existing T0 control rather than adding a 5th — that's what keeps a surface
+from re-accumulating the clutter this budget exists to prevent.
+
+The menu bar is out of scope for this budget — menus are already hidden by default and
+are the correct destination for demoted actions, not a source of clutter.
+
+Two established patterns for demoting a control without losing its function:
+- **Checkbox → `QAction`**: a checkable `QAction` is a drop-in replacement for a
+  `QCheckBox` inside a menu — same `isChecked()`/`setChecked()`/`setEnabled()`/`toggled`
+  API, so the surrounding code barely changes. See `TranscriptViewer`'s
+  `diarize_action`/`summarize_action`/`continue_action`.
+- **Several related buttons → one split-button**: `QToolButton` with
+  `setPopupMode(MenuButtonPopup)` and a `QMenu` — the button body performs the default
+  action, the arrow opens the rest. See `TranscriptViewer.transcribe_btn` (Transcribe +
+  its two settings) and `.play_all_btn`/`.export_btn`. QSS for this needs restating on
+  `QToolButton` explicitly (`objectName="splitAction"` in `resources/style.qss`) since it
+  doesn't inherit the `QPushButton` rules.
+- **Several one-off buttons → one overflow menu**: an `InstantPopup` `QToolButton`
+  carrying a vendored icon (never a Unicode glyph like "⋯" — Inter has no glyph for
+  U+22EF and it renders as tofu; use `colored_pixmap(...)`). See
+  `RecordingHeader.overflow_btn` (Rename/Add tag/Change meeting).
+
+Before folding a phase of controls into a tier change, verify the premise against the
+actual rendered surface (screenshot) and existing code comments — a plan written from
+reading widget source in isolation can misjudge which states are simultaneous (e.g. two
+labels that are actually mutually-exclusive `QStackedWidget` alternatives look like
+"clutter" until you check), and a comment defending an existing design as intentional
+outranks an assumption made while planning. Confirm a merge target is actually live
+before consolidating into it — `grep` for real call sites, not just construction.
+
+## Design tokens (`app/ui/tokens.py`)
+
+Colour, type-scale, and spacing constants for widgets that draw their own frame/QSS
+rather than living inside the main window's `resources/style.qss`-styled panels
+(compact strip/pill, activity indicator, recording controls, tag dialog, batch
+dialogs). Reference by name instead of hand-typing a hex string or a `NNpx` size —
+that hand-typing is exactly how the same near-black surface color ended up as five
+slightly different hex strings across files.
+
+- Build QSS as an f-string and interpolate: `f"QLabel {{ color: {tokens.TEXT}; }}"`
+  — note the doubled `{{`/`}}` for QSS's own rule-block braces versus single `{}` for
+  the token substitution.
+- A bare hex argument (e.g. `colored_pixmap("name", "#9184d9", 18)`) becomes the bare
+  token name directly, not an f-string wrapping one substitution:
+  `colored_pixmap("name", tokens.ACCENT, 18)`.
+- This is a separate palette from the documented Catppuccin Mocha one below (`resources/style.qss`) — it's already a different, deliberately higher-contrast theme for
+  always-on-top/floating chrome, not drift to reconcile. Don't unify the two palettes;
+  just stop re-typing either one's hex values inline.
+- Adding a new colour/size to one of these widgets: add it to `tokens.py` first (even
+  if only one call site needs it today), then reference it — never add a fresh raw hex
+  literal to one of the token-migrated files.
+
 ## CollapsibleSection (`app/ui/collapsible_section.py`)
 
 - Reusable widget with a banded header (QFrame `#collapsibleHeader`) and collapsible content area.
