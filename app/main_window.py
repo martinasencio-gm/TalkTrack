@@ -116,6 +116,16 @@ class MainWindow(QMainWindow):
         self._gain_save_timer.setSingleShot(True)
         self._gain_save_timer.timeout.connect(self._flush_gain_to_config)
 
+        # Debounced saves for user-dragged splitter handles, mirroring the
+        # gain-slider pattern above. One timer per splitter since either can
+        # be dragged independently.
+        self._panel_fraction_timer1 = QTimer(self)
+        self._panel_fraction_timer1.setSingleShot(True)
+        self._panel_fraction_timer1.timeout.connect(self._flush_splitter1_fraction)
+        self._panel_fraction_timer2 = QTimer(self)
+        self._panel_fraction_timer2.setSingleShot(True)
+        self._panel_fraction_timer2.timeout.connect(self._flush_splitter2_fraction)
+
         # Meeting detection. The detector holds all the decision logic and the
         # timing rules; this window only polls the signals and carries out what
         # it decides. It replaces the old apps_became_active auto-record path,
@@ -150,6 +160,7 @@ class MainWindow(QMainWindow):
 
         self._setup_menu()
         self._setup_ui()
+        self._restore_panel_fractions()
         self._restore_panel_collapse_state()
         self._setup_statusbar()
         self._connect_signals()
@@ -534,6 +545,56 @@ class MainWindow(QMainWindow):
         self.inspector.speakers_section.set_expanded(self.config.get("ui", "speakers_section_expanded"))
         self.inspector.summary_section.set_expanded(self.config.get("ui", "summary_section_expanded"))
 
+    def _restore_panel_fractions(self):
+        """Apply saved screen-relative widths to both splitters. Called once
+        from __init__, before _restore_panel_collapse_state() — so a
+        collapsed splitter still ends up at [total, 0] regardless of what
+        this just set. Any fraction still None (fresh install, or that
+        handle never dragged) leaves the fixed pixel defaults from
+        _setup_ui alone."""
+        from app.ui.panel_fractions import resolve_splitter_sizes
+        from app.utils.screen_utils import get_active_screen
+        screen = get_active_screen(self)
+        screen_width = screen.availableGeometry().width() if screen else 0
+        fractions = self.config.get("ui", "panel_fractions") or {}
+        self.splitter2.setSizes(
+            resolve_splitter_sizes(fractions, ["library", "transcript"], screen_width, [262, 776])
+        )
+        self.splitter1.setSizes(
+            resolve_splitter_sizes(fractions, [None, "inspector"], screen_width, [1038, 322])
+        )
+
+    def _on_splitter2_moved(self, pos, index):
+        self._panel_fraction_timer2.start(500)
+
+    def _on_splitter1_moved(self, pos, index):
+        self._panel_fraction_timer1.start(500)
+
+    def _flush_splitter2_fraction(self):
+        from app.ui.panel_fractions import fraction_for_size
+        from app.utils.screen_utils import get_active_screen
+        sizes = self.splitter2.sizes()
+        if len(sizes) < 2:
+            return
+        screen = get_active_screen(self)
+        screen_width = screen.availableGeometry().width() if screen else 0
+        fractions = dict(self.config.get("ui", "panel_fractions") or {})
+        fractions["library"] = fraction_for_size(sizes[0], screen_width)
+        fractions["transcript"] = fraction_for_size(sizes[1], screen_width)
+        self.config.set("ui", "panel_fractions", fractions)
+
+    def _flush_splitter1_fraction(self):
+        from app.ui.panel_fractions import fraction_for_size
+        from app.utils.screen_utils import get_active_screen
+        sizes = self.splitter1.sizes()
+        if len(sizes) < 2:
+            return
+        screen = get_active_screen(self)
+        screen_width = screen.availableGeometry().width() if screen else 0
+        fractions = dict(self.config.get("ui", "panel_fractions") or {})
+        fractions["inspector"] = fraction_for_size(sizes[1], screen_width)
+        self.config.set("ui", "panel_fractions", fractions)
+
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
@@ -576,6 +637,8 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.splitter2.collapse_changed.connect(self._on_transcript_collapse_changed)
         self.splitter1.collapse_changed.connect(self._on_inspector_collapse_changed)
+        self.splitter2.splitterMoved.connect(self._on_splitter2_moved)
+        self.splitter1.splitterMoved.connect(self._on_splitter1_moved)
         self.inspector.notes_section.toggled.connect(
             lambda expanded: self.config.set("ui", "notes_section_expanded", expanded)
         )
@@ -3449,6 +3512,12 @@ class MainWindow(QMainWindow):
         if self._gain_save_timer.isActive():
             self._gain_save_timer.stop()
             self._flush_gain_to_config()
+        if self._panel_fraction_timer2.isActive():
+            self._panel_fraction_timer2.stop()
+            self._flush_splitter2_fraction()
+        if self._panel_fraction_timer1.isActive():
+            self._panel_fraction_timer1.stop()
+            self._flush_splitter1_fraction()
         if self._meeting_poll_timer.isActive():
             self._meeting_poll_timer.stop()
         if self._preflight_poll_timer.isActive():
