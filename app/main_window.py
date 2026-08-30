@@ -430,14 +430,24 @@ class MainWindow(QMainWindow):
         # arrow button (collapsible_splitter.py) -- the old single-column
         # QSplitter this replaced used 1px since it had no embedded control,
         # and that value silently clipped the button to invisible when
-        # carried forward onto these two collapsible splitters.
+        # carried forward onto these two collapsible splitters. The handle
+        # background matches the window background (#161826, style.qss) so
+        # it doesn't read as a permanent divider line now that it's wide
+        # enough to see -- only the arrow button's own translucent pill
+        # stays visible at rest. :hover lifts it to #232532 (style.qss's
+        # existing raised-surface tone, e.g. QMenu) so the drag target is
+        # still discoverable.
+        _SPLITTER_HANDLE_QSS = (
+            "QSplitter::handle { background-color: #161826; }"
+            "QSplitter::handle:hover { background-color: #232532; }"
+        )
         self.splitter2 = CollapsibleSplitter(Qt.Orientation.Horizontal)
         self.splitter2.setHandleWidth(14)
-        self.splitter2.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
+        self.splitter2.setStyleSheet(_SPLITTER_HANDLE_QSS)
 
         self.splitter1 = CollapsibleSplitter(Qt.Orientation.Horizontal)
         self.splitter1.setHandleWidth(14)
-        self.splitter1.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
+        self.splitter1.setStyleSheet(_SPLITTER_HANDLE_QSS)
 
         # Column A: Library
         self.library_panel = QWidget()
