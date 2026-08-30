@@ -426,12 +426,17 @@ class MainWindow(QMainWindow):
         # docs/superpowers/specs/2026-08-29-collapsible-panels-design.md.
         # splitter2 = Library | Transcript (collapses Transcript)
         # splitter1 = splitter2 | Inspector (collapses Inspector)
+        # Handle width must fit the CollapsibleSplitterHandle's 12px-wide
+        # arrow button (collapsible_splitter.py) -- the old single-column
+        # QSplitter this replaced used 1px since it had no embedded control,
+        # and that value silently clipped the button to invisible when
+        # carried forward onto these two collapsible splitters.
         self.splitter2 = CollapsibleSplitter(Qt.Orientation.Horizontal)
-        self.splitter2.setHandleWidth(1)
+        self.splitter2.setHandleWidth(14)
         self.splitter2.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
 
         self.splitter1 = CollapsibleSplitter(Qt.Orientation.Horizontal)
-        self.splitter1.setHandleWidth(1)
+        self.splitter1.setHandleWidth(14)
         self.splitter1.setStyleSheet("QSplitter::handle { background-color: #292b31; }")
 
         # Column A: Library
