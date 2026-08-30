@@ -169,6 +169,44 @@ class TestRestorePanelFractions(unittest.TestCase):
         self.assertFalse(window.splitter1.is_collapsed())
         self.assertLessEqual(abs(window.splitter1.sizes()[1] - expected), 2)
 
+    def test_first_collapse_of_an_expanded_column_captures_the_live_size(self):
+        # Regression on the finding #1 fix: _expanded_size_seeded used to
+        # stay pending on a splitter restored EXPANDED (the common case --
+        # transcript_collapsed/inspector_collapsed both default to False,
+        # so _restore_panel_collapse_state() never calls toggle_collapse()
+        # for it at startup). Left pending, the user's first real collapse
+        # of the session would wrongly be treated as "the startup restore
+        # collapse" and consume the stale startup-seeded width instead of
+        # capturing the live (possibly since-resized) pane size.
+        from app.utils.config import Config
+
+        seed_config = Config()
+        fractions = dict(seed_config.get("ui", "panel_fractions") or {})
+        fractions["transcript"] = 0.1  # a small, stale seed -- must NOT win
+        seed_config.set("ui", "panel_fractions", fractions)
+        # transcript_collapsed left at its default (False): starts expanded.
+
+        window = _make_window(self)
+        self.assertFalse(window.splitter2.is_collapsed())
+
+        window.show()
+        QApplication.processEvents()
+
+        # User resizes the still-expanded column live, well away from the
+        # stale startup seed.
+        total = sum(window.splitter2.sizes())
+        window.splitter2.setSizes([total - 500, 500])
+
+        # User's first collapse of the session.
+        window.splitter2.toggle_collapse()
+        self.assertTrue(window.splitter2.is_collapsed())
+
+        # Expanding again must restore the just-resized width (500), not
+        # the stale startup-seeded fraction (0.1 * screen width).
+        window.splitter2.toggle_collapse()
+        self.assertFalse(window.splitter2.is_collapsed())
+        self.assertLessEqual(abs(window.splitter2.sizes()[1] - 500), 2)
+
 
 class TestSplitterMovedIsWired(unittest.TestCase):
     @classmethod

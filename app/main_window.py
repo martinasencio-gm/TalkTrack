@@ -162,6 +162,17 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._restore_panel_fractions()
         self._restore_panel_collapse_state()
+        # Scope the startup-seeded expanded width (set_expanded_size(), see
+        # _restore_panel_fractions()) to this one restore call. A splitter
+        # restored collapsed already consumed its seed inside
+        # _restore_panel_collapse_state() via toggle_collapse(); a splitter
+        # restored expanded (the common case -- both *_collapsed default to
+        # False) never touches toggle_collapse() here at all, so without
+        # this the seed would sit pending and get wrongly consumed by the
+        # user's first real collapse click of the session instead of that
+        # click capturing the live pane size.
+        self.splitter2.clear_expanded_size_seed()
+        self.splitter1.clear_expanded_size_seed()
         self._setup_statusbar()
         self._connect_signals()
 

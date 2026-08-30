@@ -137,3 +137,21 @@ class CollapsibleSplitter(QSplitter):
         if pixels and pixels > 0:
             self._expanded_size = pixels
             self._expanded_size_seeded = True
+
+    def clear_expanded_size_seed(self):
+        """Cancel a pending set_expanded_size() seed without consuming it.
+
+        MainWindow calls this right after _restore_panel_collapse_state()
+        finishes, for every splitter, regardless of whether that splitter
+        was actually restored collapsed. If it WAS restored collapsed,
+        toggle_collapse() already consumed the seed (flag is False by now,
+        so this is a no-op). If it was NOT restored collapsed -- the common
+        case, since transcript_collapsed/inspector_collapsed both default
+        to False -- the seed would otherwise sit pending on a fully
+        expanded splitter until the user's first real collapse click of
+        the session, and toggle_collapse() would wrongly treat that first
+        real collapse as the startup restore, consuming the stale
+        startup-seeded width instead of capturing the live (possibly
+        since-resized) pane size. Clearing it here scopes the seed to
+        exactly the startup-restore call it exists for."""
+        self._expanded_size_seeded = False
