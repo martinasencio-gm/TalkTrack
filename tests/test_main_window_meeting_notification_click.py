@@ -62,11 +62,11 @@ class TestMainWindowMeetingNotificationClick(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertEqual(window._pending_meeting_notification, "end")
 
-    def test_clicking_start_notification_starts_recording_and_clears_banner(self):
+    def test_clicking_start_notification_starts_recording_and_clears_toast(self):
         window = self._make_window()
         window._pending_meeting_notification = "start"
         with patch.object(window, "_on_meeting_start_accepted") as mock_accept, \
-             patch.object(window.meeting_banner, "hide_and_clear") as mock_hide:
+             patch.object(window.meeting_toast, "hide_and_clear") as mock_hide:
             window._on_tray_message_clicked()
         mock_hide.assert_called_once()
         mock_accept.assert_called_once()
@@ -89,14 +89,14 @@ class TestMainWindowMeetingNotificationClick(unittest.TestCase):
         mock_accept.assert_not_called()
         mock_restore.assert_not_called()
 
-    def test_banner_hidden_when_recording_starts(self):
+    def test_toast_hidden_when_recording_starts(self):
         from app.recording.recorder import RecordingState
         window = self._make_window()
-        window.meeting_banner.show_start("Daily Standup", 0)
-        self.assertFalse(window.meeting_banner.isHidden())
+        window.meeting_toast.show_start("Daily Standup", 0)
+        self.assertFalse(window.meeting_toast.isHidden())
         # Simulate recording state changed to RECORDING
         window._on_state_changed(RecordingState.RECORDING)
-        self.assertTrue(window.meeting_banner.isHidden())
+        self.assertTrue(window.meeting_toast.isHidden())
 
     def test_suggest_start_ignored_when_recording_active(self):
         from app.recording.recorder import RecordingState

@@ -55,7 +55,6 @@ from app.ui.summary_panel import SummaryPanel
 from app.ui.chat_panel import ChatPanel
 from app.ai.chat import build_chat_context
 from app.ui.calendar_banner import CalendarSuggestionBanner
-from app.ui.meeting_banner import MeetingBanner
 from app.ui.meeting_toast import MeetingNotificationToast
 from app.integrations.meeting_detector import MeetingDetector
 from app.utils import meeting_signals, tag_manager
@@ -545,8 +544,6 @@ class MainWindow(QMainWindow):
         self.source_selector.hide()
         self.calendar_banner = CalendarSuggestionBanner()
         self.calendar_banner.hide()
-        self.meeting_banner = MeetingBanner()
-        self.meeting_banner.hide()
         self.meeting_toast = MeetingNotificationToast()
         self.meeting_toast.hide()
         self.waveform = WaveformDisplay(seconds=5, sample_rate=16000)
@@ -792,7 +789,6 @@ class MainWindow(QMainWindow):
     def _start_recording(self):
         if getattr(self, "_meeting_detector", None) is not None and self._meeting_detector.state == "suggested":
             self._meeting_detector.accept_start()
-        self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
             self.meeting_toast.hide_and_clear()
         if getattr(self, "_pending_meeting_notification", None) == "start":
@@ -1113,7 +1109,6 @@ class MainWindow(QMainWindow):
         if action in ("suggest_start", "start") and self.recorder.state != RecordingState.IDLE:
             # Belt-and-suspenders: never offer or auto-start a recording on
             # top of one already running.
-            self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
             return
@@ -1164,7 +1159,6 @@ class MainWindow(QMainWindow):
 
     def _on_meeting_start_accepted(self):
         self._meeting_detector.accept_start()
-        self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
             self.meeting_toast.hide_and_clear()
         if self.recorder.state == RecordingState.IDLE:
@@ -1178,13 +1172,12 @@ class MainWindow(QMainWindow):
         floating activity pill instead when the window is minimized/hidden,
         same as starting from the tray menu's Record action. An "end"
         notification instead brings the window forward, since stop/pause/keep
-        is a 3-way choice the banner already shows and a single click can't
+        is a 3-way choice the toast already shows and a single click can't
         collapse into one action.
         """
         kind = self._pending_meeting_notification
         self._pending_meeting_notification = None
         if kind == "start":
-            self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
             self._on_meeting_start_accepted()
@@ -1193,13 +1186,11 @@ class MainWindow(QMainWindow):
 
     def _on_meeting_start_dismissed(self):
         self._meeting_detector.dismiss_start()
-        self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
             self.meeting_toast.hide_and_clear()
 
     def _on_meeting_end_chosen(self, action):
         self._meeting_detector.choose_end(action)
-        self.meeting_banner.hide_and_clear()
         if hasattr(self, "meeting_toast"):
             self.meeting_toast.hide_and_clear()
         if action == "stop":
@@ -1225,7 +1216,6 @@ class MainWindow(QMainWindow):
         if state == RecordingState.RECORDING:
             self._stop_idle_mic_level_monitor()
             self._compact_strip_done = False
-            self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
             if getattr(self, "_pending_meeting_notification", None) == "start":
@@ -1254,7 +1244,6 @@ class MainWindow(QMainWindow):
             self._current_capture_failures = {}
             self.source_selector.mark_capture_failures({})
             self._meeting_detector.note_recording_stopped()
-            self.meeting_banner.hide_and_clear()
             if hasattr(self, "meeting_toast"):
                 self.meeting_toast.hide_and_clear()
             self._active_detected_meeting_name = None
