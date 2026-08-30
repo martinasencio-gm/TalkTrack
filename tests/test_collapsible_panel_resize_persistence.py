@@ -97,6 +97,78 @@ class TestRestorePanelFractions(unittest.TestCase):
         window = _make_window(self)
         window._restore_panel_fractions()  # all-None defaults; must not raise
 
+    def test_collapsed_transcript_column_expands_to_its_saved_width(self):
+        # Finding #1: a column that starts collapsed at launch must still
+        # expand to its saved fraction-derived width on the first click of
+        # the expand arrow, not to whatever clamped size Qt reported while
+        # the window was still hidden. Also covers finding #4: this pins a
+        # specific numeric expectation instead of a loose ordering check.
+        from app.utils.config import Config
+        from app.ui.panel_fractions import resolve_pane_size
+        from app.utils.screen_utils import get_active_screen
+
+        seed_config = Config()
+        fractions = dict(seed_config.get("ui", "panel_fractions") or {})
+        fractions["transcript"] = 0.45
+        seed_config.set("ui", "panel_fractions", fractions)
+        seed_config.set("ui", "transcript_collapsed", True)
+
+        window = _make_window(self)
+        self.assertTrue(window.splitter2.is_collapsed())
+
+        screen = get_active_screen(window)
+        screen_width = screen.availableGeometry().width() if screen else 0
+        expected = resolve_pane_size(0.45, screen_width, 776)
+
+        # _make_window() never shows the window, so without this the
+        # splitter's own total width stays at construction-time's tiny
+        # hidden geometry, and toggle_collapse()'s restore step clamps to
+        # *that* regardless of what _expanded_size holds. A real user only
+        # ever clicks the expand arrow after the window is actually on
+        # screen and has gone through a real layout pass, so show() here
+        # (offscreen platform; no real display needed) is what makes this
+        # test representative rather than resizing the nested splitter
+        # directly, which fights its parent layout and produces unstable
+        # sizes.
+        window.show()
+        QApplication.processEvents()
+
+        window.splitter2.toggle_collapse()  # expands, since it starts collapsed
+
+        self.assertFalse(window.splitter2.is_collapsed())
+        self.assertLessEqual(abs(window.splitter2.sizes()[1] - expected), 2)
+
+    def test_collapsed_inspector_column_expands_to_its_saved_width(self):
+        from app.utils.config import Config
+        from app.ui.panel_fractions import resolve_pane_size
+        from app.utils.screen_utils import get_active_screen
+
+        seed_config = Config()
+        fractions = dict(seed_config.get("ui", "panel_fractions") or {})
+        # Above InspectorWidget's own setMinimumWidth(322) floor (app/ui/
+        # inspector.py) so that floor can't mask a wrong restored value —
+        # 0.3 of an 800px test screen (240px) sits below it and would
+        # legitimately clamp up to 322 regardless of this fix.
+        fractions["inspector"] = 0.5
+        seed_config.set("ui", "panel_fractions", fractions)
+        seed_config.set("ui", "inspector_collapsed", True)
+
+        window = _make_window(self)
+        self.assertTrue(window.splitter1.is_collapsed())
+
+        screen = get_active_screen(window)
+        screen_width = screen.availableGeometry().width() if screen else 0
+        expected = resolve_pane_size(0.5, screen_width, 322)
+
+        # See the matching comment in the transcript-column test above.
+        window.show()
+        QApplication.processEvents()
+
+        window.splitter1.toggle_collapse()  # expands, since it starts collapsed
+
+        self.assertFalse(window.splitter1.is_collapsed())
+        self.assertLessEqual(abs(window.splitter1.sizes()[1] - expected), 2)
+
 
 class TestSplitterMovedIsWired(unittest.TestCase):
     @classmethod

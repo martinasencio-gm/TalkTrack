@@ -450,13 +450,16 @@ class MainWindow(QMainWindow):
         self.splitter2.addWidget(self.transcript_panel)
 
         self.splitter2.setCollapsible(0, False)
-        # Native drag-to-zero disabled on both panes -- the arrow button
-        # (CollapsibleSplitter.toggle_collapse) is the only collapse path, so
-        # _collapsed always reflects reality and a stray drag can't desync it.
-        # toggle_collapse() flips this to True internally for the instant of
-        # its own setSizes([..., 0]) call, since Qt's collapsible=False also
-        # blocks *programmatic* collapse-to-zero once the pane's
-        # minimumSizeHint is non-trivial -- see collapsible_splitter.py.
+        # Native drag-to-zero disabled on both panes -- setCollapsible(1,
+        # False) blocks a drag from reaching size 0, but not a drag that
+        # starts from an already-zero pane and moves it back open, so
+        # CollapsibleSplitter reconciles that one direction itself
+        # (_reconcile_collapsed_state, wired to splitterMoved) and
+        # _collapsed stays accurate. toggle_collapse() flips this to True
+        # internally for the instant of its own setSizes([..., 0]) call,
+        # since Qt's collapsible=False also blocks *programmatic*
+        # collapse-to-zero once the pane's minimumSizeHint is non-trivial --
+        # see collapsible_splitter.py.
         self.splitter2.setCollapsible(1, False)
         self.splitter2.setStretchFactor(0, 0)
         self.splitter2.setStretchFactor(1, 1)
@@ -557,12 +560,18 @@ class MainWindow(QMainWindow):
         screen = get_active_screen(self)
         screen_width = screen.availableGeometry().width() if screen else 0
         fractions = self.config.get("ui", "panel_fractions") or {}
-        self.splitter2.setSizes(
-            resolve_splitter_sizes(fractions, ["library", "transcript"], screen_width, [262, 776])
-        )
-        self.splitter1.setSizes(
-            resolve_splitter_sizes(fractions, [None, "inspector"], screen_width, [1038, 322])
-        )
+        sizes2 = resolve_splitter_sizes(fractions, ["library", "transcript"], screen_width, [262, 776])
+        self.splitter2.setSizes(sizes2)
+        # Seed the known-good resolved width now, before
+        # _restore_panel_collapse_state() ever calls toggle_collapse() on a
+        # collapsed splitter — sizes() read right after this setSizes() call
+        # reports Qt's clamped interim geometry (the window is still
+        # hidden), not the value that will actually apply once show() runs
+        # a real resize, so this is the only place the real value exists.
+        self.splitter2.set_expanded_size(sizes2[1])
+        sizes1 = resolve_splitter_sizes(fractions, [None, "inspector"], screen_width, [1038, 322])
+        self.splitter1.setSizes(sizes1)
+        self.splitter1.set_expanded_size(sizes1[1])
 
     def _on_splitter2_moved(self, pos, index):
         self._panel_fraction_timer2.start(500)
@@ -1715,7 +1724,11 @@ class MainWindow(QMainWindow):
             and self._current_session.get("directory") == job.directory
             and outcome.ok
         ):
-            self._on_recording_selected(self._current_session)
+            # A background batch job finishing is not a user-initiated open
+            # (double-click, "View", "Open the last one", search-result
+            # selection) — it must not silently re-expand columns the user
+            # deliberately collapsed.
+            self._on_recording_selected(self._current_session, expand_panels=False)
 
     def _on_batch_finished(self, processed, failed, deferred):
         self.recordings_list.refresh()
@@ -2345,11 +2358,11 @@ class MainWindow(QMainWindow):
         if metadata is not None:
             self.recordings_list.recording_selected.emit(metadata)
 
-    def _on_recording_selected(self, metadata):
+    def _on_recording_selected(self, metadata, expand_panels=True):
         """Load a past recording for viewing/transcription."""
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            self._do_on_recording_selected(metadata)
+            self._do_on_recording_selected(metadata, expand_panels=expand_panels)
         finally:
             QApplication.restoreOverrideCursor()
 
@@ -2365,8 +2378,9 @@ class MainWindow(QMainWindow):
         finally:
             self._suppress_collapse_persist = False
 
-    def _do_on_recording_selected(self, metadata):
-        self._expand_panels_for_recording_view()
+    def _do_on_recording_selected(self, metadata, expand_panels=True):
+        if expand_panels:
+            self._expand_panels_for_recording_view()
 
         # Clear any stale calendar-suggestion banner from the previously
         # displayed recording — see _on_recording_finished for why.

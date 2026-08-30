@@ -96,6 +96,45 @@ class TestCollapsibleSplitter(unittest.TestCase):
         splitter.toggle_collapse()
         self.assertGreater(splitter.sizes()[1], 0)
 
+    def test_dragging_a_collapsed_pane_open_desyncs_collapsed_flag_without_reconciler(self):
+        # Documents the bug this reconciler fixes: a drag that reopens a
+        # collapsed pane bypasses toggle_collapse() entirely, so without the
+        # splitterMoved reconciliation, _collapsed would be stuck True even
+        # though the pane is now visibly open (finding #3).
+        total_width = 600
+        splitter = self._make(total_width=total_width)
+        splitter.toggle_collapse()
+        self.assertTrue(splitter.is_collapsed())
+        self.assertEqual(splitter.sizes()[1], 0)
+
+        # _make()'s about_to_toggle hookup shrinks the splitter's own width
+        # to force a literal fixed-width left pane down to zero -- a test
+        # harness detail, not something production does (MainWindow wires
+        # no listener to about_to_toggle, since its real left pane isn't a
+        # hard setFixedWidth). Widen back to the original full width to
+        # model production's actual geometry — an unchanged window width,
+        # collapsed pane sitting at zero — before simulating the drag.
+        splitter.resize(total_width, 400)
+        QApplication.processEvents()
+
+        # Simulate the drag reopening the pane directly (bypassing
+        # toggle_collapse()), then fire the same signal Qt emits after a
+        # real drag.
+        total = sum(splitter.sizes())
+        splitter.setSizes([total - 200, 200])
+        splitter.splitterMoved.emit(total - 200, 1)
+
+        self.assertGreater(splitter.sizes()[1], 0)
+        self.assertFalse(splitter.is_collapsed())
+
+    def test_reconciler_ignores_a_zero_size_move_while_already_expanded(self):
+        # Sanity check that the reconciler doesn't misfire on ordinary moves
+        # while already expanded (nothing to reconcile there).
+        splitter = self._make()
+        self.assertFalse(splitter.is_collapsed())
+        splitter.splitterMoved.emit(300, 1)
+        self.assertFalse(splitter.is_collapsed())
+
 
 if __name__ == "__main__":
     unittest.main()

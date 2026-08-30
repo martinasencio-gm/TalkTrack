@@ -51,6 +51,10 @@ class CollapsibleSplitter(QSplitter):
         super().__init__(orientation, parent)
         self._collapsed = False
         self._expanded_size = None
+        # One-shot: True only for the toggle_collapse() call immediately
+        # following set_expanded_size() — see both methods below.
+        self._expanded_size_seeded = False
+        self.splitterMoved.connect(self._reconcile_collapsed_state)
 
     def createHandle(self):
         return CollapsibleSplitterHandle(self.orientation(), self)
@@ -79,7 +83,15 @@ class CollapsibleSplitter(QSplitter):
         self.setCollapsible(1, True)
         try:
             if target:
-                self._expanded_size = sizes[1]
+                if self._expanded_size_seeded:
+                    # A caller (MainWindow's startup restore) just supplied
+                    # a known-good width via set_expanded_size() because
+                    # sizes() right now would only report Qt's clamped
+                    # pre-show geometry -- honor the seed once instead of
+                    # immediately clobbering it with that same bad reading.
+                    self._expanded_size_seeded = False
+                else:
+                    self._expanded_size = sizes[1]
                 self.setSizes([total, 0])
             else:
                 restore = self._expanded_size or max(total // 3, 1)
@@ -95,3 +107,33 @@ class CollapsibleSplitter(QSplitter):
         if collapsed == self._collapsed:
             return
         self.toggle_collapse()
+
+    def _reconcile_collapsed_state(self, pos, index):
+        """MainWindow blocks interactive drag-to-zero via
+        setCollapsible(1, False), but that only blocks the *destination*
+        size, not the direction: a drag that starts from an already-zero
+        pane and moves it back open bypasses toggle_collapse() entirely,
+        leaving _collapsed stuck True over a now-visible pane. Since
+        drag-to-zero is blocked, a drag can only ever produce the
+        collapsed-to-expanded transition here, never the reverse, so only
+        that one direction needs reconciling."""
+        if self._collapsed and self.sizes()[1] > 0:
+            self._collapsed = False
+            self.collapse_changed.emit(False)
+
+    def set_expanded_size(self, pixels):
+        """Seed the size toggle_collapse() will restore to on next expand.
+        Used by MainWindow's startup restore, where sizes() read right after
+        the pre-show setSizes() call reports Qt's clamped interim geometry,
+        not the value that will actually apply once show() runs a real
+        resize — so the snapshot toggle_collapse() would otherwise take is
+        wrong for a column being restored collapsed.
+
+        Sets the one-shot seeded flag too: if the very next toggle_collapse()
+        call is the initial collapse (MainWindow's _restore_panel_collapse_state
+        calling set_collapsed(True) on this still-expanded, freshly
+        constructed splitter), that call must not immediately overwrite this
+        seed with the same bad sizes() reading it exists to correct."""
+        if pixels and pixels > 0:
+            self._expanded_size = pixels
+            self._expanded_size_seeded = True

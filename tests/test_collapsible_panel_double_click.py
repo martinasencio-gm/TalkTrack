@@ -96,6 +96,63 @@ class TestExpandPanelsForRecordingView(unittest.TestCase):
             window._do_on_recording_selected(metadata)
         mock_expand.assert_called_once()
 
+    def test_do_on_recording_selected_can_opt_out_of_the_expand(self):
+        # Finding #2: a caller that isn't a user-initiated open (the
+        # background batch-refresh path) must be able to skip the
+        # force-expand and leave a deliberately collapsed layout alone.
+        from unittest.mock import patch
+        window = _make_window(self)
+        window.splitter2.toggle_collapse()
+        window.splitter1.toggle_collapse()
+        self.assertTrue(window.splitter2.is_collapsed())
+        self.assertTrue(window.splitter1.is_collapsed())
+        metadata = {
+            "directory": window.config.get("output", "directory"),
+            "audio_files": {},
+        }
+        with patch.object(window, "_expand_panels_for_recording_view") as mock_expand:
+            window._do_on_recording_selected(metadata, expand_panels=False)
+        mock_expand.assert_not_called()
+        self.assertTrue(window.splitter2.is_collapsed())
+        self.assertTrue(window.splitter1.is_collapsed())
+
+    def test_batch_job_finished_does_not_force_expand_collapsed_panels(self):
+        # A finishing batch job refreshing the currently displayed recording
+        # is not a user-initiated open and must not undo the user's
+        # collapsed layout.
+        from app.batch.pipeline import JobOutcome
+        from app.batch.worklist import Job
+        window = _make_window(self)
+        window.splitter2.toggle_collapse()
+        window.splitter1.toggle_collapse()
+
+        directory = window.config.get("output", "directory")
+        metadata = {"directory": directory, "audio_files": {}}
+        window._current_session = metadata
+        job = Job(directory=directory, session=metadata, label="test", audio_path=None)
+        outcome = JobOutcome(ok=True, message="ok")
+
+        window._on_batch_job_finished(job, outcome)
+
+        self.assertTrue(window.splitter2.is_collapsed())
+        self.assertTrue(window.splitter1.is_collapsed())
+
+    def test_batch_job_finished_refresh_passes_expand_panels_false(self):
+        from unittest.mock import patch
+        from app.batch.pipeline import JobOutcome
+        from app.batch.worklist import Job
+        window = _make_window(self)
+        directory = window.config.get("output", "directory")
+        metadata = {"directory": directory, "audio_files": {}}
+        window._current_session = metadata
+        job = Job(directory=directory, session=metadata, label="test", audio_path=None)
+        outcome = JobOutcome(ok=True, message="ok")
+
+        with patch.object(window, "_do_on_recording_selected") as mock_do:
+            window._on_batch_job_finished(job, outcome)
+
+        mock_do.assert_called_once_with(metadata, expand_panels=False)
+
 
 if __name__ == "__main__":
     unittest.main()
