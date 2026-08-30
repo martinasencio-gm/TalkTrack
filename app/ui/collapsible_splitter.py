@@ -35,6 +35,35 @@ class CollapsibleSplitterHandle(QSplitterHandle):
         self._button.setText("▸" if collapsed else "◂")
         self._button.setToolTip("Expand panel" if collapsed else "Collapse panel")
 
+    def _draggable(self):
+        # The spec's own words: "the arrow button is the only collapse
+        # path" (docs/superpowers/specs/2026-08-29-collapsible-panels-design.md).
+        # setCollapsible(1, False) on the owning splitter blocks dragging
+        # TO zero but Qt has no matching flag for dragging FROM zero, so
+        # while collapsed this handle sits pixel-adjacent to the next
+        # splitter's own handle (nothing occupies the collapsed pane's
+        # width) with no visual seam between them. A user reaching for
+        # that neighboring handle to resize an unrelated pane can just as
+        # easily grab this one instead, and dragging THIS one can only
+        # ever do one thing: pull the collapsed pane back open. Refusing
+        # the drag here (button clicks still land on the button, which is
+        # a child widget handled separately) makes the button the only
+        # way to reopen it, matching the spec, and leaves the neighboring
+        # handle as the sole way to resize past a collapsed pane.
+        return not self.splitter().is_collapsed()
+
+    def mousePressEvent(self, event):
+        if not self._draggable():
+            event.ignore()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self._draggable():
+            event.ignore()
+            return
+        super().mouseMoveEvent(event)
+
 
 class CollapsibleSplitter(QSplitter):
     """Two-pane splitter; index 1 (the right/second pane) is what collapses."""
