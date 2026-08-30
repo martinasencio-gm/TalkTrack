@@ -466,6 +466,26 @@ class RecordingsList(QWidget):
         """Return the in-flight search worker, if any (for shutdown handling)."""
         return self._search_worker
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # list_widget.setUniformItemSizes(True) is a real perf win (this list
+        # can hold hundreds of rows) but it makes QListWidget stingy about
+        # relaying out its setItemWidget() rows on a resize that isn't a
+        # top-level window resize -- e.g. this panel widening/narrowing as a
+        # side effect of a sibling splitter collapsing/expanding. The row
+        # widgets' own state stays perfectly correct (right pixmap, right
+        # geometry, marked visible) but they stop actually being painted --
+        # confirmed by grabbing the widget and finding the stage-track icons
+        # blank despite every attribute checking out. A plain window resize
+        # happens to force Qt through a full relayout and fixes it, which is
+        # why "just resize the window" was the only known workaround.
+        # doItemsLayout() forces that same relayout unconditionally, so do
+        # it after every resize regardless of cause. list_widget may not
+        # exist yet if this fires during our own __init__/_setup_ui.
+        list_widget = getattr(self, "list_widget", None)
+        if list_widget is not None:
+            list_widget.doItemsLayout()
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
